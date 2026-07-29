@@ -1,3 +1,5 @@
+> ⚠️ **AMENDED 2026-07-29 — THE 90-DAY COMPRESSION.** External design review ruled the seven-phase sequence in §6 too slow to market: by its Phase 2, the incumbents will have absorbed the differentiated ideas. Priority INVERTS — ship the differentiated core first (loop contracts, deterministic gates, worker/judge isolation); defer the undifferentiated plumbing (multi-cloud runtime adapters, gateway planes, policy hooks) until the loop exists. §6's Phases 0–2 compress into a 90-day arc; Phases 3–7 defer to post-MVP, pulled by demand rather than pushed by plan. ONE hero runtime adapter: Temporal. Hard deadline for the first installable release: **September 30, 2026**. Everything below remains the architectural north star; **[ROADMAP.md](ROADMAP.md) governs execution order.**
+
 # Coxswain — an open-source, enterprise-grade AI-DLC harness
 
 **Build plan for Claude Code · v1.0 · July 29, 2026**
