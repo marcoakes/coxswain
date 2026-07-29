@@ -2,22 +2,34 @@
 
 # ⛵ Coxswain
 
-**The open, control-plane-agnostic harness for AI-driven development.**
+**The vendor-neutral AI-DLC harness — a control plane for AI-driven development.**
 
 *The coxswain steers the boat, calls the stroke rate, and never rows.*
 *The harness steers the work, sets the loop cadence, and never writes the code itself.*
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Status: Design Phase](https://img.shields.io/badge/status-design%20phase-orange.svg)](coxswain-ai-dlc-harness-plan.md)
+[![v0.1.0: Sep 30, 2026](https://img.shields.io/badge/v0.1.0-Sep%2030%2C%202026-orange.svg)](ROADMAP.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[Quickstart](QUICKSTART.md) · [90-day roadmap](ROADMAP.md) · [vs LangGraph](docs/coxswain-vs-langgraph.md) · [Build plan](coxswain-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC)
 
 </div>
 
 ---
 
-Coxswain (CLI: `cox`) compiles **intent** — tickets, PRDs, Slack messages — into **verified outcomes**: reviewed merge requests with evidence. It treats *loops* and *graphs of loops* as first-class, portable primitives, and runs the **same workflow definition** on your laptop, on Temporal, on AWS Bedrock AgentCore, on Google's Agent Engine, on Microsoft Foundry, or on Anthropic Managed Agents.
+Coxswain (CLI: `cox`) compiles **intent** — tickets, PRDs, Slack messages — into **verified outcomes**: reviewed merge requests with evidence. It treats *loops* and *graphs of loops* as first-class, portable primitives, and runs the **same workflow definition** on your laptop today and on durable runtimes (Temporal first) tomorrow.
 
 Every cloud's harness locks you to its runtime, its identity system, its gateway. **Nobody owns the neutral layer.** That's the bet — Kubernetes-vs-managed-containers, replayed one layer up.
+
+## What ships first
+
+**One working loop beats seven phases of architecture.** The first release is deliberately small:
+
+```bash
+cox run --issue https://github.com/you/repo/issues/42
+```
+
+…takes a GitHub issue, runs a **repair loop** in a local sandbox — worker writes code → deterministic gates (build · test · lint) → isolated rubric judge → iterate or exit — and opens a merge request with `evidence.jsonl` and `cost.jsonl` attached. Budgeted, oscillation-proof, auditable. **`v0.1.0` lands September 30, 2026** — see the [90-day roadmap](ROADMAP.md), and the [quickstart](QUICKSTART.md) for the exact developer experience it ships.
 
 ## Why
 
@@ -25,50 +37,13 @@ The substrate is converging. Every serious AI-DLC implementation lands on the sa
 
 Coxswain is:
 
-- **Vendor-neutral by construction.** The Graph IR references *capabilities*, never vendor resources. Adapters map capabilities to vendor primitives; a conformance suite proves each mapping.
-- **A graph of loops.** A node isn't a function call — it's a *loop-bearing agent* with a contract: budget, verifier, exit conditions. The graph wires those loops into an organization with typed edges, fan-out/fan-in, human interrupt nodes, and explicit inter-loop feedback paths.
-- **Verified, not vibed.** Deterministic gates (build / test / lint / custom linters) always run before any LLM judge. Worker and judge are physically separated contexts.
-- **Auditable as a byproduct.** Every run emits intent → plan → steps → evidence → delivery as queryable JSONL plus OpenTelemetry GenAI traces.
+- **Verified, not vibed.** Deterministic gates (build / test / lint / custom linters) always run before any LLM judge. A loop cannot claim "done" without passing its declared verifier.
+- **A graph of loops.** A node isn't a function call — it's a *loop-bearing agent* with a contract: budget, verifier, exit conditions. The graph wires those loops into an organization with typed edges and explicit inter-loop feedback paths.
+- **Physically worker/judge separated.** The judge sees the rubric, the diff, and the gate outputs — never the worker's chain of reasoning. Engine guarantee, with tests.
+- **Auditable as a byproduct.** Every run emits intent → plan → steps → evidence → delivery as queryable JSONL plus OpenTelemetry GenAI traces, with a per-loop cost ledger.
+- **Vendor-neutral by construction.** The Graph IR references *capabilities*, never vendor resources. Adapters map capabilities to runtimes; a conformance suite proves each mapping.
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ L1 INTENT        GitHub/GitLab issues · Linear · Jira · Slack   │
-│                  · PRD files · CLI                              │
-├─────────────────────────────────────────────────────────────────┤
-│ L2 HARNESS (Coxswain)                                           │
-│   cox-ir      portable Graph IR (graphs of loops) + DSLs        │
-│   cox-engine  local durable executor (event-sourced,            │
-│               checkpoint/resume)                                │
-│   cox-loops   loop contracts, budgets, judges, oscillation      │
-│               detection                                         │
-│   cox-verify  deterministic gates + rubric judges + evidence    │
-│   cox-context AGENTS.md autogen · skills registry · KG hooks    │
-│   cox-policy  Cedar/OPA policy-as-code hooks                    │
-├─────────────────────────────────────────────────────────────────┤
-│ L3 WIRES (open protocols)                                       │
-│   ACP → coding agents      MCP → tools      A2A → other agents  │
-├─────────────────────────────────────────────────────────────────┤
-│ L4 PLANES (adapters — all swappable)                            │
-│   Runtime: local · Temporal · AgentCore · Agent Engine ·        │
-│     Foundry hosted agents · Anthropic Managed Agents · K8s      │
-│   Gateway: agentgateway (default) · AgentCore Gateway ·         │
-│     Google Agent Gateway · Foundry/APIM                         │
-│   Identity: OIDC broker → AgentCore Identity · Entra Agent ID · │
-│     GCP IAM agent identity                                      │
-│   Model: via gateway (OpenAI-compat) · direct SDKs              │
-│   Memory: local store · AgentCore Memory · Memory Bank ·        │
-│     Foundry memory                                              │
-├─────────────────────────────────────────────────────────────────┤
-│ L5 SANDBOX       Docker/Podman · Apple Container VM · gVisor    │
-│                  on K8s · microVM · or the managed runtime's    │
-│                  own sandbox                                    │
-├─────────────────────────────────────────────────────────────────┤
-│ CROSS-CUTTING    OTel GenAI traces · cost ledger · audit JSONL  │
-│                  · evals · self-evolution loop                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+Already using LangGraph, CrewAI, or Microsoft Agent Framework? Read the [honest comparison](docs/coxswain-vs-langgraph.md) — they're compile targets and peers here, not competitors.
 
 ## A loop is a contract
 
@@ -93,7 +68,7 @@ loop:
   evidence: full           # every iteration captured to the run bundle
 ```
 
-Anti-thrash machinery is core, not optional: failure-signature hashing, score-plateau detection, judge-disagreement tracking, per-loop cost ledgers.
+Anti-thrash machinery is core, not optional: failure-signature hashing, score-plateau detection, judge-disagreement tracking, per-loop cost ledgers. The schema is an open spec — [RFC discussion here](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC).
 
 ## A graph is an organization
 
@@ -115,28 +90,40 @@ flowchart LR
     L -. budget exhausted /<br/>oscillation .-> E{escalate<br/>to human}
 ```
 
-The worker never sees the judge; the judge never sees the worker's chain of reasoning — only the rubric, the diff, and the gate outputs. Feedback edges are *declared, not implied*, so coupled-loop conflicts (speed loop vs quality loop) are inspectable instead of emergent.
+The worker never sees the judge; the judge never sees the worker's chain of reasoning. Feedback edges are *declared, not implied*, so coupled-loop conflicts (speed loop vs quality loop) are inspectable instead of emergent.
 
-## Status
+## Architecture (the north star)
 
-**Design phase.** The full v1.0 build plan is published and is the plan of record:
+The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable runtime/gateway/identity/memory planes, sandbox layer, self-evolution loop — is specified in the **[build plan](coxswain-ai-dlc-harness-plan.md)**. We are shipping it inside-out: the differentiated core first, the plumbing when the loop has earned it. Execution order is governed by **[ROADMAP.md](ROADMAP.md)**.
 
-### 📐 **[Read the build plan →](coxswain-ai-dlc-harness-plan.md)**
-
-Coxswain is being built *with* the methodology it encodes (AWS AI-DLC: plan → approve → execute in bolts → verify), by Claude Code, against deterministic gates, from day one. The repo is the agent-experience surface — see [AGENTS.md](AGENTS.md).
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ L1 INTENT        GitHub/GitLab issues · Linear · Jira · Slack   │
+├─────────────────────────────────────────────────────────────────┤
+│ L2 HARNESS       cox-ir · cox-engine · cox-loops · cox-verify   │
+│                  cox-context · cox-policy                       │
+├─────────────────────────────────────────────────────────────────┤
+│ L3 WIRES         ACP → coding agents · MCP → tools ·            │
+│                  A2A → other agents                             │
+├─────────────────────────────────────────────────────────────────┤
+│ L4 PLANES        runtime · gateway · identity · model · memory  │
+│                  (adapters — all swappable, conformance-tested) │
+├─────────────────────────────────────────────────────────────────┤
+│ L5 SANDBOX       Docker/Podman · VM · gVisor · microVM          │
+├─────────────────────────────────────────────────────────────────┤
+│ CROSS-CUTTING    OTel GenAI traces · cost ledger · audit JSONL  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Roadmap
 
-| Phase | Scope | Status |
+| When | What | Proof |
 |---|---|---|
-| 0 | Scaffold, `@cox/verify` MVP, boundary linter, evidence v0 | ⏳ next |
-| 1 | Graph IR + event-sourced local engine, replay determinism | — |
-| 2 | ACP agent plane, sandbox, **the harness ships its own PR** | — |
-| 3 | Loop engine, judge isolation, OTel GenAI observability | — |
-| 4 | Gateway plane (agentgateway) + Cedar policy | — |
-| 5 | Runtime adapters: Temporal · AgentCore · Google · Foundry · Anthropic — conformance-first | — |
-| 6 | Context autogen, skills registry, intent surfaces (webhooks/Slack) | — |
-| 7 | Self-evolution loop (prediction-gated), benchmark rig, **v1.0** | — |
+| **Days 1–30** | The "One Loop" MVP: `cox run --issue <url>` → repair loop → MR + evidence bundle. Local only, single loop, dry-run mode | demo video |
+| **Days 31–60** | Durable execution (SQLite event log, `cox resume`), anti-thrash (oscillation + plateau detection), cost ledger, OTel GenAI traces | crash-and-resume on camera |
+| **Days 61–90** | Graph of loops (scope → plan → repair → deliver), one `human` interrupt node, **Coxswain ships a Coxswain PR** | the dogfooded PR, public |
+
+**Q3 2026 OKR:** a GitHub issue becomes a passing MR for Python repos under $2.00 LLM spend. **Q4 2026:** TypeScript targets + the Temporal adapter. Everything else in the plan — gateway plane, policy, context autogen, skills, self-evolution — is deferred behind the working loop, [with reasons](ROADMAP.md#rulings-that-changed-from-the-v10-plan).
 
 ## Design principles (the short version)
 
@@ -153,7 +140,7 @@ The full eleven, with rationale, are in [the plan](coxswain-ai-dlc-harness-plan.
 
 ## Contributing
 
-Early enough that the most valuable contributions are **design review and prior art**: open an issue against the plan. Once Phase 0 lands, `make verify` green is the only law. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The highest-value contributions right now are **design review and prior art** on the open RFCs — the [loop-contract schema, the gate plugin interface, and the evidence-bundle format](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC). Once code lands, `make verify` green is the only law. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
