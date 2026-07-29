@@ -1,16 +1,26 @@
 # Contributing to Coxswain
 
-Thanks for landing here this early. Coxswain is in its **design phase** —
-the [v1.0 build plan](coxswain-ai-dlc-harness-plan.md) is published and
-Phase 0 (scaffold + verification substrate) is the next unit of work.
+Thanks for landing here this early. Coxswain is **building toward
+`v0.1.0` on September 30, 2026** — the ["One Loop" MVP](ROADMAP.md): a
+GitHub issue in, a verified merge request with evidence out. The
+[build plan](coxswain-ai-dlc-harness-plan.md) is the architectural north
+star; [ROADMAP.md](ROADMAP.md) governs execution order.
 
 ## What's valuable right now
 
+- **The open RFCs.** Three abstractions are being locked down in public,
+  as issues titled `RFC:` —
+  [the loop-contract schema, the gate plugin interface, and the
+  evidence-bundle format](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC).
+  If you maintain or use LangGraph, Temporal, CrewAI, or Agent Framework,
+  your prior art is exactly what these threads need. Comment before the
+  schemas freeze.
 - **Design review.** Read the plan and open an issue where you disagree —
   especially on the Graph IR node kinds (§4.1), the loop-contract schema
   (§4.2), and the conformance-suite behaviors (§6 Phase 5). Prior art and
   "this will break because…" reports are the highest-value contributions
-  at this stage.
+  at this stage. This is not a lesser form of contribution here — it is
+  the preferred one.
 - **Landscape corrections.** §2 is a July 2026 snapshot of a fast-moving
   field. If a vendor surface, protocol, or price changed, file it.
 - **Adapter interest.** If you'd want to own a runtime/gateway adapter
