@@ -1,0 +1,24 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+*.tsbuildinfo
+
+# runtime artifacts
+.cox/runs/
+*.sqlite
+*.sqlite-journal
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# editor/os
+.DS_Store
+.idea/
+.vscode/
+*.log
