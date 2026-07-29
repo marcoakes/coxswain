@@ -15,14 +15,31 @@ and pulled by demand rather than pushed by plan.*
 ### Days 1–30 — the "One Loop" MVP
 
 A CLI that takes a GitHub issue, runs a single **repair loop** locally,
-and outputs a merge request with an evidence bundle. Nothing more.
+and outputs a merge request with an evidence bundle. Nothing more. And
+inside it, an even thinner first wedge (second external review):
+**`cox verify` + evidence bundles are usable standalone before the loop
+exists**, wrapped around the coding agent you already use. Coxswain
+never ships an agent.
+
+**Days 1–15 — `cox verify`, standalone.** The first thing a stranger
+can adopt:
+
+- `@cox/verify` v0.1 — pluggable gate runner: `build`, `test`, `lint` as
+  shell-command gates with structured pass/fail, emitting
+  `evidence.jsonl`.
+- `cox verify` runs in any repo, around any session — Claude Code, Codex
+  CLI, Gemini CLI, or a human — and produces the evidence bundle with no
+  loop, no judge, no MR machinery. Gates + receipts, nothing else.
+
+**Days 16–30 — the loop closes around it:**
 
 - `@cox/ir` v0.1 — minimal YAML/JSON schema for a single-loop graph. One
   node kind: `loop:repair`.
-- `@cox/verify` v0.1 — pluggable gate runner: `build`, `test`, `lint` as
-  shell-command gates with structured pass/fail, plus **one** rubric judge
-  ("does this diff satisfy the issue's acceptance criteria?") via any
-  OpenAI-compatible endpoint (local models work — Ollama for cheap dev).
+- Worker binding = **your existing coding agent via subprocess** (Claude
+  Code first; Codex/Gemini CLI next; ACP as the formal wire later).
+- One rubric judge ("does this diff satisfy the issue's acceptance
+  criteria?") via any OpenAI-compatible endpoint (local models work —
+  Ollama for cheap dev).
 - `@cox/engine` v0.1 — local in-memory executor: worker → gates → judge →
   iterate or exit. Run persisted as a JSONL evidence bundle.
 - `cox run --issue <url> --repo <path>` → branch + MR + `evidence.jsonl`.
