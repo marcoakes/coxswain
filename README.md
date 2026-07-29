@@ -29,7 +29,9 @@ Every cloud's harness locks you to its runtime, its identity system, its gateway
 cox run --issue https://github.com/you/repo/issues/42
 ```
 
-…takes a GitHub issue, runs a **repair loop** in a local sandbox — worker writes code → deterministic gates (build · test · lint) → isolated rubric judge → iterate or exit — and opens a merge request with `evidence.jsonl` and `cost.jsonl` attached. Budgeted, oscillation-proof, auditable. **`v0.1.0` lands September 30, 2026** — see the [90-day roadmap](ROADMAP.md), and the [quickstart](QUICKSTART.md) for the exact developer experience it ships.
+…takes a GitHub issue, runs a **repair loop** in a local sandbox — worker writes code → deterministic gates (build · test · lint) → isolated rubric judge → iterate or exit — and opens a merge request with `evidence.jsonl` and `cost.jsonl` attached. Budgeted, oscillation-proof, auditable.
+
+The worker is **your existing coding agent** — Claude Code, Codex CLI, Gemini CLI — Coxswain never ships its own; it wraps the one you already use in gates, evidence, and budgets. And the first installable artifact is thinner still: **`cox verify`**, standalone gates + evidence bundle around *any* session, usable before the loop even exists. **`v0.1.0` lands September 30, 2026** — see the [90-day roadmap](ROADMAP.md), and the [quickstart](QUICKSTART.md) for the exact developer experience it ships.
 
 ## Why
 
@@ -119,7 +121,7 @@ The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable run
 
 | When | What | Proof |
 |---|---|---|
-| **Days 1–30** | The "One Loop" MVP: `cox run --issue <url>` → repair loop → MR + evidence bundle. Local only, single loop, dry-run mode | demo video |
+| **Days 1–30** | The "One Loop" MVP: `cox verify` standalone first (gates + evidence around any agent session), then `cox run --issue <url>` → repair loop → MR + evidence bundle. Local only, dry-run mode | demo video |
 | **Days 31–60** | Durable execution (SQLite event log, `cox resume`), anti-thrash (oscillation + plateau detection), cost ledger, OTel GenAI traces | crash-and-resume on camera |
 | **Days 61–90** | Graph of loops (scope → plan → repair → deliver), one `human` interrupt node, **Coxswain ships a Coxswain PR** | the dogfooded PR, public |
 
