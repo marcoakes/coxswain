@@ -71,14 +71,14 @@ summary, diff, and both gates' logs, exactly as produced:
 ```
 $ wring verify
 ✓ lint passed        0.1s
-✓ test passed        17.7s
+✓ test passed        17.6s
 
 Evidence written to:
-.wringer/runs/20260730-225719-dd2c/
+.wringer/runs/20260730-231645-a57c/
 ```
 
 That is the run committed at
-[`.wringer.example/runs/20260730-225719-dd2c/`](.wringer.example/runs/) — the
+[`.wringer.example/runs/20260730-231645-a57c/`](.wringer.example/runs/) — the
 same id, so the transcript and the bundle are the same event rather than two
 similar ones. That bundle is the answer to "how do I know?" — read it rather
 than trust the badge.
