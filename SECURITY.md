@@ -35,22 +35,45 @@ recording current repo state" is an explicit
 release. If you need isolation now, run `cox verify` inside your own
 container.
 
+Two things it does refuse. It will not verify outside a git repository
+(exit `2`), because a verification claim with no commit behind it is
+meaningless; and it will not verify while a merge, rebase, cherry-pick,
+revert or bisect is half-finished (exit `3`), because the tree then
+describes a state nobody chose. A gate id is also validated as a slug, so a
+config cannot use it to write outside the run directory.
+
 ## What the evidence bundle contains
 
 A bundle (`.cox/runs/<run_id>/`) captures each gate's **full stdout and
 stderr**, its command string, the repo's HEAD SHA, branch and dirty flag.
 
-**Until secret redaction lands (Day 4 of the [v0 spec](SPEC_COX_VERIFY_V0.md#build-order-bolts--plan-first-verify-each-before-the-next)),
-assume a bundle contains whatever your gates printed** — including tokens
-echoed by a misbehaving tool, connection strings in a stack trace, or a
-`env`-dumping debug line. Two consequences today:
+**Secrets are redacted before anything is written.** The values of
+environment variables whose names match `*TOKEN*`, `*SECRET*` or `*KEY*` —
+plus any pattern the repo adds under `evidence.redact.env` — are replaced
+with `[REDACTED]` in gate logs, `diff.patch`, `status.txt`, recorded
+commands and `evidence.jsonl`. This happens *before* the write, not as a
+cleanup pass: the raw value never reaches the file. That is why gate output
+travels through a pipe instead of straight to a file descriptor.
 
-- `.cox/` is gitignored by the template Coxswain ships. Keep it that way
-  until you have read what is inside a bundle.
-- Do not attach a bundle to a public issue or PR without reading it.
+**What redaction does not do.** It knows about values that are in the
+environment of the run. It cannot know about:
 
-Redaction (`*TOKEN*`, `*SECRET*`, `*KEY*` patterns applied **before**
-write) and log-size truncation are specified and scheduled, not optional.
+- a credential your gate reads from a file (or a vault) and then prints;
+- a secret shorter than 6 characters, which is deliberately ignored — a
+  two-character "secret" would match half the log and destroy the evidence;
+- a token that appears only in a form the redactor never saw, e.g. base64 of
+  the real value.
+
+So the standing advice holds:
+
+- `.cox/` is gitignored by the template Coxswain ships. Keep it that way.
+- **Read a bundle before you attach it to a public issue or PR.**
+
+Two further bounds on what a bundle can become: each captured stream is
+capped (the tail is kept and the file states how many bytes were dropped),
+and binary file contents never enter `diff.patch` — not even when the
+repository's own `.gitattributes` defines a `textconv` driver that would
+turn them into text.
 
 ## What Coxswain never does
 

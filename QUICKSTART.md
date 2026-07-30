@@ -164,9 +164,18 @@ Untracked files are listed in `status.txt` and the `git.status` event, not in
 the patch — git cannot diff a file it has never seen, and pretending
 otherwise would be a lie in an evidence bundle.
 
-Exit codes are contract: `0` all required gates passed · `1` a required gate
-failed · `2` config or environment error. (`3` refused precondition and `4`
-interrupted are reserved and not yet emitted.)
+Exit codes are contract, and all five are live: `0` all required gates
+passed · `1` a required gate failed · `2` config or environment error ·
+`3` refused (see below) · `4` interrupted.
+
+`cox verify` refuses with `3` when the tree is in the middle of a merge,
+rebase, cherry-pick, revert or bisect — HEAD and the working tree then
+describe a state nobody chose, and "passing" would be a claim about a commit
+that does not exist yet. Finish or abort the operation, then verify.
+
+Press Ctrl-C and you get `4`: the gate is stopped (it runs in its own process
+group, so Coxswain has to do that deliberately) and the partial bundle is
+written and marked `interrupted` rather than abandoned half-finished.
 
 ## `cox explain` — what just happened
 
@@ -249,11 +258,35 @@ you type it:
 cox verify --changed-only  # gate only what changed
 ```
 
-Also landing before the tag: secret redaction before write, log-size
-truncation, binary exclusion from the diff, exit codes `3` and `4`, and
-`pipx install coxswain` from PyPI. Progress is tracked in
+Also landing before the tag: real command detection in `cox init`,
+`cox verify --output`, and `pipx install coxswain` from PyPI. Progress is tracked in
 [AGENTS.md](AGENTS.md); the release bar is the spec's
 [Definition of PROVEN](SPEC_COX_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts).
+
+## Secrets
+
+Gate output is captured, so a tool that echoes a token would otherwise write
+it into the bundle. Before anything is written, Coxswain erases the *values*
+of environment variables whose *names* match `*TOKEN*`, `*SECRET*` or
+`*KEY*`, replacing each with `[REDACTED]`. Add your own patterns — the
+defaults always stay on:
+
+```yaml
+evidence:
+  redact:
+    env:
+      - "*PASSWORD*"
+      - "*_URL"
+```
+
+This catches secrets that live in the environment, which is where most of
+them are. It cannot catch a credential your gate reads from a file and
+prints, so keep reading a bundle before you share it — see
+[SECURITY.md](SECURITY.md).
+
+Two other bounds on what a bundle can become: each captured stream is capped
+(the tail is kept, and the file says how much was dropped), and binary file
+contents never enter `diff.patch`.
 
 ## What it will never do
 

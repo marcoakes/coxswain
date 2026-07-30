@@ -31,12 +31,13 @@ no network, no uploads — ever.
 
 Where they disagree about v0.1, the spec wins.
 
-## Current state — Bolt 3 shipped
+## Current state — Bolt 4 shipped
 
 There **is** code now: `cox init` and `cox verify` work — `verify` runs a
 repo's whole declared gate set and writes a real bundle, `cox explain`
-diagnoses a finished run, and `--json` feeds agents — with 125 tests
-passing on Python 3.11–3.13 (plus macOS) in CI, behind a ruff lint gate.
+diagnoses a finished run, `--json` feeds agents, and secrets never reach the
+disk — with 151 tests passing on Python 3.11–3.13 (plus macOS) in CI, behind
+a ruff lint gate.
 
 | Bolt | Spec day | State |
 |---|---|---|
@@ -44,8 +45,8 @@ passing on Python 3.11–3.13 (plus macOS) in CI, behind a ruff lint gate.
 | 2 — gate runner | Day 2 | ✅ every gate in declared order, `timeout` enforced (process-group kill), stop-on-first-required-failure, optional-gate semantics, per-gate `gates/NNN_id/{stdout.log,stderr.log,result.json}`, `summary.md`, CI |
 | 2.5 — review hardening | — | ✅ gate ids validated as slugs, internal git calls bounded, POSIX-only kill declared, ruff lint gate + macOS CI, real transcripts, SECURITY.md |
 | 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `cox verify --json`, `cox explain` |
-| 4 — redaction & safety | Day 4 | ⬜ next: env redaction before write, log truncation, binary exclusion, exit 3 preconditions, exit 4 on SIGINT |
-| 5 — dogfood | Day 5 | ⬜ Coxswain verifies Coxswain, CI upgraded to run `cox verify` and upload the bundle, committed sanitized bundle in `.cox.example/`, real README transcript |
+| 4 — redaction & safety | Day 4 | ✅ env redaction before write, capped logs with a declared note, binary + textconv exclusion, exit 2 outside a repo, exit 3 mid-merge/rebase, exit 4 on SIGINT with the gate killed |
+| 5 — dogfood | Day 5 | ⬜ next: real command detection in `cox init`, `cox verify --output`, Coxswain verifies Coxswain, CI upgraded to run `cox verify` and upload the bundle, committed sanitized bundle in `.cox.example/`, real README transcript |
 
 The `v0.1.0` tag is gated on the spec's
 [Definition of PROVEN](SPEC_COX_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
@@ -73,7 +74,7 @@ uv pip install -e '.[dev]' --python .venv/bin/python
 Then:
 
 ```bash
-.venv/bin/pytest                # the gate: all tests, ~6s, must be green
+.venv/bin/pytest                # the gate: all tests, ~10s, must be green
 .venv/bin/cox --help
 .venv/bin/cox init              # writes .cox.yaml (refuses to overwrite)
 .venv/bin/cox verify            # runs every gate, writes .cox/runs/<run_id>/
@@ -109,15 +110,15 @@ block first — the clean console is the product.
 | Module | Does | Deliberately does not (yet) |
 |---|---|---|
 | `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, and `cox explain`'s rendering | register `--changed-only` or `--output` — see below |
-| `config.py` | strict `.cox.yaml` loader → frozen `Config`/`Gate` dataclasses | consume `evidence:` (parsed for shape, stored raw for Bolts 3–4) |
+| `config.py` | strict `.cox.yaml` loader → frozen `Config`/`Gate` dataclasses; validates `evidence.redact` because a typo there must not silently disable redaction | consume `evidence.include` (still shape-only) |
 | `detect.py` | the commented `.cox.yaml` template `cox init` writes | actually detect project commands (static template is Day-1-legal per the spec: *"if detection is uncertain, generate comments rather than being clever"*) |
-| `git.py` | root detection, HEAD SHA, branch, dirty flag, changed/untracked lists, `diff`/`status` capture; read-only, bounded, never fatal | binary exclusion from the diff (Bolt 4) |
-| `gates.py` | run one gate through the shell in the repo root: own process group, `timeout` enforced by SIGTERM→SIGKILL on the group, stdout/stderr captured to files, duration in ms | decide anything about *which* gates run — that is `cli.py`'s sequencing |
-| `evidence.py` | allocate `.cox/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) | redaction and size limits (Bolt 4) |
+| `git.py` | root detection, HEAD SHA, branch, dirty flag, changed/untracked lists, `diff`/`status` capture, and the refusal checks (`is_repo`, `in_progress`); read-only, bounded, never fatal | write anything — every call here is a read |
+| `gates.py` | run one gate through the shell in the repo root: own process group, `timeout` enforced by SIGTERM→SIGKILL on the group, output captured **through a pipe** so it can be scrubbed and capped before it is written, duration in ms | decide anything about *which* gates run — that is `cli.py`'s sequencing |
+| `evidence.py` | allocate `.cox/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) — scrubbing every write, because the `Bundle` holds the redactor | decide *what* counts as a secret — that is `redact.py` |
+| `redact.py` | turn env-var name patterns into the set of secret values, and erase them from text or bytes | look anywhere but the environment |
 | `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
 
-`redact.py` appears in the spec's layout and does **not** exist yet by
-design — it arrives with Bolt 4.
+Every module in the spec's layout now exists.
 
 ### Do not add these early
 
@@ -135,7 +136,7 @@ semantics in the spec before building it.
 
 ## Contracts you must not break
 
-**Exit codes** (spec table — 0/1/2 are wired, 3/4 are reserved for Bolt 4):
+**Exit codes** (the spec's table — all five are live now):
 
 | code | meaning |
 |---|---|
@@ -182,6 +183,13 @@ groups (`os.killpg`), which is POSIX-only; `gates.py` degrades to killing
 just the shell elsewhere and pyproject's classifiers say so. Windows is a
 v0.2 conversation, not a silent failure.
 
+**Redaction happens before the write, never after.** The `Bundle` owns a
+`Redactor` so every write path scrubs by construction; gate output travels
+through a pipe for the same reason. If you add a file to the bundle, add it
+through the `Bundle`, or you have quietly opted out of the one guarantee
+SECURITY.md makes. Scrub first, *then* truncate — truncation must never be
+what saves a secret.
+
 **Config semantics:** validation is strict — unknown keys are errors,
 because a typo in a gate definition must not silently change what
 "verified" means. `optional` is the canonical field; `required` is
@@ -226,8 +234,9 @@ is an error.
   through a shell with the user's privileges. Never add a feature that
   widens that (no fetching a config over the network, no running a gate
   from an untrusted source) without a spec change and a SECURITY.md
-  update. Bundles hold raw gate output, so they are unredacted until
-  Bolt 4: don't paste one into a public issue.
+  update. Bundles are redacted before write, but redaction only knows about
+  values in the environment — a secret a gate reads from a file and prints
+  is still yours to catch, so read a bundle before pasting it anywhere.
 - **Don't run `cox verify` on this repo casually while iterating** — each
   run writes a new `.cox/runs/<id>/`. Harmless (gitignored), just noisy.
 - **Test repos must be isolated from the developer's git config.**
