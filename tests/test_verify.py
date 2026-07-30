@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from cox import cli, evidence
+from cox import cli, evidence, gates
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -339,6 +339,8 @@ def test_a_required_failure_stops_the_run_and_skips_the_rest(
         "command": "false",
         "exit_code": 1,
         "timed_out": False,
+        "stdout_truncated": False,
+        "stderr_truncated": False,
         "optional": False,
         "status": "failed",
     }
@@ -563,6 +565,43 @@ evidence:
     log = gate_log(bundle, "001_leaky", "stdout")
     assert "hunter2" not in log
     assert "[REDACTED]" in log
+
+
+def test_a_truncated_log_is_declared_in_the_evidence(
+    repo, write_config, monkeypatch, capfd
+):
+    monkeypatch.setattr(gates, "MAX_LOG_BYTES", 64)
+    write_config(
+        repo,
+        """\
+version: 1
+gates:
+  - id: noisy
+    run: for i in $(seq 1 200); do echo line-$i; done
+""",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capfd.readouterr()
+
+    bundle = only_bundle(repo)
+    row = result_json(bundle, "001_noisy")
+    assert row["stdout_truncated"] is True
+    assert row["stderr_truncated"] is False
+    # the event says so too, so a machine reading only evidence.jsonl knows
+    assert of_type(events(bundle), "gate.finished")[0]["truncated"] is True
+
+
+def test_a_whole_log_carries_no_truncation_key(repo, write_config, monkeypatch, capfd):
+    write_config(repo, ONE_PASSING_GATE)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capfd.readouterr()
+
+    bundle = only_bundle(repo)
+    assert "truncated" not in of_type(events(bundle), "gate.finished")[0]
 
 
 def test_a_timeout_fails_the_run_and_says_timed_out(

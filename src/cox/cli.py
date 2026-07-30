@@ -365,6 +365,9 @@ def _run_gate(
         # The spec carries `log` on the failing gate only — that is the one
         # a reader is being sent to.
         finished["log"] = bundle.relative(result.stdout_path)
+    if result.truncated:
+        # Only when true: an absent key means the log is whole.
+        finished["truncated"] = True
     bundle.event("gate.finished", **finished)
     return result
 

@@ -21,6 +21,11 @@ from cox.redact import Redactor
 # How long a gate that overran its timeout gets between SIGTERM and SIGKILL.
 KILL_GRACE_SECONDS = 2
 
+# The most any single captured stream may contribute to a bundle. A runaway
+# gate should not fill the disk, and nobody reads the middle of a 4 GB log.
+# The tail is kept, because that is where a failure announces itself.
+MAX_LOG_BYTES = 1_048_576
+
 # v0.1 targets macOS and Linux (see pyproject's classifiers). Process groups
 # are the mechanism that makes a timeout stick, and they are POSIX-only.
 _POSIX = os.name == "posix"
@@ -37,6 +42,12 @@ class GateResult:
     timed_out: bool
     stdout_path: Path
     stderr_path: Path
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+
+    @property
+    def truncated(self) -> bool:
+        return self.stdout_truncated or self.stderr_truncated
 
     @property
     def passed(self) -> bool:
@@ -92,8 +103,12 @@ def run(
         # the last lines before a hang are usually the interesting ones.
         out, err = proc.communicate()
 
-    stdout_path.write_bytes(redactor.scrub_bytes(out))
-    stderr_path.write_bytes(redactor.scrub_bytes(err))
+    # Scrub first, then bound: truncation must never be what saves a secret,
+    # and a redacted log is what the limit applies to.
+    out_data, out_cut = truncate(redactor.scrub_bytes(out), MAX_LOG_BYTES)
+    err_data, err_cut = truncate(redactor.scrub_bytes(err), MAX_LOG_BYTES)
+    stdout_path.write_bytes(out_data)
+    stderr_path.write_bytes(err_data)
 
     return GateResult(
         gate=gate,
@@ -102,7 +117,23 @@ def run(
         timed_out=timed_out,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
+        stdout_truncated=out_cut,
+        stderr_truncated=err_cut,
     )
+
+
+def truncate(data: bytes, limit: int) -> tuple[bytes, bool]:
+    """Keep the last `limit` bytes, announcing what was dropped.
+
+    The note goes in the file itself: a reader must never mistake a bounded
+    log for a complete one, and a bundle that quietly loses evidence is
+    worse than one that admits it.
+    """
+    if len(data) <= limit:
+        return data, False
+    dropped = len(data) - limit
+    note = f"[cox: {dropped} earlier bytes dropped, keeping the last {limit}]\n"
+    return note.encode() + data[-limit:], True
 
 
 def _terminate(proc: subprocess.Popen) -> int:

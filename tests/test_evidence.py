@@ -119,6 +119,8 @@ def test_gate_result_json_is_exactly_the_contract(tmp_path: Path):
         "exit_code": 1,
         "duration_ms": 9231,
         "timed_out": False,
+        "stdout_truncated": False,
+        "stderr_truncated": False,
         "optional": False,
         "status": "failed",
     }

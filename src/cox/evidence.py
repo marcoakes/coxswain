@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cox.gates import GateResult
+from cox import gates
 from cox.git import RepoState
 from cox.redact import Redactor
 
@@ -169,11 +169,13 @@ class Bundle:
         text = self.redactor.scrub(text)
         if text and not text.endswith("\n"):
             text += "\n"
+        # Same bound as a gate log: a 500 MB diff is not evidence either.
+        data, _ = gates.truncate(text.encode("utf-8"), gates.MAX_LOG_BYTES)
         path = self.directory / filename
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(data)
         return path
 
-    def write_gate_result(self, gate_dir: Path, result: GateResult) -> Path:
+    def write_gate_result(self, gate_dir: Path, result: gates.GateResult) -> Path:
         """`gates/NNN_<id>/result.json` — one gate's row of the contract."""
         payload = {
             "gate_id": result.gate.id,
@@ -181,6 +183,8 @@ class Bundle:
             "exit_code": result.exit_code,
             "duration_ms": result.duration_ms,
             "timed_out": result.timed_out,
+            "stdout_truncated": result.stdout_truncated,
+            "stderr_truncated": result.stderr_truncated,
             "optional": result.gate.optional,
             "status": result.status,
         }

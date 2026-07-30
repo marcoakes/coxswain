@@ -74,6 +74,41 @@ def test_duration_is_recorded_in_milliseconds(tmp_path: Path):
     assert result.duration_ms < 5000
 
 
+def test_a_short_log_is_written_whole(tmp_path: Path):
+    result = execute("echo small", tmp_path)
+
+    assert result.stdout_truncated is False
+    assert result.truncated is False
+    assert result.stdout_path.read_text(encoding="utf-8") == "small\n"
+
+
+def test_an_oversized_log_keeps_the_tail_and_says_so(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(gates, "MAX_LOG_BYTES", 64)
+
+    result = execute("for i in $(seq 1 200); do echo line-$i; done", tmp_path)
+
+    assert result.stdout_truncated is True
+    assert result.truncated is True
+    written = result.stdout_path.read_text(encoding="utf-8")
+    assert written.startswith("[cox: ")
+    assert "earlier bytes dropped" in written
+    # the end of the log — where a failure announces itself — survives
+    assert "line-200" in written
+    assert "line-1\n" not in written
+
+
+def test_truncate_leaves_short_data_untouched():
+    assert gates.truncate(b"short", 64) == (b"short", False)
+
+
+def test_truncate_reports_what_it_dropped():
+    data, cut = gates.truncate(b"0123456789", 4)
+
+    assert cut is True
+    assert data.endswith(b"6789")
+    assert b"6 earlier bytes dropped" in data
+
+
 def test_timeout_stops_the_gate_and_is_recorded(tmp_path: Path):
     result = execute("sleep 30", tmp_path, timeout=1)
 
