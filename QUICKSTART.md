@@ -262,7 +262,9 @@ wring verify --output .wringer/runs/manual-001
 ```
 
 Naming a path is an instruction, so unlike a normal run this one will reuse
-the directory you gave it.
+the directory you gave it — clearing the previous run's bundle first, because
+one directory describes one run. Anything else you keep in that directory is
+left alone.
 
 ## Not built yet
 

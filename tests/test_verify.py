@@ -485,6 +485,54 @@ def test_output_reuses_a_directory_because_naming_one_is_an_instruction(
     assert recorded[0]["run_id"] == manifest(target)["run_id"]
 
 
+def test_a_reused_output_directory_holds_no_evidence_from_the_run_before(
+    repo, write_config, monkeypatch, capsys
+):
+    """A gate that did not run this time must leave nothing behind, or the
+    bundle contradicts itself: summary.md calls the gate skipped while
+    `wring explain` reads last run's result.json and calls it passed."""
+    monkeypatch.chdir(repo)
+    target = repo / "fixed"
+
+    write_config(
+        repo,
+        """\
+version: 1
+gates:
+  - id: lint
+    run: "true"
+  - id: test
+    run: "true"
+""",
+    )
+    assert cli.main(["verify", "--output", str(target)]) == cli.EXIT_OK
+    assert (target / evidence.GATES_DIRNAME / "002_test").is_dir()
+
+    # now lint fails, so test never gets a turn
+    write_config(
+        repo,
+        """\
+version: 1
+gates:
+  - id: lint
+    run: "false"
+  - id: test
+    run: "true"
+""",
+    )
+    assert cli.main(["verify", "--output", str(target)]) == cli.EXIT_GATE_FAILED
+    capsys.readouterr()
+
+    assert not (target / evidence.GATES_DIRNAME / "002_test").exists()
+    summary = (target / "summary.md").read_text(encoding="utf-8")
+    assert "| test | skipped |" in summary
+
+    assert cli.main(["explain", str(target)]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "✗ lint failed" in out
+    assert "test passed" not in out  # the stale verdict is gone
+
+
 def test_a_timeout_fails_the_run_and_says_timed_out(
     repo, write_config, monkeypatch, capsys
 ):

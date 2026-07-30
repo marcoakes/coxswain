@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,8 +30,15 @@ MANIFEST_FILENAME = "manifest.json"
 RESULT_FILENAME = "result.json"
 DIFF_FILENAME = "diff.patch"
 STATUS_FILENAME = "status.txt"
+# Rendered by summary.py, but named here with the bundle's other files: what
+# a run writes has to be knowable in one place to be removable in one place.
+SUMMARY_FILENAME = "summary.md"
 GATES_DIRNAME = "gates"
 RUNS_DIRNAME = Path(".wringer") / "runs"
+
+# The id's timestamp prefix: `20260730-080601` of `20260730-080601-a13f`.
+_RUN_ID_TIME_FORMAT = "%Y%m%d-%H%M%S"
+_RUN_ID_TIME_LENGTH = 15
 
 _RUN_ID_ATTEMPTS = 64
 
@@ -40,20 +48,37 @@ class EvidenceError(Exception):
 
 
 def latest_run(runs_root: Path) -> Path | None:
-    """The most recent run directory, or None if there are none.
-
-    A run id starts with a sortable timestamp, which orders runs down to the
-    second. Within one second the id ends in a *random* suffix, not a
-    counter — so lexical order alone would happily call an older run the
-    latest one. Two runs landing in the same second is not a corner case:
-    it is what a verify-fix-verify loop does all day. mtime breaks the tie.
-    """
+    """The most recent run directory, or None if there are none."""
     if not runs_root.is_dir():
         return None
     runs = [path for path in runs_root.iterdir() if path.is_dir()]
     if not runs:
         return None
-    return max(runs, key=lambda path: (path.name[:15], path.stat().st_mtime))
+    return max(runs, key=_started_at)
+
+
+def _started_at(run_dir: Path) -> tuple[datetime, float]:
+    """When a run began, for ordering — read from its id, or its mtime.
+
+    A run id starts with a sortable timestamp, but `--output` lets a caller
+    name a directory anything, and comparing those names as *text* let one
+    letter outrank every real run forever: `manual-001` beats `20260730-…`
+    because "m" > "2", so `wring explain` would keep diagnosing the manual
+    run no matter how many newer ones landed. A directory whose name is not
+    a run id is dated by its mtime instead.
+
+    Within one second the id ends in a *random* suffix, not a counter, so
+    mtime breaks that tie too. Two runs landing in the same second is not a
+    corner case: it is what a verify-fix-verify loop does all day.
+    """
+    mtime = run_dir.stat().st_mtime
+    try:
+        started = datetime.strptime(
+            run_dir.name[:_RUN_ID_TIME_LENGTH], _RUN_ID_TIME_FORMAT
+        )
+    except ValueError:  # not a run id — a caller-named --output directory
+        started = datetime.fromtimestamp(mtime)
+    return started, mtime
 
 
 def read_manifest(run_dir: Path) -> dict[str, Any]:
@@ -93,6 +118,34 @@ def _read_json(path: Path) -> dict[str, Any]:
         raise EvidenceError(f"cannot read {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise EvidenceError(f"{path} is not valid JSON: {exc}") from exc
+
+
+def _clear_previous(directory: Path) -> None:
+    """Remove what an earlier run left in a reused `--output` directory.
+
+    One directory must describe one run. `evidence.jsonl` is append-only
+    *within* a run, so a reused log would grow into a file describing two;
+    worse, a stale `gates/NNN_id/result.json` is read straight back by
+    `wring explain`, which is how a bundle ends up saying a gate passed on
+    the same screen its summary calls it skipped. A bundle that contradicts
+    itself is worse than no bundle at all.
+
+    Only Wringer's own artifacts go: the directory belongs to the caller,
+    and anything else they keep in it is theirs.
+    """
+    for filename in (
+        EVIDENCE_FILENAME,
+        MANIFEST_FILENAME,
+        SUMMARY_FILENAME,
+        DIFF_FILENAME,
+        STATUS_FILENAME,
+    ):
+        (directory / filename).unlink(missing_ok=True)
+    previous_gates = directory / GATES_DIRNAME
+    if previous_gates.is_dir():
+        # Not ignore_errors: a gates/ tree we cannot clear would leave last
+        # run's verdicts in this run's bundle, and that must be loud.
+        shutil.rmtree(previous_gates)
 
 
 def timestamp() -> str:
@@ -168,10 +221,7 @@ class Bundle:
         """
         try:
             directory.mkdir(parents=True, exist_ok=True)
-            # `evidence.jsonl` is append-only *within* a run. Reusing a
-            # directory starts a new one, so the old log goes rather than
-            # silently growing into a file that describes two runs at once.
-            (directory / EVIDENCE_FILENAME).unlink(missing_ok=True)
+            _clear_previous(directory)
         except OSError as exc:
             raise EvidenceError(f"cannot create {directory}: {exc}") from exc
         return cls(

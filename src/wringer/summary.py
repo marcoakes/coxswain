@@ -18,7 +18,9 @@ from wringer.evidence import Bundle
 from wringer.gates import GateResult
 from wringer.git import RepoState
 
-SUMMARY_FILENAME = "summary.md"
+# Named in evidence.py with the bundle's other filenames, and re-exported
+# here because this module is the one that writes it.
+SUMMARY_FILENAME = evidence.SUMMARY_FILENAME
 
 
 @dataclass(frozen=True)

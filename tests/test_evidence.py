@@ -18,6 +18,13 @@ RUN_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")
 NOW = datetime(2026, 7, 30, 8, 6, 1, 123456, tzinfo=timezone(timedelta(hours=1)))
 
 
+def stamp(path: Path, when: datetime) -> None:
+    """Give a run directory a real mtime — local, like the ids it competes
+    against, so the two are actually comparable."""
+    epoch = when.timestamp()
+    os.utime(path, (epoch, epoch))
+
+
 def test_run_id_has_the_spec_shape():
     run_id = evidence.new_run_id(NOW)
     assert RUN_ID.match(run_id), run_id
@@ -86,8 +93,72 @@ def test_latest_run_prefers_a_newer_second_over_mtime(tmp_path: Path):
     assert evidence.latest_run(runs) == newer_second
 
 
+def test_latest_run_is_not_hijacked_by_a_manual_name(tmp_path: Path):
+    """`--output` lets a caller name a directory anything, and QUICKSTART
+    teaches exactly that. Compared as text, "manual-001" outranks every real
+    run id forever ("m" > "2"), so `wring explain` would keep diagnosing it
+    however many newer runs landed."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    manual = runs / "manual-001"
+    later = runs / "20260730-201936-0000"
+    manual.mkdir()
+    later.mkdir()
+    # the manual run happened first, six seconds before the real one
+    stamp(manual, datetime(2026, 7, 30, 20, 19, 30))
+    stamp(later, datetime(2026, 7, 30, 20, 19, 36))
+
+    assert evidence.latest_run(runs) == later
+
+
+def test_latest_run_still_picks_a_manual_run_when_it_is_the_newest(tmp_path: Path):
+    """A directory whose name is not a run id is dated by its mtime — which
+    means it can win, it just cannot win by spelling."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    earlier = runs / "20260730-201936-0000"
+    manual = runs / "manual-001"
+    earlier.mkdir()
+    manual.mkdir()
+    stamp(earlier, datetime(2026, 7, 30, 20, 19, 36))
+    stamp(manual, datetime(2026, 7, 30, 20, 19, 40))
+
+    assert evidence.latest_run(runs) == manual
+
+
 def test_latest_run_with_no_runs_is_none(tmp_path: Path):
     assert evidence.latest_run(tmp_path / "nothing-here") is None
+
+
+def test_at_clears_what_the_previous_run_left(tmp_path: Path):
+    """One directory describes one run. A stale `result.json` is read
+    straight back by `wring explain`, which is how a bundle ends up calling
+    a gate passed on the same screen its summary calls it skipped."""
+    directory = tmp_path / "manual-001"
+    first = evidence.Bundle.at(directory, now=NOW)
+    first.event("run.started", run_id=first.run_id)
+    for filename in (
+        evidence.MANIFEST_FILENAME,
+        evidence.SUMMARY_FILENAME,
+        evidence.DIFF_FILENAME,
+        evidence.STATUS_FILENAME,
+    ):
+        (directory / filename).write_text("last run's", encoding="utf-8")
+    stale = first.gate_dir(2, "test")
+    (stale / evidence.RESULT_FILENAME).write_text('{"status": "passed"}', "utf-8")
+    mine = directory / "notes.txt"
+    mine.write_text("the caller's own file", encoding="utf-8")
+
+    evidence.Bundle.at(directory, now=NOW)
+
+    assert not (directory / evidence.EVIDENCE_FILENAME).exists()
+    assert not (directory / evidence.MANIFEST_FILENAME).exists()
+    assert not (directory / evidence.SUMMARY_FILENAME).exists()
+    assert not (directory / evidence.DIFF_FILENAME).exists()
+    assert not (directory / evidence.STATUS_FILENAME).exists()
+    assert not stale.exists()
+    # the directory belongs to the caller: only Wringer's artifacts go
+    assert mine.read_text(encoding="utf-8") == "the caller's own file"
 
 
 def test_gate_dir_is_named_for_the_declared_position(tmp_path: Path):

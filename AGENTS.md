@@ -181,7 +181,19 @@ Three conventions inside the bundle are load-bearing:
   (every gate's logs are on disk and linked from `summary.md`).
 - **Skipped gates leave no trace in `evidence.jsonl` and no directory.**
   They were not run, so claiming otherwise would be a lie; `summary.md`
-  is the one place the full declared set appears, marked `skipped`.
+  is the one place the full declared set appears, marked `skipped` — or
+  `interrupted` for the one gate a Ctrl-C caught mid-flight, which is
+  neither passed nor skipped and still gets no invented `gate.finished`.
+- **One directory describes one run.** `--output` reuses the directory it
+  is given, so `Bundle.at` first clears the previous bundle (`evidence.jsonl`,
+  `manifest.json`, `summary.md`, `diff.patch`, `status.txt`, `gates/`) and
+  nothing else — the directory is the caller's. Leaving a stale
+  `gates/NNN_id/result.json` behind is how a bundle comes to say a gate
+  passed on the same screen its summary calls it skipped.
+- **`latest_run` orders by time, never by name.** A `--output` directory can
+  be called anything, and as text `manual-001` outranks every real run id
+  forever. Ids are dated from their timestamp prefix, other names from their
+  mtime.
 
 **Gate ids are slugs** (`[A-Za-z0-9][A-Za-z0-9_-]*`, ≤64 chars) because
 they become directory names: `gates/NNN_<id>/`. A config saying
