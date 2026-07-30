@@ -32,8 +32,8 @@ A real run, pasted unedited from a scratch Python repo (`ruff` and `pytest` as t
 
 ```
 $ wring verify
-✓ lint passed        0.1s
-✗ test failed        0.2s
+✓ lint passed        0.0s
+✗ test failed        0.1s
 
 --- gates/002_test/stdout.log ---
     def test_add():
@@ -45,10 +45,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.wringer/runs/20260730-160105-830a/
+.wringer/runs/20260730-202258-c7e4/
 
 Next:
-  open .wringer/runs/20260730-160105-830a/summary.md
+  open .wringer/runs/20260730-202258-c7e4/summary.md
   rerun wring verify --gate test
 ```
 

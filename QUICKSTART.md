@@ -50,18 +50,18 @@ gates:
 ```
 $ wring verify
 ✓ lint passed        0.1s
-✓ test passed        0.2s
+✓ test passed        0.1s
 
 Evidence written to:
-.wringer/runs/20260730-160103-3547/
+.wringer/runs/20260730-202255-fac4/
 ```
 
 Exit code `0`. Now an off-by-one slips into `calc.py`:
 
 ```
 $ wring verify
-✓ lint passed        0.1s
-✗ test failed        0.2s
+✓ lint passed        0.0s
+✗ test failed        0.1s
 
 --- gates/002_test/stdout.log ---
 F                                                                        [100%]
@@ -79,10 +79,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.wringer/runs/20260730-160105-830a/
+.wringer/runs/20260730-202258-c7e4/
 
 Next:
-  open .wringer/runs/20260730-160105-830a/summary.md
+  open .wringer/runs/20260730-202258-c7e4/summary.md
   rerun wring verify --gate test
 ```
 
@@ -93,38 +93,38 @@ gates listed after a required failure are not run at all.
 ## What it leaves behind
 
 ```
-$ find .wringer/runs/20260730-160105-830a | sort
-.wringer/runs/20260730-160105-830a
-.wringer/runs/20260730-160105-830a/diff.patch
-.wringer/runs/20260730-160105-830a/evidence.jsonl
-.wringer/runs/20260730-160105-830a/gates
-.wringer/runs/20260730-160105-830a/gates/001_lint
-.wringer/runs/20260730-160105-830a/gates/001_lint/result.json
-.wringer/runs/20260730-160105-830a/gates/001_lint/stderr.log
-.wringer/runs/20260730-160105-830a/gates/001_lint/stdout.log
-.wringer/runs/20260730-160105-830a/gates/002_test
-.wringer/runs/20260730-160105-830a/gates/002_test/result.json
-.wringer/runs/20260730-160105-830a/gates/002_test/stderr.log
-.wringer/runs/20260730-160105-830a/gates/002_test/stdout.log
-.wringer/runs/20260730-160105-830a/manifest.json
-.wringer/runs/20260730-160105-830a/status.txt
-.wringer/runs/20260730-160105-830a/summary.md
+$ find .wringer/runs/20260730-202258-c7e4 | sort
+.wringer/runs/20260730-202258-c7e4
+.wringer/runs/20260730-202258-c7e4/diff.patch
+.wringer/runs/20260730-202258-c7e4/evidence.jsonl
+.wringer/runs/20260730-202258-c7e4/gates
+.wringer/runs/20260730-202258-c7e4/gates/001_lint
+.wringer/runs/20260730-202258-c7e4/gates/001_lint/result.json
+.wringer/runs/20260730-202258-c7e4/gates/001_lint/stderr.log
+.wringer/runs/20260730-202258-c7e4/gates/001_lint/stdout.log
+.wringer/runs/20260730-202258-c7e4/gates/002_test
+.wringer/runs/20260730-202258-c7e4/gates/002_test/result.json
+.wringer/runs/20260730-202258-c7e4/gates/002_test/stderr.log
+.wringer/runs/20260730-202258-c7e4/gates/002_test/stdout.log
+.wringer/runs/20260730-202258-c7e4/manifest.json
+.wringer/runs/20260730-202258-c7e4/status.txt
+.wringer/runs/20260730-202258-c7e4/summary.md
 ```
 
 `summary.md` is the human's entry point:
 
 ````markdown
-# wring verify — 20260730-160105-830a
+# wring verify — 20260730-202258-c7e4
 
-- repo: **demo5** @ `d8970f8` (branch `main`, dirty)
-- started: 2026-07-30T16:01:05+01:00
+- repo: **final** @ `4895ac6` (branch `main`, dirty)
+- started: 2026-07-30T20:22:58+01:00
 - result: **failed** — required gate `test` failed
 - files: 1 changed ([diff.patch](diff.patch), [status.txt](status.txt))
 
 | gate | status | duration | logs |
 |---|---|---|---|
-| lint | passed | 0.1s | [stdout](gates/001_lint/stdout.log) · [stderr](gates/001_lint/stderr.log) |
-| test | failed | 0.2s | [stdout](gates/002_test/stdout.log) · [stderr](gates/002_test/stderr.log) |
+| lint | passed | 0.0s | [stdout](gates/001_lint/stdout.log) · [stderr](gates/001_lint/stderr.log) |
+| test | failed | 0.1s | [stdout](gates/002_test/stdout.log) · [stderr](gates/002_test/stderr.log) |
 
 Rerun the failing gate:
 
@@ -137,13 +137,13 @@ wring verify --gate test
 line:
 
 ```json
-{"type": "run.started", "ts": "2026-07-30T16:01:05.176+01:00", "run_id": "20260730-160105-830a", "wringer_version": "0.1.0.dev0", "repo": "demo5", "sha": "d8970f808ec2b607e764d941bab0656cccfcc83f"}
-{"type": "git.status", "ts": "2026-07-30T16:01:05.177+01:00", "dirty": true, "changed_files": ["calc.py"]}
-{"type": "gate.started", "ts": "2026-07-30T16:01:05.178+01:00", "gate_id": "lint", "command": "ruff check ."}
-{"type": "gate.finished", "ts": "2026-07-30T16:01:05.311+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 130}
-{"type": "gate.started", "ts": "2026-07-30T16:01:05.312+01:00", "gate_id": "test", "command": "pytest -q"}
-{"type": "gate.finished", "ts": "2026-07-30T16:01:05.553+01:00", "gate_id": "test", "exit_code": 1, "duration_ms": 240, "log": "gates/002_test/stdout.log"}
-{"type": "run.finished", "ts": "2026-07-30T16:01:05.554+01:00", "status": "failed", "failed_gate": "test"}
+{"type": "run.started", "ts": "2026-07-30T20:22:58.288+01:00", "run_id": "20260730-202258-c7e4", "wringer_version": "0.1.0.dev0", "repo": "final", "sha": "4895ac6426d6788e42180a95b15c785cf76eab30"}
+{"type": "git.status", "ts": "2026-07-30T20:22:58.288+01:00", "dirty": true, "changed_files": ["calc.py"]}
+{"type": "gate.started", "ts": "2026-07-30T20:22:58.289+01:00", "gate_id": "lint", "command": "ruff check ."}
+{"type": "gate.finished", "ts": "2026-07-30T20:22:58.303+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 14}
+{"type": "gate.started", "ts": "2026-07-30T20:22:58.304+01:00", "gate_id": "test", "command": "pytest -q"}
+{"type": "gate.finished", "ts": "2026-07-30T20:22:58.424+01:00", "gate_id": "test", "exit_code": 1, "duration_ms": 119, "log": "gates/002_test/stdout.log"}
+{"type": "run.finished", "ts": "2026-07-30T20:22:58.424+01:00", "status": "failed", "failed_gate": "test"}
 ```
 
 And `diff.patch` is exactly what you were verifying:
@@ -184,11 +184,11 @@ straight out of the bundle.
 
 ```
 $ wring explain
-Run 20260730-160105-830a — failed
-demo5 @ d8970f8 (branch main, dirty) · started 2026-07-30T16:01:05+01:00
+Run 20260730-202258-c7e4 — failed
+final @ 4895ac6 (branch main, dirty) · started 2026-07-30T20:22:58+01:00
 
-✓ lint passed        0.1s
-✗ test failed        0.2s
+✓ lint passed        0.0s
+✗ test failed        0.1s
 
 Failing gate: test
   command    pytest -q
@@ -213,7 +213,7 @@ Changed files (1):
   calc.py
 
 Full report:
-  .wringer/runs/20260730-160105-830a/summary.md
+  .wringer/runs/20260730-202258-c7e4/summary.md
 
 Rerun:
   wring verify --gate test
@@ -226,7 +226,7 @@ no log tails — so a coding agent can act on the result without parsing prose:
 
 ```
 $ wring verify --json
-{"status": "failed", "failed_gate": "test", "rerun": "wring verify --gate test", "evidence_dir": ".wringer/runs/20260730-160105-d217"}
+{"status": "failed", "failed_gate": "test", "rerun": "wring verify --gate test", "evidence_dir": ".wringer/runs/20260730-202300-228e"}
 ```
 
 Every key is always present, so a consumer never has to tell "passed" apart
