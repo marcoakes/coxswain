@@ -1,49 +1,71 @@
 # Quickstart
 
-> ⚠️ **Aspirational.** This is the developer experience `v0.1.0` ships on
-> **September 30, 2026** ([roadmap](ROADMAP.md)). It is published now so the
-> target is public and the design is held to it. Nothing below installs yet.
+> ⚠️ **Aspirational until `v0.1.0` tags** — and by the
+> [spec's own release bar](SPEC_COX_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
+> this page must become a **real transcript** before that tag happens.
+> Published now so the target is public and the design is held to it.
 
-## Issue → verified MR in five minutes
+## One command, and the receipts
 
 ```bash
-# install the CLI (Node 22+)
-npm install -g coxswain
+# install (Python 3.11+)
+pipx install coxswain
 
-# initialize a repo: detects build/test/lint commands, writes coxswain.yaml
+# initialize: detects your build/test/lint commands, writes .cox.yaml
 cd my-repo
 cox init
 
-# point it at an issue — Coxswain runs a repair loop in a local sandbox:
-# worker writes code → gates run (build, test, lint) → judge scores the
-# diff against the issue's acceptance criteria → iterate or exit
-cox run --issue https://github.com/you/my-repo/issues/42
-
-# output: a branch, an open MR, and the receipts
-cox evidence open <run-id>
+# run the gates, capture the evidence
+cox verify
 ```
 
-What you get with the MR:
+Output:
 
-- **`evidence.jsonl`** — every iteration: the gate reports, the judge's
-  structured verdict, the diffs.
-- **`cost.jsonl`** — tokens and spend, per loop, per run.
-- A loop that **cannot thrash**: budgets (`max_iterations`, `max_cost_usd`,
-  `max_wall_clock`) and oscillation detection are in the loop contract,
-  not in your hope.
+```
+✓ git status captured
+✓ diff captured
+✓ lint passed        1.8s
+✗ test failed        9.2s
 
-## Cheap mode
+Evidence written to:
+.cox/runs/20260730-080601-a13f/
+
+Next:
+  open .cox/runs/20260730-080601-a13f/summary.md
+  rerun cox verify --gate test
+```
+
+What's in the bundle: `manifest.json`, `evidence.jsonl` (append-only
+event log), `summary.md`, `diff.patch`, per-gate stdout/stderr logs —
+what was checked, what changed, what passed, what failed, and what
+commit and environment produced it. See the
+[full format](SPEC_COX_VERIFY_V0.md#the-evidence-bundle-this-is-the-product).
+
+## For agents
 
 ```bash
-# gates run for real; the judge is a deterministic rubric — zero LLM spend
-cox run --issue <url> --dry-run
+# structured back-pressure instead of prose — Claude Code, Codex CLI,
+# and Gemini CLI can act on this directly
+cox verify --json
+```
 
-# or point the judge at a local model
-cox run --issue <url> --judge-endpoint http://localhost:11434/v1
+```json
+{
+  "status": "failed",
+  "failed_gate": "test",
+  "rerun": "cox verify --gate test",
+  "evidence_dir": ".cox/runs/20260730-080601-a13f"
+}
+```
+
+```bash
+# compact diagnosis of the latest failed run (no LLM involved)
+cox explain
 ```
 
 ## What it will NOT do
 
-Write code itself (the harness never writes code — agents do), replace
-your CI, or require any cloud. Local first; [Temporal for durability in
-Q4](ROADMAP.md#okrs).
+Write code (the harness never writes code — agents do), call any LLM,
+open PRs, replace your CI, upload anything anywhere, or require any
+cloud. That's `cox run` and later — see the [roadmap](ROADMAP.md) and
+the [v0 spec](SPEC_COX_VERIFY_V0.md).
