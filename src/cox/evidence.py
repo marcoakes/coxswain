@@ -36,6 +36,12 @@ class EvidenceError(Exception):
     """The bundle could not be written (CLI exit code 2)."""
 
 
+def timestamp() -> str:
+    """Local ISO-8601 with offset, to the millisecond — fine enough to order
+    two fast gates, coarse enough to stay readable."""
+    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+
+
 def new_run_id(now: datetime) -> str:
     """`YYYYMMDD-HHMMSS-<4 hex>` in local time, e.g. `20260730-080601-a13f`.
 
@@ -105,8 +111,13 @@ class Bundle:
         return path
 
     def event(self, event_type: str, **fields: Any) -> None:
-        """Append one `{"type": ...}` object to `evidence.jsonl`."""
-        line = json.dumps({"type": event_type, **fields})
+        """Append one `{"type": ..., "ts": ...}` object to `evidence.jsonl`.
+
+        Every event is stamped: an audit trail whose entries cannot be
+        placed in time is a weaker artifact than one that can, and
+        `duration_ms` only tells you how long a gate took, not when.
+        """
+        line = json.dumps({"type": event_type, "ts": timestamp(), **fields})
         with (self.directory / EVIDENCE_FILENAME).open(
             "a", encoding="utf-8"
         ) as stream:

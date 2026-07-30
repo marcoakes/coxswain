@@ -77,7 +77,9 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
         .read_text(encoding="utf-8")
         .splitlines()
     )
-    assert [json.loads(line) for line in lines] == [
+    recorded = [json.loads(line) for line in lines]
+    stamps = [event.pop("ts") for event in recorded]
+    assert recorded == [
         {"type": "run.started", "run_id": bundle.run_id, "sha": None},
         {
             "type": "gate.finished",
@@ -86,6 +88,10 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
             "duration_ms": 9231,
         },
     ]
+    # every event is placeable in time, and in order
+    parsed = [datetime.fromisoformat(stamp) for stamp in stamps]
+    assert all(stamp.tzinfo is not None for stamp in parsed)
+    assert parsed == sorted(parsed)
 
 
 def test_gate_result_json_is_exactly_the_contract(tmp_path: Path):

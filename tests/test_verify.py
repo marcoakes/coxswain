@@ -64,6 +64,11 @@ def events(bundle: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines()]
 
 
+def bare(event: dict) -> dict:
+    """An event without its timestamp, for exact-shape assertions."""
+    return {key: value for key, value in event.items() if key != "ts"}
+
+
 def manifest(bundle: Path) -> dict:
     return json.loads(
         (bundle / evidence.MANIFEST_FILENAME).read_text(encoding="utf-8")
@@ -111,7 +116,7 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
     assert started["cox_version"] == cli.__version__
     assert started["repo"] == repo.name
     assert SHA.match(started["sha"]), started["sha"]
-    assert gate_started == {
+    assert bare(gate_started) == {
         "type": "gate.started",
         "gate_id": "unit",
         "command": "true",
@@ -120,7 +125,7 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
     assert gate_finished["exit_code"] == 0
     assert isinstance(gate_finished["duration_ms"], int)
     assert gate_finished["duration_ms"] >= 0
-    assert finished == {"type": "run.finished", "status": "passed"}
+    assert bare(finished) == {"type": "run.finished", "status": "passed"}
 
     recorded_manifest = manifest(bundle)
     assert recorded_manifest["schema_version"] == "cox.evidence.v1"
@@ -156,7 +161,7 @@ def test_failing_required_gate_exits_one_and_names_the_gate(
     bundle = only_bundle(repo)
     gate_finished, finished = events(bundle)[2:]
     assert gate_finished["exit_code"] == 1
-    assert finished == {
+    assert bare(finished) == {
         "type": "run.finished",
         "status": "failed",
         "failed_gate": "unit",
@@ -188,7 +193,7 @@ gates:
     bundle = only_bundle(repo)
     gate_finished, finished = events(bundle)[2:]
     assert gate_finished["exit_code"] == 1  # the failure IS recorded
-    assert finished == {"type": "run.finished", "status": "passed"}
+    assert bare(finished) == {"type": "run.finished", "status": "passed"}
     assert manifest(bundle)["result"] == {"status": "passed", "failed_gate": None}
 
     out = capsys.readouterr().out
@@ -307,7 +312,7 @@ def test_a_required_failure_stops_the_run_and_skips_the_rest(
     ]
     assert "log" not in lint_finished
     assert test_finished["log"] == "gates/002_test/stdout.log"
-    assert recorded[-1] == {
+    assert bare(recorded[-1]) == {
         "type": "run.finished",
         "status": "failed",
         "failed_gate": "test",
@@ -391,7 +396,7 @@ gates:
     format_finished = [e for e in recorded if e["type"] == "gate.finished"][0]
     assert format_finished["exit_code"] == 1
     assert format_finished["log"] == "gates/001_format/stdout.log"
-    assert recorded[-1] == {"type": "run.finished", "status": "passed"}
+    assert bare(recorded[-1]) == {"type": "run.finished", "status": "passed"}
     assert manifest(bundle)["result"] == {"status": "passed", "failed_gate": None}
     assert result_json(bundle, "001_format")["optional"] is True
     assert "| format | failed (optional) |" in summary_text(bundle)

@@ -125,16 +125,18 @@ agents and judges consume — see [RFC #2](https://github.com/marcoakes/coxswain
       result.json
 ```
 
-`evidence.jsonl` — append-only, one JSON object per line:
+`evidence.jsonl` — append-only, one JSON object per line. Every event
+carries `type` and a millisecond-precision local `ts` (amended
+2026-07-30, Bolt 3: an audit trail needs to be placeable in time):
 
 ```json
-{"type":"run.started","run_id":"20260730-080601-a13f","cox_version":"0.1.0","repo":"coxswain","sha":"abc123"}
-{"type":"git.status","dirty":true,"changed_files":["src/foo.py","tests/test_foo.py"]}
-{"type":"gate.started","gate_id":"lint","command":"make lint"}
-{"type":"gate.finished","gate_id":"lint","exit_code":0,"duration_ms":1842}
-{"type":"gate.started","gate_id":"test","command":"make test"}
-{"type":"gate.finished","gate_id":"test","exit_code":1,"duration_ms":9231,"log":"gates/002_test/stdout.log"}
-{"type":"run.finished","status":"failed","failed_gate":"test"}
+{"type":"run.started","ts":"2026-07-30T08:06:01.004+01:00","run_id":"20260730-080601-a13f","cox_version":"0.1.0","repo":"coxswain","sha":"abc123"}
+{"type":"git.status","ts":"2026-07-30T08:06:01.031+01:00","dirty":true,"changed_files":["src/foo.py","tests/test_foo.py"]}
+{"type":"gate.started","ts":"2026-07-30T08:06:01.033+01:00","gate_id":"lint","command":"make lint"}
+{"type":"gate.finished","ts":"2026-07-30T08:06:02.875+01:00","gate_id":"lint","exit_code":0,"duration_ms":1842}
+{"type":"gate.started","ts":"2026-07-30T08:06:02.877+01:00","gate_id":"test","command":"make test"}
+{"type":"gate.finished","ts":"2026-07-30T08:06:12.108+01:00","gate_id":"test","exit_code":1,"duration_ms":9231,"log":"gates/002_test/stdout.log"}
+{"type":"run.finished","ts":"2026-07-30T08:06:12.110+01:00","status":"failed","failed_gate":"test"}
 ```
 
 `manifest.json`:
