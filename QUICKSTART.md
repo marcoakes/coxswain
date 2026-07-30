@@ -22,15 +22,20 @@ and installs the same package.
 
 ## Declare your gates
 
-`wring init` writes a commented `.wringer.yaml`:
+`wring init` reads what your project already declares — `pyproject.toml`,
+`package.json`, or a `Makefile` — and writes the matching gates:
 
 ```
 $ wring init
-Wrote .wringer.yaml — edit the gates to match this project, then run: wring verify
+Wrote .wringer.yaml from pyproject.toml — gates: lint, test
+Check they are the commands you want proven, then: wring verify
+Added .wringer/ to .gitignore
 ```
 
-Edit it to your project's real commands. They run in your repo root, in the
-order you list them — cheapest first:
+It never invents a command nobody wrote down: in a repo with nothing to
+detect you get a commented template to fill in instead. Either way the file
+is yours to edit — gates run in your repo root, in the order listed,
+cheapest first:
 
 ```yaml
 version: 1
@@ -38,7 +43,7 @@ version: 1
 gates:
   - id: lint
     run: ruff check .
-    timeout: 60
+    timeout: 120
 
   - id: test
     run: pytest -q
@@ -53,7 +58,7 @@ $ wring verify
 ✓ test passed        0.1s
 
 Evidence written to:
-.wringer/runs/20260730-202255-fac4/
+.wringer/runs/20260730-204911-a230/
 ```
 
 Exit code `0`. Now an off-by-one slips into `calc.py`:
@@ -79,10 +84,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.wringer/runs/20260730-202258-c7e4/
+.wringer/runs/20260730-204914-02d5/
 
 Next:
-  open .wringer/runs/20260730-202258-c7e4/summary.md
+  open .wringer/runs/20260730-204914-02d5/summary.md
   rerun wring verify --gate test
 ```
 
@@ -93,33 +98,33 @@ gates listed after a required failure are not run at all.
 ## What it leaves behind
 
 ```
-$ find .wringer/runs/20260730-202258-c7e4 | sort
-.wringer/runs/20260730-202258-c7e4
-.wringer/runs/20260730-202258-c7e4/diff.patch
-.wringer/runs/20260730-202258-c7e4/evidence.jsonl
-.wringer/runs/20260730-202258-c7e4/gates
-.wringer/runs/20260730-202258-c7e4/gates/001_lint
-.wringer/runs/20260730-202258-c7e4/gates/001_lint/result.json
-.wringer/runs/20260730-202258-c7e4/gates/001_lint/stderr.log
-.wringer/runs/20260730-202258-c7e4/gates/001_lint/stdout.log
-.wringer/runs/20260730-202258-c7e4/gates/002_test
-.wringer/runs/20260730-202258-c7e4/gates/002_test/result.json
-.wringer/runs/20260730-202258-c7e4/gates/002_test/stderr.log
-.wringer/runs/20260730-202258-c7e4/gates/002_test/stdout.log
-.wringer/runs/20260730-202258-c7e4/manifest.json
-.wringer/runs/20260730-202258-c7e4/status.txt
-.wringer/runs/20260730-202258-c7e4/summary.md
+$ find .wringer/runs/20260730-204914-02d5 | sort
+.wringer/runs/20260730-204914-02d5
+.wringer/runs/20260730-204914-02d5/diff.patch
+.wringer/runs/20260730-204914-02d5/evidence.jsonl
+.wringer/runs/20260730-204914-02d5/gates
+.wringer/runs/20260730-204914-02d5/gates/001_lint
+.wringer/runs/20260730-204914-02d5/gates/001_lint/result.json
+.wringer/runs/20260730-204914-02d5/gates/001_lint/stderr.log
+.wringer/runs/20260730-204914-02d5/gates/001_lint/stdout.log
+.wringer/runs/20260730-204914-02d5/gates/002_test
+.wringer/runs/20260730-204914-02d5/gates/002_test/result.json
+.wringer/runs/20260730-204914-02d5/gates/002_test/stderr.log
+.wringer/runs/20260730-204914-02d5/gates/002_test/stdout.log
+.wringer/runs/20260730-204914-02d5/manifest.json
+.wringer/runs/20260730-204914-02d5/status.txt
+.wringer/runs/20260730-204914-02d5/summary.md
 ```
 
 `summary.md` is the human's entry point:
 
 ````markdown
-# wring verify — 20260730-202258-c7e4
+# wring verify — 20260730-204914-02d5
 
-- repo: **final** @ `4895ac6` (branch `main`, dirty)
-- started: 2026-07-30T20:22:58+01:00
+- repo: **qs** @ `d8e726c` (branch `main`, dirty)
+- started: 2026-07-30T20:49:14+01:00
 - result: **failed** — required gate `test` failed
-- files: 1 changed ([diff.patch](diff.patch), [status.txt](status.txt))
+- files: 1 changed, 1 untracked ([diff.patch](diff.patch), [status.txt](status.txt))
 
 | gate | status | duration | logs |
 |---|---|---|---|
@@ -137,13 +142,13 @@ wring verify --gate test
 line:
 
 ```json
-{"type": "run.started", "ts": "2026-07-30T20:22:58.288+01:00", "run_id": "20260730-202258-c7e4", "wringer_version": "0.1.0.dev0", "repo": "final", "sha": "4895ac6426d6788e42180a95b15c785cf76eab30"}
-{"type": "git.status", "ts": "2026-07-30T20:22:58.288+01:00", "dirty": true, "changed_files": ["calc.py"]}
-{"type": "gate.started", "ts": "2026-07-30T20:22:58.289+01:00", "gate_id": "lint", "command": "ruff check ."}
-{"type": "gate.finished", "ts": "2026-07-30T20:22:58.303+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 14}
-{"type": "gate.started", "ts": "2026-07-30T20:22:58.304+01:00", "gate_id": "test", "command": "pytest -q"}
-{"type": "gate.finished", "ts": "2026-07-30T20:22:58.424+01:00", "gate_id": "test", "exit_code": 1, "duration_ms": 119, "log": "gates/002_test/stdout.log"}
-{"type": "run.finished", "ts": "2026-07-30T20:22:58.424+01:00", "status": "failed", "failed_gate": "test"}
+{"type": "run.started", "ts": "2026-07-30T20:49:14.014+01:00", "run_id": "20260730-204914-02d5", "wringer_version": "0.1.0.dev0", "repo": "qs", "sha": "d8e726c24d6ef53914981632691cab3fb74e0254"}
+{"type": "git.status", "ts": "2026-07-30T20:49:14.014+01:00", "dirty": true, "changed_files": ["calc.py"], "untracked": ["__pycache__/"]}
+{"type": "gate.started", "ts": "2026-07-30T20:49:14.015+01:00", "gate_id": "lint", "command": "ruff check ."}
+{"type": "gate.finished", "ts": "2026-07-30T20:49:14.028+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 13}
+{"type": "gate.started", "ts": "2026-07-30T20:49:14.029+01:00", "gate_id": "test", "command": "pytest -q"}
+{"type": "gate.finished", "ts": "2026-07-30T20:49:14.148+01:00", "gate_id": "test", "exit_code": 1, "duration_ms": 119, "log": "gates/002_test/stdout.log"}
+{"type": "run.finished", "ts": "2026-07-30T20:49:14.148+01:00", "status": "failed", "failed_gate": "test"}
 ```
 
 And `diff.patch` is exactly what you were verifying:
@@ -184,8 +189,8 @@ straight out of the bundle.
 
 ```
 $ wring explain
-Run 20260730-202258-c7e4 — failed
-final @ 4895ac6 (branch main, dirty) · started 2026-07-30T20:22:58+01:00
+Run 20260730-204914-02d5 — failed
+qs @ d8e726c (branch main, dirty) · started 2026-07-30T20:49:14+01:00
 
 ✓ lint passed        0.0s
 ✗ test failed        0.1s
@@ -211,9 +216,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 
 Changed files (1):
   calc.py
+Untracked (1): __pycache__/
 
 Full report:
-  .wringer/runs/20260730-202258-c7e4/summary.md
+  .wringer/runs/20260730-204914-02d5/summary.md
 
 Rerun:
   wring verify --gate test
@@ -226,7 +232,7 @@ no log tails — so a coding agent can act on the result without parsing prose:
 
 ```
 $ wring verify --json
-{"status": "failed", "failed_gate": "test", "rerun": "wring verify --gate test", "evidence_dir": ".wringer/runs/20260730-202300-228e"}
+{"status": "failed", "failed_gate": "test", "rerun": "wring verify --gate test", "evidence_dir": ".wringer/runs/20260730-204959-7eec"}
 ```
 
 Every key is always present, so a consumer never has to tell "passed" apart
@@ -249,7 +255,16 @@ privileges — exactly as if you had typed them. **Read a repository's
 `.wringer.yaml` before running `wring verify` in it**, the same way you would read
 its `Makefile`. See [SECURITY.md](SECURITY.md).
 
-## Not built yet — arrives with `v0.1.0`
+## Writing the bundle somewhere else
+
+```bash
+wring verify --output .wringer/runs/manual-001
+```
+
+Naming a path is an instruction, so unlike a normal run this one will reuse
+the directory you gave it.
+
+## Not built yet
 
 Everything above is real. This is **not implemented** and does not work if
 you type it:
@@ -258,10 +273,13 @@ you type it:
 wring verify --changed-only  # gate only what changed
 ```
 
-Also landing before the tag: real command detection in `wring init`,
-`wring verify --output`, and `pipx install wringer` from PyPI. Progress is tracked in
-[AGENTS.md](AGENTS.md); the release bar is the spec's
-[Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts).
+It is deliberately unbuilt: the spec names the flag but never defines what
+"changed" should mean, and a flag that half-works is worse than a missing
+one when agents consume the CLI. `pipx install wringer` from PyPI is the
+other outstanding item — install from git until then. The release bar is
+the spec's
+[Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
+and every line except the PyPI publish is now ticked.
 
 ## Secrets
 

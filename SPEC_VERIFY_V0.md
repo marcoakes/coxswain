@@ -244,15 +244,18 @@ wringer/
 
 **Do not tag `v0.1.0` until every line is true:**
 
-- [ ] `pipx install wringer` works
-- [ ] `wring init` works in an empty-ish Python repo
-- [ ] `wring verify` runs at least two gates
-- [ ] failed gates produce useful logs
-- [ ] evidence bundle format is stable and documented
-- [ ] **CI runs `wring verify` on this repo** (GitHub Actions example shipped)
-- [ ] **Wringer itself uses `wring verify`** — a sanitized demo bundle is
-      committed so the repo carries proof of its own verification
-- [ ] README shows a **real transcript**, not aspirational syntax
+- [ ] `pipx install wringer` works — *awaiting the PyPI publish; installing
+      from git works today and is documented in the quickstart*
+- [x] `wring init` works in an empty-ish Python repo — detects ruff/pytest/
+      mypy from `pyproject.toml`, npm scripts, and Makefile targets
+- [x] `wring verify` runs at least two gates
+- [x] failed gates produce useful logs
+- [x] evidence bundle format is stable and documented
+- [x] **CI runs `wring verify` on this repo** and uploads the bundle
+- [x] **Wringer itself uses `wring verify`** — [`.wringer.yaml`](.wringer.yaml)
+      declares its gates and a real bundle is committed to
+      [`.wringer.example/`](.wringer.example/)
+- [x] README shows a **real transcript**, not aspirational syntax
 
 The README demo at that point:
 

@@ -30,7 +30,10 @@ mergeable and leaves behind evidence a human or agent can inspect.
   `wring verify` on this repo; a sanitized demo bundle is committed; the
   README transcript is real) — all in the spec.
 
-**v0.1.0 tags when the spec's release bar is fully true** — well before
+**The release bar is one line from true** — everything except the PyPI
+publish is done and committed (see the spec's
+[Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts)).
+**v0.1.0 tags when that last line is true** — well before
 the Sept 30 outer deadline if the bolts land clean.
 
 **After v0.1.0 (v0.2, inside the 90 days) — the loop closes around it:**

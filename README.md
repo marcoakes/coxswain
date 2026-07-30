@@ -45,10 +45,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.wringer/runs/20260730-202258-c7e4/
+.wringer/runs/20260730-204914-02d5/
 
 Next:
-  open .wringer/runs/20260730-202258-c7e4/summary.md
+  open .wringer/runs/20260730-204914-02d5/summary.md
   rerun wring verify --gate test
 ```
 
@@ -59,6 +59,26 @@ It runs your project's declared gates (build · test · lint) in order and write
 > ⚠️ **`.wringer.yaml` is code.** `wring verify` runs the commands a repository declares, through a shell, with your privileges — the same trust you extend to its `Makefile`. Read a stranger's `.wringer.yaml` before running `wring verify` in their repo. Gates are not sandboxed in v0.1; see [SECURITY.md](SECURITY.md), which also explains why an evidence bundle should be read before you share it.
 
 Then the loop closes: `wring run` is just a loop that keeps calling `wring verify` until the evidence says stop — worker (your existing coding agent; Wringer never ships its own) → gates → isolated rubric judge → iterate or exit → MR with the receipts attached. **`v0.1.0` no later than September 30, 2026** — see the [90-day roadmap](ROADMAP.md) and the [quickstart](QUICKSTART.md).
+
+## Wringer verifies Wringer
+
+The claim is checkable, not rhetorical. This repo declares its own gates in
+[`.wringer.yaml`](.wringer.yaml), CI runs `wring verify` on every push and
+uploads the bundle, and a real one is committed at
+[`.wringer.example/`](.wringer.example/) — manifest, timestamped event log,
+summary, diff, and both gates' logs, exactly as produced:
+
+```
+$ wring verify
+✓ lint passed        0.0s
+✓ test passed        11.0s
+
+Evidence written to:
+.wringer/runs/20260730-204401-e209/
+```
+
+That bundle is the answer to "how do I know?" — read it rather than trust
+the badge.
 
 ## Why
 

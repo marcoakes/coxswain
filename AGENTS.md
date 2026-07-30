@@ -31,13 +31,18 @@ no network, no uploads — ever.
 
 Where they disagree about v0.1, the spec wins.
 
-## Current state — Bolt 4 shipped
+## Current state — every bolt shipped; one line from the tag
 
 There **is** code now: `wring init` and `wring verify` work — `verify` runs a
 repo's whole declared gate set and writes a real bundle, `wring explain`
 diagnoses a finished run, `--json` feeds agents, and secrets never reach the
-disk — with 151 tests passing on Python 3.11–3.13 (plus macOS) in CI, behind
-a ruff lint gate.
+disk — with 172 tests passing on Python 3.11–3.13 (plus macOS) in CI.
+
+**Wringer now verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares
+this repo's own gates, CI runs `wring verify` and uploads the bundle, and a
+real one is committed at [`.wringer.example/`](.wringer.example/). The only
+unticked line on the spec's release bar is the PyPI publish, which is the
+maintainer's to do.
 
 | Bolt | Spec day | State |
 |---|---|---|
@@ -46,7 +51,7 @@ a ruff lint gate.
 | 2.5 — review hardening | — | ✅ gate ids validated as slugs, internal git calls bounded, POSIX-only kill declared, ruff lint gate + macOS CI, real transcripts, SECURITY.md |
 | 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `wring verify --json`, `wring explain` |
 | 4 — redaction & safety | Day 4 | ✅ env redaction before write, capped logs with a declared note, binary + textconv exclusion, exit 2 outside a repo, exit 3 mid-merge/rebase, exit 4 on SIGINT with the gate killed |
-| 5 — dogfood | Day 5 | ⬜ next: real command detection in `wring init`, `wring verify --output`, Wringer verifies Wringer, CI upgraded to run `wring verify` and upload the bundle, committed sanitized bundle in `.wringer.example/`, real README transcript |
+| 5 — dogfood | Day 5 | ✅ `wring init` detects real commands (pyproject / package.json / Makefile) and gitignores `.wringer/`, `wring verify --output`, Wringer's own `.wringer.yaml`, CI runs `wring verify` + uploads the bundle, committed bundle in `.wringer.example/` |
 
 The `v0.1.0` tag is gated on the spec's
 [Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
@@ -83,15 +88,20 @@ Then:
 .venv/bin/wring explain           # diagnose the latest run (no LLM)
 ```
 
-**Two commands are the law until Bolt 5, when `wring verify` on this repo
-becomes the gate:**
+**`wring verify` on this repo is the law** — it runs the two gates
+[`.wringer.yaml`](.wringer.yaml) declares, which are exactly:
 
 ```bash
 .venv/bin/ruff check src tests   # must be clean
 .venv/bin/pytest                 # must be green
 ```
 
-CI mirrors exactly those two:
+Run them however you like, but `wring verify` is what CI runs and what the
+committed bundle proves. Gates inherit your `PATH`, so the venv has to be on
+it (`export PATH="$PWD/.venv/bin:$PATH"`) or `ruff` will not be found — the
+same rule as any `Makefile`.
+
+CI mirrors exactly this:
 [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs ruff
 once and pytest on 3.11 / 3.12 / 3.13 plus macOS, for every push and PR.
 Bolt 5 upgrades that workflow to run `wring verify` and upload the bundle —
@@ -111,7 +121,7 @@ block first — the clean console is the product.
 |---|---|---|
 | `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, and `wring explain`'s rendering | register `--changed-only` or `--output` — see below |
 | `config.py` | strict `.wringer.yaml` loader → frozen `Config`/`Gate` dataclasses; validates `evidence.redact` because a typo there must not silently disable redaction | consume `evidence.include` (still shape-only) |
-| `detect.py` | the commented `.wringer.yaml` template `wring init` writes | actually detect project commands (static template is Day-1-legal per the spec: *"if detection is uncertain, generate comments rather than being clever"*) |
+| `detect.py` | find the commands a repo already declares — ruff/mypy/pytest in `pyproject.toml`, npm scripts, Makefile targets — and render `.wringer.yaml`; fall back to a commented template when nothing is found | invent a command nobody wrote down (*"if detection is uncertain, generate comments rather than being clever"*) |
 | `git.py` | root detection, HEAD SHA, branch, dirty flag, changed/untracked lists, `diff`/`status` capture, and the refusal checks (`is_repo`, `in_progress`); read-only, bounded, never fatal | write anything — every call here is a read |
 | `gates.py` | run one gate through the shell in the repo root: own process group, `timeout` enforced by SIGTERM→SIGKILL on the group, output captured **through a pipe** so it can be scrubbed and capped before it is written, duration in ms | decide anything about *which* gates run — that is `cli.py`'s sequencing |
 | `evidence.py` | allocate `.wringer/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) — scrubbing every write, because the `Bundle` holds the redactor | decide *what* counts as a secret — that is `redact.py` |
@@ -128,7 +138,7 @@ creation, no Temporal, no OpenTelemetry, no multi-agent anything, no
 sandboxing beyond recording repo state.
 
 Also: a flag that half-works is worse than a missing flag, because agents
-consume this CLI. `--changed-only` and `--output` stay **unregistered**.
+consume this CLI. `--changed-only` stays **unregistered**.
 `--changed-only` is deliberately deferred: the spec names it but never
 defines it, and the plausible readings (skip a clean tree · scope gates to
 changed files · limit what is captured) are different products. Pin the
