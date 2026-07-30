@@ -25,6 +25,8 @@ MAX_GATE_ID_LENGTH = 64
 
 _TOP_LEVEL_KEYS = {"version", "gates", "evidence"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
+_EVIDENCE_KEYS = {"include", "redact"}
+_REDACT_KEYS = {"env"}
 
 
 class ConfigError(Exception):
@@ -90,8 +92,46 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         evidence = {}
     if not isinstance(evidence, dict):
         raise ConfigError(f"{source}: 'evidence' must be a mapping")
+    _validate_evidence(evidence, source)
 
     return Config(version=version, gates=gates, evidence=evidence)
+
+
+def _validate_evidence(evidence: dict[str, Any], source: str) -> None:
+    """Shape-check the `evidence:` section.
+
+    `redact` is consumed now (Day 4), so a typo in it must be an error rather
+    than silently switching redaction off — the one failure mode where a
+    quiet default is dangerous. `include` is still parsed for shape only.
+    """
+    unknown = sorted(set(evidence) - _EVIDENCE_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{source}: unknown keys under 'evidence': {', '.join(unknown)}"
+        )
+
+    redact = evidence.get("redact")
+    if redact is None:
+        return
+    if not isinstance(redact, dict):
+        raise ConfigError(f"{source}: 'evidence.redact' must be a mapping")
+
+    unknown = sorted(set(redact) - _REDACT_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{source}: unknown keys under 'evidence.redact': {', '.join(unknown)}"
+        )
+
+    patterns = redact.get("env")
+    if patterns is None:
+        return
+    if not isinstance(patterns, list) or not all(
+        isinstance(pattern, str) and pattern for pattern in patterns
+    ):
+        raise ConfigError(
+            f"{source}: 'evidence.redact.env' must be a list of non-empty "
+            "environment-variable name patterns, e.g. '*TOKEN*'"
+        )
 
 
 def _parse_gate(raw: Any, index: int, source: str) -> Gate:

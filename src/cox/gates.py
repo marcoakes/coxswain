@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cox.config import Gate
+from cox.redact import Redactor
 
 # How long a gate that overran its timeout gets between SIGTERM and SIGKILL.
 KILL_GRACE_SECONDS = 2
@@ -47,7 +48,11 @@ class GateResult:
 
 
 def run(
-    gate: Gate, cwd: Path, stdout_path: Path, stderr_path: Path
+    gate: Gate,
+    cwd: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    redactor: Redactor | None = None,
 ) -> GateResult:
     """Run `gate.run` through the shell in `cwd`, capturing its streams.
 
@@ -58,25 +63,37 @@ def run(
 
     The gate gets its own process group (`start_new_session`) so that a
     timeout kills the shell *and* everything it spawned. Killing only the
-    shell would leave the real work running against the repo, still
-    writing into a log file we have already closed.
+    shell would leave the real work running against the repo.
+
+    Output travels through a pipe rather than straight to the log file so
+    that secrets can be removed *before* anything is written — the spec's
+    rule 5. The cost is that a gate's output is held in memory until it
+    exits; a gate that emits gigabytes would be a problem, and streaming
+    redaction is the v0.2 answer if one ever appears.
     """
+    redactor = redactor or Redactor()
     started = time.monotonic()
-    with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
-        proc = subprocess.Popen(
-            gate.run,
-            shell=True,
-            cwd=cwd,
-            stdout=out,
-            stderr=err,
-            start_new_session=_POSIX,
-        )
-        timed_out = False
-        try:
-            exit_code = proc.wait(timeout=gate.timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            exit_code = _terminate(proc)
+    proc = subprocess.Popen(
+        gate.run,
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=_POSIX,
+    )
+    timed_out = False
+    try:
+        out, err = proc.communicate(timeout=gate.timeout)
+        exit_code = proc.returncode
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        exit_code = _terminate(proc)
+        # Drain whatever the gate managed to say before it was stopped —
+        # the last lines before a hang are usually the interesting ones.
+        out, err = proc.communicate()
+
+    stdout_path.write_bytes(redactor.scrub_bytes(out))
+    stderr_path.write_bytes(redactor.scrub_bytes(err))
 
     return GateResult(
         gate=gate,

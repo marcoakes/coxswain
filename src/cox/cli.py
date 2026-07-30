@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from cox import __version__, config, detect, evidence, gates, git, summary
+from cox import __version__, config, detect, evidence, gates, git, redact, summary
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -110,8 +110,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
     state = git.inspect(root)
     patch = git.diff(root, state.head_sha)
     status_text = git.status(root)
+    # Built from the environment this run inherits, so the gates' own
+    # secrets are the ones erased.
+    redactor = redact.Redactor.from_config(cfg.evidence)
     try:
-        bundle = evidence.Bundle.create(root / evidence.RUNS_DIRNAME)
+        bundle = evidence.Bundle.create(
+            root / evidence.RUNS_DIRNAME, redactor=redactor
+        )
     except evidence.EvidenceError as exc:
         print(f"cox verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -347,6 +352,7 @@ def _run_gate(
         cwd=root,
         stdout_path=gate_dir / "stdout.log",
         stderr_path=gate_dir / "stderr.log",
+        redactor=bundle.redactor,
     )
     bundle.write_gate_result(gate_dir, result)
 

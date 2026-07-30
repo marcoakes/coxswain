@@ -21,6 +21,7 @@ from typing import Any
 
 from cox.gates import GateResult
 from cox.git import RepoState
+from cox.redact import Redactor
 
 SCHEMA_VERSION = "cox.evidence.v1"
 EVIDENCE_FILENAME = "evidence.jsonl"
@@ -110,9 +111,18 @@ class Bundle:
     directory: Path
     run_id: str
     started_at: datetime
+    # Held by the bundle rather than passed to each call: "redact before
+    # write" is an invariant, and an invariant that depends on every caller
+    # remembering is not one.
+    redactor: Redactor = Redactor()
 
     @classmethod
-    def create(cls, runs_root: Path, now: datetime | None = None) -> Bundle:
+    def create(
+        cls,
+        runs_root: Path,
+        now: datetime | None = None,
+        redactor: Redactor | None = None,
+    ) -> Bundle:
         """Allocate `runs_root/<run_id>/`, refusing to reuse a directory."""
         started_at = now if now is not None else datetime.now().astimezone()
         try:
@@ -129,7 +139,12 @@ class Bundle:
                 continue  # same second, fresh suffix
             except OSError as exc:
                 raise EvidenceError(f"cannot create {directory}: {exc}") from exc
-            return cls(directory=directory, run_id=run_id, started_at=started_at)
+            return cls(
+                directory=directory,
+                run_id=run_id,
+                started_at=started_at,
+                redactor=redactor or Redactor(),
+            )
 
         raise EvidenceError(f"could not allocate a run directory under {runs_root}")
 
@@ -151,6 +166,7 @@ class Bundle:
 
     def write_capture(self, filename: str, text: str) -> Path:
         """Write one captured git artifact (`diff.patch`, `status.txt`)."""
+        text = self.redactor.scrub(text)
         if text and not text.endswith("\n"):
             text += "\n"
         path = self.directory / filename
@@ -161,7 +177,7 @@ class Bundle:
         """`gates/NNN_<id>/result.json` — one gate's row of the contract."""
         payload = {
             "gate_id": result.gate.id,
-            "command": result.gate.run,
+            "command": self.redactor.scrub(result.gate.run),
             "exit_code": result.exit_code,
             "duration_ms": result.duration_ms,
             "timed_out": result.timed_out,
@@ -179,7 +195,11 @@ class Bundle:
         placed in time is a weaker artifact than one that can, and
         `duration_ms` only tells you how long a gate took, not when.
         """
-        line = json.dumps({"type": event_type, "ts": timestamp(), **fields})
+        scrubbed = {
+            key: self.redactor.scrub(value) if isinstance(value, str) else value
+            for key, value in fields.items()
+        }
+        line = json.dumps({"type": event_type, "ts": timestamp(), **scrubbed})
         with (self.directory / EVIDENCE_FILENAME).open(
             "a", encoding="utf-8"
         ) as stream:

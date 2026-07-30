@@ -486,6 +486,85 @@ def test_json_still_writes_the_whole_bundle(repo, write_config, monkeypatch, cap
     assert [event["type"] for event in events(bundle)][0] == "run.started"
 
 
+SECRET = "s3cr3t-value-that-must-never-be-written"
+
+
+def test_a_planted_secret_appears_nowhere_in_the_bundle(
+    repo, write_config, git_run, monkeypatch, capfd
+):
+    """The spec's Day-4 exit criterion, end to end.
+
+    The secret is planted in four places that all reach the bundle by a
+    different route: a gate's stdout, a gate's stderr, the gate command
+    itself, and a tracked file's diff.
+    """
+    monkeypatch.setenv("SUPER_SECRET_TOKEN", SECRET)
+
+    (repo / "config.ini").write_text("token = placeholder\n", encoding="utf-8")
+    git_run(repo, "add", "config.ini")
+    git_run(repo, "commit", "-q", "-m", "add config")
+    (repo / "config.ini").write_text(f"token = {SECRET}\n", encoding="utf-8")
+
+    write_config(
+        repo,
+        f"""\
+version: 1
+gates:
+  - id: leaky
+    run: echo "$SUPER_SECRET_TOKEN"; echo "{SECRET}" >&2; exit 1
+""",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_GATE_FAILED
+
+    bundle = only_bundle(repo)
+    written = [path for path in bundle.rglob("*") if path.is_file()]
+    assert written, "nothing was written"
+    for path in written:
+        assert SECRET not in path.read_text(encoding="utf-8", errors="replace"), (
+            f"secret leaked into {path.relative_to(bundle)}"
+        )
+
+    # and prove we were looking at files that really did contain it
+    assert "[REDACTED]" in gate_log(bundle, "001_leaky", "stdout")
+    assert "[REDACTED]" in gate_log(bundle, "001_leaky", "stderr")
+    assert "[REDACTED]" in (bundle / evidence.DIFF_FILENAME).read_text(
+        encoding="utf-8"
+    )
+    assert "[REDACTED]" in result_json(bundle, "001_leaky")["command"]
+    # the console tail is read back from the scrubbed log, so it is clean too
+    assert SECRET not in capfd.readouterr().out
+
+
+def test_redaction_patterns_from_the_config_are_honoured(
+    repo, write_config, monkeypatch, capfd
+):
+    monkeypatch.setenv("DEPLOY_URL", "https://user:hunter2@example.invalid")
+    write_config(
+        repo,
+        """\
+version: 1
+gates:
+  - id: leaky
+    run: echo "$DEPLOY_URL"
+evidence:
+  redact:
+    env:
+      - "*URL*"
+""",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capfd.readouterr()
+
+    bundle = only_bundle(repo)
+    log = gate_log(bundle, "001_leaky", "stdout")
+    assert "hunter2" not in log
+    assert "[REDACTED]" in log
+
+
 def test_a_timeout_fails_the_run_and_says_timed_out(
     repo, write_config, monkeypatch, capsys
 ):
