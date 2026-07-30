@@ -1,0 +1,100 @@
+"""Write the evidence bundle — the product.
+
+Boring, stable, grep-friendly (SPEC_COX_VERIFY_V0.md §The evidence
+bundle). `evidence.jsonl` is append-only, one JSON object per line;
+`manifest.json` is the run's index and carries `schema_version` so future
+readers can tell what they are holding. Day 1 writes those two files;
+`summary.md`, `diff.patch`, `status.txt` and `gates/NNN_id/` arrive with
+the Day-2 and Day-3 bolts.
+
+Nothing here uploads anywhere. Ever.
+"""
+
+from __future__ import annotations
+
+import json
+import secrets
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from cox.git import RepoState
+
+SCHEMA_VERSION = "cox.evidence.v1"
+EVIDENCE_FILENAME = "evidence.jsonl"
+MANIFEST_FILENAME = "manifest.json"
+RUNS_DIRNAME = Path(".cox") / "runs"
+
+_RUN_ID_ATTEMPTS = 64
+
+
+class EvidenceError(Exception):
+    """The bundle could not be written (CLI exit code 2)."""
+
+
+def new_run_id(now: datetime) -> str:
+    """`YYYYMMDD-HHMMSS-<4 hex>` in local time, e.g. `20260730-080601-a13f`.
+
+    The random suffix — not a counter — keeps two runs in the same second
+    from colliding without either one having to read the other's state.
+    """
+    return f"{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+
+
+@dataclass(frozen=True)
+class Bundle:
+    directory: Path
+    run_id: str
+    started_at: datetime
+
+    @classmethod
+    def create(cls, runs_root: Path, now: datetime | None = None) -> Bundle:
+        """Allocate `runs_root/<run_id>/`, refusing to reuse a directory."""
+        started_at = now if now is not None else datetime.now().astimezone()
+        try:
+            runs_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise EvidenceError(f"cannot create {runs_root}: {exc}") from exc
+
+        for _ in range(_RUN_ID_ATTEMPTS):
+            run_id = new_run_id(started_at)
+            directory = runs_root / run_id
+            try:
+                directory.mkdir(exist_ok=False)
+            except FileExistsError:
+                continue  # same second, fresh suffix
+            except OSError as exc:
+                raise EvidenceError(f"cannot create {directory}: {exc}") from exc
+            return cls(directory=directory, run_id=run_id, started_at=started_at)
+
+        raise EvidenceError(f"could not allocate a run directory under {runs_root}")
+
+    def event(self, event_type: str, **fields: Any) -> None:
+        """Append one `{"type": ...}` object to `evidence.jsonl`."""
+        line = json.dumps({"type": event_type, **fields})
+        with (self.directory / EVIDENCE_FILENAME).open(
+            "a", encoding="utf-8"
+        ) as stream:
+            stream.write(line + "\n")
+
+    def write_manifest(
+        self, state: RepoState, status: str, failed_gate: str | None
+    ) -> None:
+        manifest = {
+            "schema_version": SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "started_at": self.started_at.replace(microsecond=0).isoformat(),
+            "repo": {
+                # The bundle lives inside the repo it describes, so the
+                # manifest stays portable: paths are repo-relative.
+                "root": ".",
+                "head_sha": state.head_sha,
+                "branch": state.branch,
+                "dirty": state.dirty,
+            },
+            "result": {"status": status, "failed_gate": failed_gate},
+        }
+        (self.directory / MANIFEST_FILENAME).write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
