@@ -26,20 +26,22 @@ no network, no uploads — ever.
 | [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md) | **binding** for v0.1 implementation — CLI surface, exit codes, bundle format, build order, release bar |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [coxswain-ai-dlc-harness-plan.md](coxswain-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
-| README · [QUICKSTART.md](QUICKSTART.md) | landing pages — both still carry **aspirational** transcripts that the spec's release bar requires be replaced with real ones before `v0.1.0` tags |
+| README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
+| [SECURITY.md](SECURITY.md) | the execution model (`.cox.yaml` is code), what a bundle may contain, reporting channel |
 
 Where they disagree about v0.1, the spec wins.
 
 ## Current state — Bolt 2 shipped
 
 There **is** code now: `cox init` and `cox verify` work — `verify` runs a
-repo's whole declared gate set and writes a real bundle — and 81 tests
-pass on Python 3.11–3.13 in CI.
+repo's whole declared gate set and writes a real bundle — and 102 tests
+pass on Python 3.11–3.13 (plus macOS) in CI, behind a ruff lint gate.
 
 | Bolt | Spec day | State |
 |---|---|---|
 | 1 — skeleton | Day 1 | ✅ packaging, config loader, `cox init`, `cox verify` running one gate, `evidence.jsonl` + `manifest.json`, exit codes 0/1/2 |
 | 2 — gate runner | Day 2 | ✅ every gate in declared order, `timeout` enforced (process-group kill), stop-on-first-required-failure, optional-gate semantics, per-gate `gates/NNN_id/{stdout.log,stderr.log,result.json}`, `summary.md`, CI |
+| 2.5 — review hardening | — | ✅ gate ids validated as slugs, internal git calls bounded, POSIX-only kill declared, ruff lint gate + macOS CI, real transcripts, SECURITY.md |
 | 3 — git evidence | Day 3 | ⬜ next: changed files, `diff.patch`, `status.txt`, untracked list, `--changed-only`, `--json`, `cox explain` |
 | 4 — redaction & safety | Day 4 | ⬜ env redaction before write, log truncation, binary exclusion, exit 3 preconditions, exit 4 on SIGINT |
 | 5 — dogfood | Day 5 | ⬜ Coxswain verifies Coxswain, CI upgraded to run `cox verify` and upload the bundle, committed sanitized bundle in `.cox.example/`, real README transcript |
@@ -77,13 +79,22 @@ Then:
 .venv/bin/cox verify --gate ID  # one gate, numbered as if the full run happened
 ```
 
-**`.venv/bin/pytest` green is the law until Bolt 5, when `cox verify` on
-this repo becomes the gate.** CI already mirrors the current law:
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs pytest
-on 3.11 / 3.12 / 3.13 for every push and PR, and Bolt 5 upgrades that
-workflow to run `cox verify` and upload the bundle. There is still no
-`Makefile` and no lint gate — adding `ruff` is a dependency decision, so
-ask.
+**Two commands are the law until Bolt 5, when `cox verify` on this repo
+becomes the gate:**
+
+```bash
+.venv/bin/ruff check src tests   # must be clean
+.venv/bin/pytest                 # must be green
+```
+
+CI mirrors exactly those two:
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs ruff
+once and pytest on 3.11 / 3.12 / 3.13 plus macOS, for every push and PR.
+Bolt 5 upgrades that workflow to run `cox verify` and upload the bundle —
+and these two commands are the gates Coxswain's own `.cox.yaml` will
+declare. Ruff config lives in `pyproject.toml` (`E,F,W,I,UP,B`,
+line-length 88); there is still no `Makefile`, and any further dependency
+is a decision to ask about.
 
 Gate output is **captured, never teed**: streams go to the bundle's log
 files, and only a failing required gate gets a 20-line tail on the
@@ -148,6 +159,16 @@ Three conventions inside the bundle are load-bearing:
   They were not run, so claiming otherwise would be a lie; `summary.md`
   is the one place the full declared set appears, marked `skipped`.
 
+**Gate ids are slugs** (`[A-Za-z0-9][A-Za-z0-9_-]*`, ≤64 chars) because
+they become directory names: `gates/NNN_<id>/`. A config saying
+`id: ../../x` is a parse error, not a path traversal. Widening that
+pattern means re-checking every place an id reaches the filesystem.
+
+**v0.1 supports macOS and Linux.** Timeout enforcement needs process
+groups (`os.killpg`), which is POSIX-only; `gates.py` degrades to killing
+just the shell elsewhere and pyproject's classifiers say so. Windows is a
+v0.2 conversation, not a silent failure.
+
 **Config semantics:** validation is strict — unknown keys are errors,
 because a typo in a gate definition must not silently change what
 "verified" means. `optional` is the canonical field; `required` is
@@ -188,6 +209,12 @@ is an error.
   locally and the maintainer pushes, or publishing happens through the
   browser against his logged-in GitHub session — his call, per bolt.
   Never work around it, never handle a token — surface the block and ask.
+- **`.cox.yaml` is arbitrary code execution by design** — gates run
+  through a shell with the user's privileges. Never add a feature that
+  widens that (no fetching a config over the network, no running a gate
+  from an untrusted source) without a spec change and a SECURITY.md
+  update. Bundles hold raw gate output, so they are unredacted until
+  Bolt 4: don't paste one into a public issue.
 - **Don't run `cox verify` on this repo casually while iterating** — each
   run writes a new `.cox/runs/<id>/`. Harmless (gitignored), just noisy.
 - **Test repos must be isolated from the developer's git config.**
