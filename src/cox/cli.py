@@ -9,6 +9,7 @@ precondition · 4 = interrupted.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -51,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ID",
         help="run only this gate instead of every declared gate",
     )
+    parser_verify.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
     parser_verify.set_defaults(func=cmd_verify)
 
     return parser
@@ -87,7 +93,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     # evidence as an untracked file.
     state = git.inspect(root)
     patch = git.diff(root, state.head_sha)
-    status = git.status(root)
+    status_text = git.status(root)
     try:
         bundle = evidence.Bundle.create(root / evidence.RUNS_DIRNAME)
     except evidence.EvidenceError as exc:
@@ -111,8 +117,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     )
     if patch is not None:
         bundle.write_capture(evidence.DIFF_FILENAME, patch)
-    if status is not None:
-        bundle.write_capture(evidence.STATUS_FILENAME, status)
+    if status_text is not None:
+        bundle.write_capture(evidence.STATUS_FILENAME, status_text)
 
     results: list[gates.GateResult] = []
     skipped: list[config.Gate] = []
@@ -121,7 +127,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     for offset, (index, gate) in enumerate(planned):
         result = _run_gate(bundle, gate, index, root)
         results.append(result)
-        _report_gate(result)
+        if not args.json:
+            _report_gate(result)
         if not result.passed and not gate.optional:
             # Stop on the first required failure; everything after it is
             # unrun, not passed, and the summary says so.
@@ -140,7 +147,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
         bundle, state, results=results, skipped=skipped, failed_gate=failed_gate
     )
 
-    _report_run(bundle, root, results, failed_gate)
+    if args.json:
+        _report_json(bundle, root, failed_gate)
+    else:
+        _report_run(bundle, root, results, failed_gate)
     return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
 
 
@@ -208,6 +218,40 @@ def _report_gate(result: gates.GateResult) -> None:
     )
 
 
+def _bundle_path(bundle: evidence.Bundle, root: Path) -> str:
+    """The bundle's path as a reader would type it — repo-relative when it
+    lives inside the repo, absolute when it somehow does not."""
+    try:
+        return bundle.directory.relative_to(root).as_posix()
+    except ValueError:
+        return str(bundle.directory)
+
+
+def _report_json(
+    bundle: evidence.Bundle, root: Path, failed_gate: str | None
+) -> None:
+    """One object on stdout and nothing else (spec §CLI surface).
+
+    This is what a coding agent consumes, so the keys are stable and present
+    even when empty: a consumer should never have to distinguish "passed"
+    from "the tool forgot to tell me".
+    """
+    print(
+        json.dumps(
+            {
+                "status": "failed" if failed_gate is not None else "passed",
+                "failed_gate": failed_gate,
+                "rerun": (
+                    f"cox verify --gate {failed_gate}"
+                    if failed_gate is not None
+                    else None
+                ),
+                "evidence_dir": _bundle_path(bundle, root),
+            }
+        )
+    )
+
+
 def _report_run(
     bundle: evidence.Bundle,
     root: Path,
@@ -219,10 +263,7 @@ def _report_run(
         for path in (failure.stdout_path, failure.stderr_path):
             _print_tail(path, bundle.relative(path))
 
-    try:
-        shown = bundle.directory.relative_to(root).as_posix()
-    except ValueError:  # bundle outside the repo root
-        shown = str(bundle.directory)
+    shown = _bundle_path(bundle, root)
     print(f"\nEvidence written to:\n{shown}/")
 
     if failed_gate is not None:

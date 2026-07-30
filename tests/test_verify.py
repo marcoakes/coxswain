@@ -420,6 +420,72 @@ def test_outside_a_repo_there_is_no_diff_or_status(
     assert of_type(events(bundle), "git.status")[0]["changed_files"] == []
 
 
+def test_json_emits_one_object_and_nothing_else(
+    repo, write_config, monkeypatch, capfd
+):
+    write_config(repo, THREE_GATES)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify", "--json"]) == cli.EXIT_OK
+
+    captured = capfd.readouterr()
+    bundle = only_bundle(repo)
+    # exactly one line, and it parses — `cox verify --json | jq` must be clean
+    assert len(captured.out.strip().splitlines()) == 1
+    assert json.loads(captured.out) == {
+        "status": "passed",
+        "failed_gate": None,
+        "rerun": None,
+        "evidence_dir": f".cox/runs/{bundle.name}",
+    }
+    # none of the human report leaks into an agent's stdin
+    assert "✓" not in captured.out
+    assert "Evidence written to" not in captured.out
+
+
+def test_json_on_failure_carries_the_rerun_command(
+    repo, write_config, monkeypatch, capfd
+):
+    write_config(
+        repo,
+        """\
+version: 1
+gates:
+  - id: test
+    run: echo noise-that-stays-in-the-bundle; exit 1
+""",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify", "--json"]) == cli.EXIT_GATE_FAILED
+
+    captured = capfd.readouterr()
+    bundle = only_bundle(repo)
+    assert json.loads(captured.out) == {
+        "status": "failed",
+        "failed_gate": "test",
+        "rerun": "cox verify --gate test",
+        "evidence_dir": f".cox/runs/{bundle.name}",
+    }
+    # the log tail is suppressed too — it is in the bundle, where it belongs
+    assert "noise-that-stays-in-the-bundle" not in captured.out
+    assert "noise-that-stays-in-the-bundle" in gate_log(bundle, "001_test", "stdout")
+
+
+def test_json_still_writes_the_whole_bundle(repo, write_config, monkeypatch, capfd):
+    write_config(repo, ONE_PASSING_GATE)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify", "--json"]) == cli.EXIT_OK
+    capfd.readouterr()
+
+    bundle = only_bundle(repo)
+    assert (bundle / "summary.md").is_file()
+    assert (bundle / evidence.MANIFEST_FILENAME).is_file()
+    assert (bundle / evidence.DIFF_FILENAME).is_file()
+    assert [event["type"] for event in events(bundle)][0] == "run.started"
+
+
 def test_a_timeout_fails_the_run_and_says_timed_out(
     repo, write_config, monkeypatch, capsys
 ):
