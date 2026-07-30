@@ -1,14 +1,17 @@
-# deps
-node_modules/
-.pnpm-store/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
 
 # builds
 dist/
 build/
-*.tsbuildinfo
 
-# runtime artifacts
-.cox/runs/
+# runtime artifacts — evidence bundles are local by design (nothing
+# uploads, ever); the committed demo bundle lives in .cox.example/
+.cox/
 *.sqlite
 *.sqlite-journal
 
