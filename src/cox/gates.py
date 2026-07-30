@@ -102,13 +102,15 @@ def run(
         # Drain whatever the gate managed to say before it was stopped —
         # the last lines before a hang are usually the interesting ones.
         out, err = proc.communicate()
+    except KeyboardInterrupt:
+        # The gate runs in its own process group, so Ctrl-C reached cox and
+        # not the gate: stopping it is our job, or it outlives the verifier.
+        _terminate(proc)
+        out, err = proc.communicate()
+        _write_logs(stdout_path, stderr_path, out, err, redactor)
+        raise
 
-    # Scrub first, then bound: truncation must never be what saves a secret,
-    # and a redacted log is what the limit applies to.
-    out_data, out_cut = truncate(redactor.scrub_bytes(out), MAX_LOG_BYTES)
-    err_data, err_cut = truncate(redactor.scrub_bytes(err), MAX_LOG_BYTES)
-    stdout_path.write_bytes(out_data)
-    stderr_path.write_bytes(err_data)
+    out_cut, err_cut = _write_logs(stdout_path, stderr_path, out, err, redactor)
 
     return GateResult(
         gate=gate,
@@ -120,6 +122,22 @@ def run(
         stdout_truncated=out_cut,
         stderr_truncated=err_cut,
     )
+
+
+def _write_logs(
+    stdout_path: Path,
+    stderr_path: Path,
+    out: bytes,
+    err: bytes,
+    redactor: Redactor,
+) -> tuple[bool, bool]:
+    """Scrub, bound, write. In that order: truncation must never be what
+    saves a secret, and the limit applies to the redacted text."""
+    out_data, out_cut = truncate(redactor.scrub_bytes(out), MAX_LOG_BYTES)
+    err_data, err_cut = truncate(redactor.scrub_bytes(err), MAX_LOG_BYTES)
+    stdout_path.write_bytes(out_data)
+    stderr_path.write_bytes(err_data)
+    return out_cut, err_cut
 
 
 def truncate(data: bytes, limit: int) -> tuple[bytes, bool]:

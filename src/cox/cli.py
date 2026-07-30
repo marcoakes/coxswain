@@ -18,8 +18,8 @@ from cox import __version__, config, detect, evidence, gates, git, redact, summa
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
 EXIT_CONFIG = 2
-EXIT_REFUSED = 3  # wired in the Day-4 bolt
-EXIT_INTERRUPTED = 4  # wired in the Day-4 bolt
+EXIT_REFUSED = 3
+EXIT_INTERRUPTED = 4
 
 # How much of a failing gate's logs to put on the console. The whole log is
 # in the bundle; this is just enough to see what broke without opening it.
@@ -166,8 +166,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
     skipped: list[config.Gate] = []
     failed_gate: str | None = None
 
+    interrupted = False
+
     for offset, (index, gate) in enumerate(planned):
-        result = _run_gate(bundle, gate, index, root)
+        try:
+            result = _run_gate(bundle, gate, index, root)
+        except KeyboardInterrupt:
+            # Ctrl-C: finish the bundle rather than abandon it half-written.
+            # A run that stopped is evidence too, as long as it says so.
+            interrupted = True
+            skipped = [pending for _, pending in planned[offset + 1 :]]
+            break
         results.append(result)
         if not args.json:
             _report_gate(result)
@@ -178,7 +187,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
             skipped = [pending for _, pending in planned[offset + 1 :]]
             break
 
-    status = "failed" if failed_gate is not None else "passed"
+    if interrupted:
+        status = "interrupted"
+    elif failed_gate is not None:
+        status = "failed"
+    else:
+        status = "passed"
     bundle.event(
         "run.finished",
         status=status,
@@ -186,13 +200,21 @@ def cmd_verify(args: argparse.Namespace) -> int:
     )
     bundle.write_manifest(state=state, status=status, failed_gate=failed_gate)
     summary.write(
-        bundle, state, results=results, skipped=skipped, failed_gate=failed_gate
+        bundle,
+        state,
+        results=results,
+        skipped=skipped,
+        failed_gate=failed_gate,
+        status=status,
     )
 
     if args.json:
-        _report_json(bundle, root, failed_gate)
+        _report_json(bundle, root, failed_gate, status)
     else:
-        _report_run(bundle, root, results, failed_gate)
+        _report_run(bundle, root, results, failed_gate, status)
+
+    if interrupted:
+        return EXIT_INTERRUPTED
     return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
 
 
@@ -434,7 +456,10 @@ def _bundle_path(bundle: evidence.Bundle, root: Path) -> str:
 
 
 def _report_json(
-    bundle: evidence.Bundle, root: Path, failed_gate: str | None
+    bundle: evidence.Bundle,
+    root: Path,
+    failed_gate: str | None,
+    status: str = "passed",
 ) -> None:
     """One object on stdout and nothing else (spec §CLI surface).
 
@@ -445,7 +470,7 @@ def _report_json(
     print(
         json.dumps(
             {
-                "status": "failed" if failed_gate is not None else "passed",
+                "status": status,
                 "failed_gate": failed_gate,
                 "rerun": (
                     f"cox verify --gate {failed_gate}"
@@ -463,7 +488,10 @@ def _report_run(
     root: Path,
     results: list[gates.GateResult],
     failed_gate: str | None,
+    status: str = "passed",
 ) -> None:
+    if status == "interrupted":
+        print("\n✗ interrupted — the run stopped before every gate finished")
     if failed_gate is not None:
         failure = next(r for r in results if r.gate.id == failed_gate)
         for path in (failure.stdout_path, failure.stderr_path):
@@ -499,4 +527,10 @@ def _print_tail(path: Path, label: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        # A Ctrl-C between the phases that handle it themselves still owes the
+        # caller the contract's exit code, not a traceback.
+        print("\ncox: interrupted", file=sys.stderr)
+        return EXIT_INTERRUPTED

@@ -26,6 +26,7 @@ def write(
     results: list[GateResult],
     skipped: list[Gate],
     failed_gate: str | None,
+    status: str = "passed",
 ) -> Path:
     """Write `summary.md` into the bundle and return its path."""
     lines = [
@@ -33,7 +34,7 @@ def write(
         "",
         _repo_line(state),
         f"- started: {bundle.started_at.replace(microsecond=0).isoformat()}",
-        _result_line(failed_gate),
+        _result_line(status, failed_gate),
     ]
     changes = _changes_line(state)
     if changes is not None:
@@ -95,7 +96,9 @@ def _changes_line(state: RepoState) -> str | None:
     )
 
 
-def _result_line(failed_gate: str | None) -> str:
+def _result_line(status: str, failed_gate: str | None) -> str:
+    if status == "interrupted":
+        return "- result: **interrupted** — stopped before every gate ran"
     if failed_gate is None:
         return "- result: **passed** — all required gates passed"
     return f"- result: **failed** — required gate `{failed_gate}` failed"
