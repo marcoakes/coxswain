@@ -12,39 +12,36 @@ and pulled by demand rather than pushed by plan.*
 
 ## The 90-day arc
 
-### Days 1–30 — the "One Loop" MVP
+### Days 1–30 — v0.1.0, the standalone evidence compiler
 
-A CLI that takes a GitHub issue, runs a single **repair loop** locally,
-and outputs a merge request with an evidence bundle. Nothing more. And
-inside it, an even thinner first wedge (second external review):
-**`cox verify` + evidence bundles are usable standalone before the loop
-exists**, wrapped around the coding agent you already use. Coxswain
-never ships an agent.
+⚠️ **Superseded in detail by [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)**
+(third external review, 2026-07-30) — the binding implementation
+contract. The essence: **`cox verify` ships first as a standalone
+evidence compiler**, before `cox run`, before the graph IR, before
+judges, before agents. One command that proves whether a change is
+mergeable and leaves behind evidence a human or agent can inspect.
 
-**Days 1–15 — `cox verify`, standalone.** The first thing a stranger
-can adopt:
+- `cox init` — detect project commands, write `.cox.yaml`.
+- `cox verify` — run declared gates in order, write the evidence bundle
+  (`manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, gate
+  logs). Exit codes are contract. `--json` for agent consumption.
+- `cox explain` — compact non-LLM diagnosis of the latest failed run.
+- Five-day build order + the "Definition of PROVEN" release bar (CI runs
+  `cox verify` on this repo; a sanitized demo bundle is committed; the
+  README transcript is real) — all in the spec.
 
-- `@cox/verify` v0.1 — pluggable gate runner: `build`, `test`, `lint` as
-  shell-command gates with structured pass/fail, emitting
-  `evidence.jsonl`.
-- `cox verify` runs in any repo, around any session — Claude Code, Codex
-  CLI, Gemini CLI, or a human — and produces the evidence bundle with no
-  loop, no judge, no MR machinery. Gates + receipts, nothing else.
+**v0.1.0 tags when the spec's release bar is fully true** — well before
+the Sept 30 outer deadline if the bolts land clean.
 
-**Days 16–30 — the loop closes around it:**
+**After v0.1.0 (v0.2, inside the 90 days) — the loop closes around it:**
 
-- `@cox/ir` v0.1 — minimal YAML/JSON schema for a single-loop graph. One
-  node kind: `loop:repair`.
+- `cox run` = a loop that keeps calling `cox verify` until the evidence
+  says stop. Minimal single-loop IR (`loop:repair`), in-memory engine.
 - Worker binding = **your existing coding agent via subprocess** (Claude
   Code first; Codex/Gemini CLI next; ACP as the formal wire later).
-- One rubric judge ("does this diff satisfy the issue's acceptance
-  criteria?") via any OpenAI-compatible endpoint (local models work —
-  Ollama for cheap dev).
-- `@cox/engine` v0.1 — local in-memory executor: worker → gates → judge →
-  iterate or exit. Run persisted as a JSONL evidence bundle.
-- `cox run --issue <url> --repo <path>` → branch + MR + `evidence.jsonl`.
-- **Dry-run mode**: gates run, judge is a deterministic rubric (no LLM
-  call) — demos and CI cost nothing.
+- One rubric judge via any OpenAI-compatible endpoint (Ollama works);
+  dry-run mode keeps demos and CI at zero LLM spend.
+- Issue → branch + MR + evidence delivery.
 
 Cut from this slice: graph orchestration, fan-out/fan-in, human interrupt
 nodes, all cloud adapters, Cedar/OPA, AGENTS.md autogen, skills registry.
@@ -87,8 +84,12 @@ nodes, all cloud adapters, Cedar/OPA, AGENTS.md autogen, skills registry.
 - **Phases 3–7 of the plan's §6 are deferred**, not deleted — gateway
   plane, policy hooks, context autogen, skills registry, self-evolution
   all wait behind a working, dogfooded loop.
-- Implementation language stays **TypeScript** (plan §5 ruling); Python
-  is the first *target* ecosystem, not the implementation.
+- **v0 implementation is Python** (third review, 2026-07-30: ubiquitous,
+  inspectable, `pipx`-installable, right audience — see
+  [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)). This supersedes the
+  earlier TypeScript-first ruling for v0.1; the TS monorepo remains the
+  plan's shape for the later graph engine — revisit at v0.2. Python
+  repos are also the first *target* ecosystem (Q3 OKR).
 
 ## Risks
 
