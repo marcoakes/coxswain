@@ -1,0 +1,153 @@
+diff --git a/.wringer.example/runs/20260730-204401-e209/diff.patch b/.wringer.example/runs/20260730-204401-e209/diff.patch
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/.wringer.example/runs/20260730-204401-e209/evidence.jsonl b/.wringer.example/runs/20260730-204401-e209/evidence.jsonl
+deleted file mode 100644
+index 692af62..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/evidence.jsonl
++++ /dev/null
+@@ -1,7 +0,0 @@
+-{"type": "run.started", "ts": "2026-07-30T20:44:01.245+01:00", "run_id": "20260730-204401-e209", "wringer_version": "0.1.0.dev0", "repo": "wringer", "sha": "05c63cad87665996cf30729629e9eb9bf95be45a"}
+-{"type": "git.status", "ts": "2026-07-30T20:44:01.245+01:00", "dirty": true, "changed_files": [], "untracked": [".wringer.yaml"]}
+-{"type": "gate.started", "ts": "2026-07-30T20:44:01.246+01:00", "gate_id": "lint", "command": "ruff check src tests"}
+-{"type": "gate.finished", "ts": "2026-07-30T20:44:01.296+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 49}
+-{"type": "gate.started", "ts": "2026-07-30T20:44:01.296+01:00", "gate_id": "test", "command": "pytest -q"}
+-{"type": "gate.finished", "ts": "2026-07-30T20:44:12.250+01:00", "gate_id": "test", "exit_code": 0, "duration_ms": 10954}
+-{"type": "run.finished", "ts": "2026-07-30T20:44:12.250+01:00", "status": "passed"}
+diff --git a/.wringer.example/runs/20260730-204401-e209/gates/001_lint/result.json b/.wringer.example/runs/20260730-204401-e209/gates/001_lint/result.json
+deleted file mode 100644
+index af3df3e..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/gates/001_lint/result.json
++++ /dev/null
+@@ -1,11 +0,0 @@
+-{
+-  "gate_id": "lint",
+-  "command": "ruff check src tests",
+-  "exit_code": 0,
+-  "duration_ms": 49,
+-  "timed_out": false,
+-  "stdout_truncated": false,
+-  "stderr_truncated": false,
+-  "optional": false,
+-  "status": "passed"
+-}
+diff --git a/.wringer.example/runs/20260730-204401-e209/gates/001_lint/stderr.log b/.wringer.example/runs/20260730-204401-e209/gates/001_lint/stderr.log
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/.wringer.example/runs/20260730-204401-e209/gates/001_lint/stdout.log b/.wringer.example/runs/20260730-204401-e209/gates/001_lint/stdout.log
+deleted file mode 100644
+index 1f5f344..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/gates/001_lint/stdout.log
++++ /dev/null
+@@ -1 +0,0 @@
+-All checks passed!
+diff --git a/.wringer.example/runs/20260730-204401-e209/gates/002_test/result.json b/.wringer.example/runs/20260730-204401-e209/gates/002_test/result.json
+deleted file mode 100644
+index 4d3a698..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/gates/002_test/result.json
++++ /dev/null
+@@ -1,11 +0,0 @@
+-{
+-  "gate_id": "test",
+-  "command": "pytest -q",
+-  "exit_code": 0,
+-  "duration_ms": 10954,
+-  "timed_out": false,
+-  "stdout_truncated": false,
+-  "stderr_truncated": false,
+-  "optional": false,
+-  "status": "passed"
+-}
+diff --git a/.wringer.example/runs/20260730-204401-e209/gates/002_test/stderr.log b/.wringer.example/runs/20260730-204401-e209/gates/002_test/stderr.log
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/.wringer.example/runs/20260730-204401-e209/gates/002_test/stdout.log b/.wringer.example/runs/20260730-204401-e209/gates/002_test/stdout.log
+deleted file mode 100644
+index 4459077..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/gates/002_test/stdout.log
++++ /dev/null
+@@ -1,4 +0,0 @@
+-........................................................................ [ 41%]
+-........................................................................ [ 83%]
+-............................                                             [100%]
+-172 passed in 10.79s
+diff --git a/.wringer.example/runs/20260730-204401-e209/manifest.json b/.wringer.example/runs/20260730-204401-e209/manifest.json
+deleted file mode 100644
+index fd2003b..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/manifest.json
++++ /dev/null
+@@ -1,15 +0,0 @@
+-{
+-  "schema_version": "wringer.evidence.v1",
+-  "run_id": "20260730-204401-e209",
+-  "started_at": "2026-07-30T20:44:01+01:00",
+-  "repo": {
+-    "root": ".",
+-    "head_sha": "05c63cad87665996cf30729629e9eb9bf95be45a",
+-    "branch": "main",
+-    "dirty": true
+-  },
+-  "result": {
+-    "status": "passed",
+-    "failed_gate": null
+-  }
+-}
+diff --git a/.wringer.example/runs/20260730-204401-e209/status.txt b/.wringer.example/runs/20260730-204401-e209/status.txt
+deleted file mode 100644
+index edea65c..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/status.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-?? .wringer.yaml
+diff --git a/.wringer.example/runs/20260730-204401-e209/summary.md b/.wringer.example/runs/20260730-204401-e209/summary.md
+deleted file mode 100644
+index a7032a3..0000000
+--- a/.wringer.example/runs/20260730-204401-e209/summary.md
++++ /dev/null
+@@ -1,11 +0,0 @@
+-# wring verify — 20260730-204401-e209
+-
+-- repo: **wringer** @ `05c63ca` (branch `main`, dirty)
+-- started: 2026-07-30T20:44:01+01:00
+-- result: **passed** — all required gates passed
+-- files: 0 changed, 1 untracked ([diff.patch](diff.patch), [status.txt](status.txt))
+-
+-| gate | status | duration | logs |
+-|---|---|---|---|
+-| lint | passed | 0.0s | [stdout](gates/001_lint/stdout.log) · [stderr](gates/001_lint/stderr.log) |
+-| test | passed | 11.0s | [stdout](gates/002_test/stdout.log) · [stderr](gates/002_test/stderr.log) |
+diff --git a/SECURITY.md b/SECURITY.md
+index 28bc3dd..5d2bf33 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -1,6 +1,6 @@
+ # Security
+ 
+-Wringer is pre-release software (`0.1.0.dev0`). Read this before running
++Wringer is young software (`0.1.0`). Read this before running
+ `wring verify` in a repository you did not write.
+ 
+ ## Reporting a vulnerability
+diff --git a/pyproject.toml b/pyproject.toml
+index 2608def..82b448a 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "wringer"
+-version = "0.1.0.dev0"
++version = "0.1.0"
+ description = "One command that proves whether this change is mergeable — wring verify, a standalone evidence compiler"
+ readme = "README.md"
+ requires-python = ">=3.11"
+diff --git a/src/wringer/__init__.py b/src/wringer/__init__.py
+index 65c7330..cba44f3 100644
+--- a/src/wringer/__init__.py
++++ b/src/wringer/__init__.py
+@@ -5,4 +5,4 @@ declared gates and writes a portable evidence bundle. Binding contract:
+ SPEC_VERIFY_V0.md at the repo root.
+ """
+ 
+-__version__ = "0.1.0.dev0"
++__version__ = "0.1.0"

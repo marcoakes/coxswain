@@ -45,10 +45,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.wringer/runs/20260730-204914-02d5/
+.wringer/runs/20260730-210750-b3ec/
 
 Next:
-  open .wringer/runs/20260730-204914-02d5/summary.md
+  open .wringer/runs/20260730-210750-b3ec/summary.md
   rerun wring verify --gate test
 ```
 

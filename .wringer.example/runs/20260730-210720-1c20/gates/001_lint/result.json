@@ -1,8 +1,8 @@
 {
-  "gate_id": "test",
-  "command": "pytest -q",
+  "gate_id": "lint",
+  "command": "ruff check src tests",
   "exit_code": 0,
-  "duration_ms": 10954,
+  "duration_ms": 45,
   "timed_out": false,
   "stdout_truncated": false,
   "stderr_truncated": false,

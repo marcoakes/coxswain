@@ -1,0 +1,14 @@
+ D .wringer.example/runs/20260730-204401-e209/diff.patch
+ D .wringer.example/runs/20260730-204401-e209/evidence.jsonl
+ D .wringer.example/runs/20260730-204401-e209/gates/001_lint/result.json
+ D .wringer.example/runs/20260730-204401-e209/gates/001_lint/stderr.log
+ D .wringer.example/runs/20260730-204401-e209/gates/001_lint/stdout.log
+ D .wringer.example/runs/20260730-204401-e209/gates/002_test/result.json
+ D .wringer.example/runs/20260730-204401-e209/gates/002_test/stderr.log
+ D .wringer.example/runs/20260730-204401-e209/gates/002_test/stdout.log
+ D .wringer.example/runs/20260730-204401-e209/manifest.json
+ D .wringer.example/runs/20260730-204401-e209/status.txt
+ D .wringer.example/runs/20260730-204401-e209/summary.md
+ M SECURITY.md
+ M pyproject.toml
+ M src/wringer/__init__.py

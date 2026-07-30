@@ -5,4 +5,4 @@ declared gates and writes a portable evidence bundle. Binding contract:
 SPEC_VERIFY_V0.md at the repo root.
 """
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"

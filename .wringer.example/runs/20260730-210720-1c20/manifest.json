@@ -1,10 +1,10 @@
 {
   "schema_version": "wringer.evidence.v1",
-  "run_id": "20260730-204401-e209",
-  "started_at": "2026-07-30T20:44:01+01:00",
+  "run_id": "20260730-210720-1c20",
+  "started_at": "2026-07-30T21:07:20+01:00",
   "repo": {
     "root": ".",
-    "head_sha": "05c63cad87665996cf30729629e9eb9bf95be45a",
+    "head_sha": "ae00013e6fdc14a6971efd2118f06aca1eeedd04",
     "branch": "main",
     "dirty": true
   },

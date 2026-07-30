@@ -1,6 +1,6 @@
 # Security
 
-Wringer is pre-release software (`0.1.0.dev0`). Read this before running
+Wringer is young software (`0.1.0`). Read this before running
 `wring verify` in a repository you did not write.
 
 ## Reporting a vulnerability

@@ -4,8 +4,8 @@
 > repo on 2026-07-30, captured and pasted unedited, in the order shown. The
 > single clearly-marked block at the bottom is not built yet and says so.
 >
-> `pipx install wringer` from PyPI does **not** work yet — the package is
-> unreleased. Install from git, as below.
+> Installing with `pipx install wringer` requires the PyPI release; until
+> that lands, install from git as below — both give you the same `0.1.0`.
 
 ## Install
 
@@ -58,7 +58,7 @@ $ wring verify
 ✓ test passed        0.1s
 
 Evidence written to:
-.wringer/runs/20260730-204911-a230/
+.wringer/runs/20260730-210748-c5fc/
 ```
 
 Exit code `0`. Now an off-by-one slips into `calc.py`:
@@ -84,10 +84,10 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.wringer/runs/20260730-204914-02d5/
+.wringer/runs/20260730-210750-b3ec/
 
 Next:
-  open .wringer/runs/20260730-204914-02d5/summary.md
+  open .wringer/runs/20260730-210750-b3ec/summary.md
   rerun wring verify --gate test
 ```
 
@@ -98,31 +98,31 @@ gates listed after a required failure are not run at all.
 ## What it leaves behind
 
 ```
-$ find .wringer/runs/20260730-204914-02d5 | sort
-.wringer/runs/20260730-204914-02d5
-.wringer/runs/20260730-204914-02d5/diff.patch
-.wringer/runs/20260730-204914-02d5/evidence.jsonl
-.wringer/runs/20260730-204914-02d5/gates
-.wringer/runs/20260730-204914-02d5/gates/001_lint
-.wringer/runs/20260730-204914-02d5/gates/001_lint/result.json
-.wringer/runs/20260730-204914-02d5/gates/001_lint/stderr.log
-.wringer/runs/20260730-204914-02d5/gates/001_lint/stdout.log
-.wringer/runs/20260730-204914-02d5/gates/002_test
-.wringer/runs/20260730-204914-02d5/gates/002_test/result.json
-.wringer/runs/20260730-204914-02d5/gates/002_test/stderr.log
-.wringer/runs/20260730-204914-02d5/gates/002_test/stdout.log
-.wringer/runs/20260730-204914-02d5/manifest.json
-.wringer/runs/20260730-204914-02d5/status.txt
-.wringer/runs/20260730-204914-02d5/summary.md
+$ find .wringer/runs/20260730-210750-b3ec | sort
+.wringer/runs/20260730-210750-b3ec
+.wringer/runs/20260730-210750-b3ec/diff.patch
+.wringer/runs/20260730-210750-b3ec/evidence.jsonl
+.wringer/runs/20260730-210750-b3ec/gates
+.wringer/runs/20260730-210750-b3ec/gates/001_lint
+.wringer/runs/20260730-210750-b3ec/gates/001_lint/result.json
+.wringer/runs/20260730-210750-b3ec/gates/001_lint/stderr.log
+.wringer/runs/20260730-210750-b3ec/gates/001_lint/stdout.log
+.wringer/runs/20260730-210750-b3ec/gates/002_test
+.wringer/runs/20260730-210750-b3ec/gates/002_test/result.json
+.wringer/runs/20260730-210750-b3ec/gates/002_test/stderr.log
+.wringer/runs/20260730-210750-b3ec/gates/002_test/stdout.log
+.wringer/runs/20260730-210750-b3ec/manifest.json
+.wringer/runs/20260730-210750-b3ec/status.txt
+.wringer/runs/20260730-210750-b3ec/summary.md
 ```
 
 `summary.md` is the human's entry point:
 
 ````markdown
-# wring verify — 20260730-204914-02d5
+# wring verify — 20260730-210750-b3ec
 
-- repo: **qs** @ `d8e726c` (branch `main`, dirty)
-- started: 2026-07-30T20:49:14+01:00
+- repo: **qs2** @ `25cbad0` (branch `main`, dirty)
+- started: 2026-07-30T21:07:50+01:00
 - result: **failed** — required gate `test` failed
 - files: 1 changed, 1 untracked ([diff.patch](diff.patch), [status.txt](status.txt))
 
@@ -142,13 +142,13 @@ wring verify --gate test
 line:
 
 ```json
-{"type": "run.started", "ts": "2026-07-30T20:49:14.014+01:00", "run_id": "20260730-204914-02d5", "wringer_version": "0.1.0.dev0", "repo": "qs", "sha": "d8e726c24d6ef53914981632691cab3fb74e0254"}
-{"type": "git.status", "ts": "2026-07-30T20:49:14.014+01:00", "dirty": true, "changed_files": ["calc.py"], "untracked": ["__pycache__/"]}
-{"type": "gate.started", "ts": "2026-07-30T20:49:14.015+01:00", "gate_id": "lint", "command": "ruff check ."}
-{"type": "gate.finished", "ts": "2026-07-30T20:49:14.028+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 13}
-{"type": "gate.started", "ts": "2026-07-30T20:49:14.029+01:00", "gate_id": "test", "command": "pytest -q"}
-{"type": "gate.finished", "ts": "2026-07-30T20:49:14.148+01:00", "gate_id": "test", "exit_code": 1, "duration_ms": 119, "log": "gates/002_test/stdout.log"}
-{"type": "run.finished", "ts": "2026-07-30T20:49:14.148+01:00", "status": "failed", "failed_gate": "test"}
+{"type": "run.started", "ts": "2026-07-30T21:07:50.641+01:00", "run_id": "20260730-210750-b3ec", "wringer_version": "0.1.0", "repo": "qs2", "sha": "25cbad08b3d1e553fdd40631767984d2d19f46d3"}
+{"type": "git.status", "ts": "2026-07-30T21:07:50.641+01:00", "dirty": true, "changed_files": ["calc.py"], "untracked": ["__pycache__/"]}
+{"type": "gate.started", "ts": "2026-07-30T21:07:50.642+01:00", "gate_id": "lint", "command": "ruff check ."}
+{"type": "gate.finished", "ts": "2026-07-30T21:07:50.655+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 13}
+{"type": "gate.started", "ts": "2026-07-30T21:07:50.655+01:00", "gate_id": "test", "command": "pytest -q"}
+{"type": "gate.finished", "ts": "2026-07-30T21:07:50.777+01:00", "gate_id": "test", "exit_code": 1, "duration_ms": 121, "log": "gates/002_test/stdout.log"}
+{"type": "run.finished", "ts": "2026-07-30T21:07:50.777+01:00", "status": "failed", "failed_gate": "test"}
 ```
 
 And `diff.patch` is exactly what you were verifying:
@@ -189,8 +189,8 @@ straight out of the bundle.
 
 ```
 $ wring explain
-Run 20260730-204914-02d5 — failed
-qs @ d8e726c (branch main, dirty) · started 2026-07-30T20:49:14+01:00
+Run 20260730-210750-b3ec — failed
+qs2 @ 25cbad0 (branch main, dirty) · started 2026-07-30T21:07:50+01:00
 
 ✓ lint passed        0.0s
 ✗ test failed        0.1s
@@ -219,7 +219,7 @@ Changed files (1):
 Untracked (1): __pycache__/
 
 Full report:
-  .wringer/runs/20260730-204914-02d5/summary.md
+  .wringer/runs/20260730-210750-b3ec/summary.md
 
 Rerun:
   wring verify --gate test
