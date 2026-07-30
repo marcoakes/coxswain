@@ -110,6 +110,36 @@ def test_diff_captures_staged_and_unstaged_but_not_untracked(repo: Path, git_run
     assert "untracked.py" not in patch
 
 
+def test_binary_content_never_enters_the_patch(repo: Path, git_run):
+    blob = repo / "image.bin"
+    blob.write_bytes(b"\x00\x01\x02binary-marker-aaa\x00")
+    git_run(repo, "add", "image.bin")
+    git_run(repo, "commit", "-q", "-m", "add binary")
+    blob.write_bytes(b"\x00\x01\x02binary-marker-bbb\x00\xff")
+
+    patch = git.diff(repo, git.inspect(repo).head_sha)
+
+    assert "Binary files" in patch
+    assert "binary-marker-bbb" not in patch
+
+
+def test_a_repo_cannot_force_binary_content_in_with_textconv(repo: Path, git_run):
+    """`.gitattributes` can name a textconv driver that turns a blob into
+    text. That is the repo deciding what goes in *our* evidence file, so we
+    decline."""
+    blob = repo / "image.bin"
+    blob.write_bytes(b"\x00\x01\x02binary-marker-aaa\x00")
+    (repo / ".gitattributes").write_text("*.bin diff=leak\n", encoding="utf-8")
+    git_run(repo, "config", "diff.leak.textconv", "cat")
+    git_run(repo, "add", "image.bin", ".gitattributes")
+    git_run(repo, "commit", "-q", "-m", "add binary with a textconv driver")
+    blob.write_bytes(b"\x00\x01\x02binary-marker-bbb\x00\xff")
+
+    patch = git.diff(repo, git.inspect(repo).head_sha)
+
+    assert "binary-marker-bbb" not in patch
+
+
 def test_status_is_the_porcelain_form(repo: Path):
     (repo / "fresh.py").write_text("x\n", encoding="utf-8")
 

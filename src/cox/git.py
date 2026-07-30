@@ -100,10 +100,17 @@ def diff(root: Path, head_sha: str | None) -> str | None:
     never seen. They are listed in `status.txt` and the `git.status` event
     instead, so a reader is never misled into thinking a new file's contents
     were captured here.
+
+    Binary content stays out: git says "Binary files … differ" by default,
+    and `--no-textconv` stops a repo's own `.gitattributes` from converting
+    a blob into text that would then land in the bundle. An evidence file
+    should not be able to grow a megabyte of image on someone else's say-so.
     """
     against = ["HEAD"] if head_sha else []
     return _git(
-        ["diff", "--no-color", "--no-ext-diff", *against], cwd=root, strip=False
+        ["diff", "--no-color", "--no-ext-diff", "--no-textconv", *against],
+        cwd=root,
+        strip=False,
     )
 
 
