@@ -165,6 +165,12 @@ and the interface future judges and agents consume ([RFC #2](https://github.com/
 Changing either shape is a spec change, not an implementation detail —
 bump the schema version and say so in the commit.
 
+That shape is now **published as JSON Schema** in [`schema/`](schema/), and
+[tests/test_schema.py](tests/test_schema.py) fails if the code writes a key
+the schema does not declare. Adding a field therefore means editing the
+schema in the same commit — which is the point: the version string is what a
+new field costs.
+
 Three conventions inside the bundle are load-bearing:
 
 - **`gates/NNN_<id>/` numbering follows the *declared* order, not the run.**

@@ -83,6 +83,14 @@ same id, so the transcript and the bundle are the same event rather than two
 similar ones. That bundle is the answer to "how do I know?" — read it rather
 than trust the badge.
 
+## The format is targetable, not just readable
+
+The bundle is the interface, so it is [published as JSON
+Schema](schema/) — `manifest.json`, each `evidence.jsonl` event, and each
+gate's `result.json`, in draft 2020-12. Write a tool against the schema
+rather than against this implementation. A test fails the build if the code
+ever writes a field the schema does not declare.
+
 ## It is not a Python tool
 
 Wringer is *written* in Python; nothing about it is *for* Python. It runs the

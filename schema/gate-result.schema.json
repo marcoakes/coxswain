@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/gate-result.schema.json",
+  "title": "Wringer gate result",
+  "description": "gates/NNN_<id>/result.json — one gate's row of the contract. Present only for gates that actually ran: a skipped gate leaves no directory, and a gate interrupted mid-flight leaves its logs but no result, because it never finished.",
+  "type": "object",
+  "required": [
+    "gate_id",
+    "command",
+    "exit_code",
+    "duration_ms",
+    "timed_out",
+    "stdout_truncated",
+    "stderr_truncated",
+    "optional",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gate_id": {
+      "description": "The gate's id as declared. A slug: [A-Za-z0-9][A-Za-z0-9_-]* up to 64 characters, because it also names the directory.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+      "maxLength": 64
+    },
+    "command": {
+      "description": "The shell command as declared, after redaction.",
+      "type": "string"
+    },
+    "exit_code": {
+      "description": "The process exit status. Negative when a signal ended it — which is what a timeout looks like.",
+      "type": "integer"
+    },
+    "duration_ms": {
+      "description": "Wall-clock milliseconds from spawn to reap.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "timed_out": {
+      "description": "Whether the gate overran its declared timeout and was killed.",
+      "type": "boolean"
+    },
+    "stdout_truncated": {
+      "description": "Whether stdout.log was capped. The file says so in its first line when true.",
+      "type": "boolean"
+    },
+    "stderr_truncated": {
+      "description": "Whether stderr.log was capped.",
+      "type": "boolean"
+    },
+    "optional": {
+      "description": "Whether a failure here was allowed to leave the run passing.",
+      "type": "boolean"
+    },
+    "status": {
+      "description": "passed requires exit_code 0 AND timed_out false.",
+      "enum": ["passed", "failed"]
+    }
+  }
+}

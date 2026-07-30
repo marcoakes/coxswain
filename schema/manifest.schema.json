@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/manifest.schema.json",
+  "title": "Wringer evidence bundle manifest",
+  "description": "manifest.json — the index of one `wring verify` run. Written once, at the end of the run. Schema version wringer.evidence.v1; any change to this shape is a spec change and bumps that version.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "started_at", "repo", "result"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Identifies the bundle format a reader is holding.",
+      "const": "wringer.evidence.v1"
+    },
+    "run_id": {
+      "description": "The run directory's name. Normally YYYYMMDD-HHMMSS-<4 hex>, but `--output DIR` lets a caller name it anything, so readers must not parse this for a timestamp.",
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "description": "Local time with UTC offset, seconds precision.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "repo": {
+      "type": "object",
+      "required": ["root", "head_sha", "branch", "dirty"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "description": "Always \".\" — the bundle lives inside the repo it describes, so paths stay repo-relative and the bundle stays portable.",
+          "type": "string"
+        },
+        "head_sha": {
+          "description": "Full 40-character HEAD SHA, or null when git could not be read.",
+          "type": ["string", "null"]
+        },
+        "branch": {
+          "description": "Branch name, or null on a detached HEAD or when git could not be read.",
+          "type": ["string", "null"]
+        },
+        "dirty": {
+          "description": "Whether the tree had changed or untracked files when the run started.",
+          "type": "boolean"
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["status", "failed_gate"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "description": "passed = every required gate passed. failed = a required gate failed. interrupted = the run stopped before every gate finished.",
+          "enum": ["passed", "failed", "interrupted"]
+        },
+        "failed_gate": {
+          "description": "The id of the required gate that failed, or null. Null on an interrupted run too: stopping is not failing.",
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}
