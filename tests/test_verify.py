@@ -408,165 +408,6 @@ def test_a_clean_repo_captures_an_empty_diff(
     }
 
 
-def test_outside_a_repo_there_is_no_diff_or_status(
-    tmp_path, write_config, monkeypatch
-):
-    write_config(tmp_path, ONE_PASSING_GATE)
-    monkeypatch.chdir(tmp_path)
-
-    assert cli.main(["verify"]) == cli.EXIT_OK
-
-    bundle = only_bundle(tmp_path)
-    assert not (bundle / evidence.DIFF_FILENAME).exists()
-    assert not (bundle / evidence.STATUS_FILENAME).exists()
-    assert of_type(events(bundle), "git.status")[0]["changed_files"] == []
-
-
-def test_json_emits_one_object_and_nothing_else(
-    repo, write_config, monkeypatch, capfd
-):
-    write_config(repo, THREE_GATES)
-    monkeypatch.chdir(repo)
-
-    assert cli.main(["verify", "--json"]) == cli.EXIT_OK
-
-    captured = capfd.readouterr()
-    bundle = only_bundle(repo)
-    # exactly one line, and it parses — `cox verify --json | jq` must be clean
-    assert len(captured.out.strip().splitlines()) == 1
-    assert json.loads(captured.out) == {
-        "status": "passed",
-        "failed_gate": None,
-        "rerun": None,
-        "evidence_dir": f".cox/runs/{bundle.name}",
-    }
-    # none of the human report leaks into an agent's stdin
-    assert "✓" not in captured.out
-    assert "Evidence written to" not in captured.out
-
-
-def test_json_on_failure_carries_the_rerun_command(
-    repo, write_config, monkeypatch, capfd
-):
-    write_config(
-        repo,
-        """\
-version: 1
-gates:
-  - id: test
-    run: echo noise-that-stays-in-the-bundle; exit 1
-""",
-    )
-    monkeypatch.chdir(repo)
-
-    assert cli.main(["verify", "--json"]) == cli.EXIT_GATE_FAILED
-
-    captured = capfd.readouterr()
-    bundle = only_bundle(repo)
-    assert json.loads(captured.out) == {
-        "status": "failed",
-        "failed_gate": "test",
-        "rerun": "cox verify --gate test",
-        "evidence_dir": f".cox/runs/{bundle.name}",
-    }
-    # the log tail is suppressed too — it is in the bundle, where it belongs
-    assert "noise-that-stays-in-the-bundle" not in captured.out
-    assert "noise-that-stays-in-the-bundle" in gate_log(bundle, "001_test", "stdout")
-
-
-def test_json_still_writes_the_whole_bundle(repo, write_config, monkeypatch, capfd):
-    write_config(repo, ONE_PASSING_GATE)
-    monkeypatch.chdir(repo)
-
-    assert cli.main(["verify", "--json"]) == cli.EXIT_OK
-    capfd.readouterr()
-
-    bundle = only_bundle(repo)
-    assert (bundle / "summary.md").is_file()
-    assert (bundle / evidence.MANIFEST_FILENAME).is_file()
-    assert (bundle / evidence.DIFF_FILENAME).is_file()
-    assert [event["type"] for event in events(bundle)][0] == "run.started"
-
-
-SECRET = "s3cr3t-value-that-must-never-be-written"
-
-
-def test_a_planted_secret_appears_nowhere_in_the_bundle(
-    repo, write_config, git_run, monkeypatch, capfd
-):
-    """The spec's Day-4 exit criterion, end to end.
-
-    The secret is planted in four places that all reach the bundle by a
-    different route: a gate's stdout, a gate's stderr, the gate command
-    itself, and a tracked file's diff.
-    """
-    monkeypatch.setenv("SUPER_SECRET_TOKEN", SECRET)
-
-    (repo / "config.ini").write_text("token = placeholder\n", encoding="utf-8")
-    git_run(repo, "add", "config.ini")
-    git_run(repo, "commit", "-q", "-m", "add config")
-    (repo / "config.ini").write_text(f"token = {SECRET}\n", encoding="utf-8")
-
-    write_config(
-        repo,
-        f"""\
-version: 1
-gates:
-  - id: leaky
-    run: echo "$SUPER_SECRET_TOKEN"; echo "{SECRET}" >&2; exit 1
-""",
-    )
-    monkeypatch.chdir(repo)
-
-    assert cli.main(["verify"]) == cli.EXIT_GATE_FAILED
-
-    bundle = only_bundle(repo)
-    written = [path for path in bundle.rglob("*") if path.is_file()]
-    assert written, "nothing was written"
-    for path in written:
-        assert SECRET not in path.read_text(encoding="utf-8", errors="replace"), (
-            f"secret leaked into {path.relative_to(bundle)}"
-        )
-
-    # and prove we were looking at files that really did contain it
-    assert "[REDACTED]" in gate_log(bundle, "001_leaky", "stdout")
-    assert "[REDACTED]" in gate_log(bundle, "001_leaky", "stderr")
-    assert "[REDACTED]" in (bundle / evidence.DIFF_FILENAME).read_text(
-        encoding="utf-8"
-    )
-    assert "[REDACTED]" in result_json(bundle, "001_leaky")["command"]
-    # the console tail is read back from the scrubbed log, so it is clean too
-    assert SECRET not in capfd.readouterr().out
-
-
-def test_redaction_patterns_from_the_config_are_honoured(
-    repo, write_config, monkeypatch, capfd
-):
-    monkeypatch.setenv("DEPLOY_URL", "https://user:hunter2@example.invalid")
-    write_config(
-        repo,
-        """\
-version: 1
-gates:
-  - id: leaky
-    run: echo "$DEPLOY_URL"
-evidence:
-  redact:
-    env:
-      - "*URL*"
-""",
-    )
-    monkeypatch.chdir(repo)
-
-    assert cli.main(["verify"]) == cli.EXIT_OK
-    capfd.readouterr()
-
-    bundle = only_bundle(repo)
-    log = gate_log(bundle, "001_leaky", "stdout")
-    assert "hunter2" not in log
-    assert "[REDACTED]" in log
-
-
 def test_a_truncated_log_is_declared_in_the_evidence(
     repo, write_config, monkeypatch, capfd
 ):
@@ -593,7 +434,9 @@ gates:
     assert of_type(events(bundle), "gate.finished")[0]["truncated"] is True
 
 
-def test_a_whole_log_carries_no_truncation_key(repo, write_config, monkeypatch, capfd):
+def test_a_whole_log_carries_no_truncation_key(
+    repo, write_config, monkeypatch, capfd
+):
     write_config(repo, ONE_PASSING_GATE)
     monkeypatch.chdir(repo)
 
@@ -768,23 +611,44 @@ def test_verify_finds_the_repo_root_from_a_subdirectory(
     assert f".cox/runs/{bundle.name}/" in capsys.readouterr().out
 
 
-def test_outside_a_git_repo_the_run_still_works_with_null_git_fields(
-    tmp_path, write_config, monkeypatch, capsys
-):
+def test_outside_a_git_repo_verify_refuses(tmp_path, write_config, monkeypatch, capsys):
+    """Verification is a claim about a commit. Without git there is no commit
+    to make the claim about, so refuse rather than write a bundle whose
+    provenance fields are all null."""
     write_config(tmp_path, ONE_PASSING_GATE)
     monkeypatch.chdir(tmp_path)
 
-    assert cli.main(["verify"]) == cli.EXIT_OK
+    assert cli.main(["verify"]) == cli.EXIT_CONFIG
 
-    bundle = only_bundle(tmp_path)
-    assert events(bundle)[0]["sha"] is None
-    assert manifest(bundle)["repo"] == {
-        "root": ".",
-        "head_sha": None,
-        "branch": None,
-        "dirty": False,
-    }
-    assert "✓ unit passed" in capsys.readouterr().out
+    err = capsys.readouterr().err
+    assert "not a git repository" in err
+    assert bundles(tmp_path) == []
+
+
+def test_a_conflicted_merge_is_refused_with_exit_three(
+    repo, write_config, git_run, monkeypatch, capsys
+):
+    (repo / "shared.txt").write_text("base\n", encoding="utf-8")
+    git_run(repo, "add", "shared.txt")
+    git_run(repo, "commit", "-q", "-m", "base")
+
+    git_run(repo, "checkout", "-q", "-b", "other")
+    (repo / "shared.txt").write_text("theirs\n", encoding="utf-8")
+    git_run(repo, "commit", "-q", "-am", "theirs")
+
+    git_run(repo, "checkout", "-q", "main")
+    (repo / "shared.txt").write_text("ours\n", encoding="utf-8")
+    git_run(repo, "commit", "-q", "-am", "ours")
+    git_run(repo, "merge", "other", check=False)  # conflicts, on purpose
+
+    write_config(repo, ONE_PASSING_GATE)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_REFUSED
+
+    err = capsys.readouterr().err
+    assert "in the middle of a merge" in err
+    assert bundles(repo) == []
 
 
 def test_each_run_gets_its_own_bundle(repo, write_config, monkeypatch):

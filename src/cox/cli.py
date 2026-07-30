@@ -97,6 +97,27 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     root = git.find_root(Path.cwd())
 
+    # Preconditions first: a bundle that describes an unsafe or unknowable
+    # state is worse than no bundle, so neither one gets written.
+    if not git.is_repo(root):
+        print(
+            f"cox verify: {Path.cwd()} is not a git repository — verification "
+            "records which commit and which changes were proven, so it needs "
+            "one. Run 'git init', or verify from inside your repo.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    unfinished = git.in_progress(root)
+    if unfinished is not None:
+        print(
+            f"cox verify: refusing to verify in the middle of {unfinished} — "
+            "HEAD and the working tree describe a state nobody chose. Finish "
+            "or abort it, then verify.",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
         planned = _plan(cfg, args.gate)

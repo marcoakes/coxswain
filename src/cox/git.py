@@ -21,6 +21,17 @@ from pathlib import Path
 # overruns is treated exactly like a call that failed.
 GIT_TIMEOUT_SECONDS = 10
 
+# Paths git leaves inside .git while an operation is unfinished, and the
+# word for what the developer is in the middle of.
+_IN_PROGRESS = {
+    "MERGE_HEAD": "a merge",
+    "rebase-merge": "a rebase",
+    "rebase-apply": "a rebase",
+    "CHERRY_PICK_HEAD": "a cherry-pick",
+    "REVERT_HEAD": "a revert",
+    "BISECT_LOG": "a bisect",
+}
+
 
 @dataclass(frozen=True)
 class RepoState:
@@ -55,6 +66,31 @@ def inspect(root: Path) -> RepoState:
         changed_files=changed,
         untracked=untracked,
     )
+
+
+def is_repo(root: Path) -> bool:
+    return _git(["rev-parse", "--is-inside-work-tree"], cwd=root) == "true"
+
+
+def in_progress(root: Path) -> str | None:
+    """The half-finished git operation in this tree, if any.
+
+    Verifying in the middle of a merge or rebase produces evidence about a
+    state nobody chose: the tree is a machine's intermediate, HEAD is not
+    where the developer thinks it is, and a "passing" run would be a claim
+    about a commit that does not exist yet.
+    """
+    git_dir = _git(["rev-parse", "--git-dir"], cwd=root)
+    if git_dir is None:
+        return None
+    base = Path(git_dir)
+    if not base.is_absolute():
+        base = root / base
+
+    for marker, description in _IN_PROGRESS.items():
+        if (base / marker).exists():
+            return description
+    return None
 
 
 def diff(root: Path, head_sha: str | None) -> str | None:

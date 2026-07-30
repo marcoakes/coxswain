@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from cox import git
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -127,6 +129,60 @@ def test_detached_head_records_no_branch(repo: Path, git_run):
     state = git.inspect(repo)
     assert state.head_sha == sha
     assert state.branch is None
+
+
+def test_is_repo_recognises_a_repo(repo: Path):
+    assert git.is_repo(repo) is True
+
+
+def test_is_repo_rejects_a_plain_directory(tmp_path: Path):
+    assert git.is_repo(tmp_path) is False
+
+
+def test_a_settled_tree_has_nothing_in_progress(repo: Path):
+    assert git.in_progress(repo) is None
+
+
+@pytest.mark.parametrize(
+    "marker, described",
+    [
+        ("MERGE_HEAD", "a merge"),
+        ("rebase-merge", "a rebase"),
+        ("rebase-apply", "a rebase"),
+        ("CHERRY_PICK_HEAD", "a cherry-pick"),
+        ("REVERT_HEAD", "a revert"),
+        ("BISECT_LOG", "a bisect"),
+    ],
+)
+def test_every_half_finished_operation_is_named(
+    repo: Path, marker: str, described: str
+):
+    """git leaves one of these behind mid-operation; each must be recognised,
+    because verifying then describes a state nobody chose."""
+    left_behind = repo / ".git" / marker
+    if marker.startswith("rebase"):
+        left_behind.mkdir()  # git uses a directory for these two
+    else:
+        left_behind.write_text("x\n", encoding="utf-8")
+
+    assert git.in_progress(repo) == described
+
+
+def test_a_real_conflicted_merge_is_detected(repo: Path, git_run):
+    (repo / "shared.txt").write_text("base\n", encoding="utf-8")
+    git_run(repo, "add", "shared.txt")
+    git_run(repo, "commit", "-q", "-m", "base")
+
+    git_run(repo, "checkout", "-q", "-b", "other")
+    (repo / "shared.txt").write_text("theirs\n", encoding="utf-8")
+    git_run(repo, "commit", "-q", "-am", "theirs")
+
+    git_run(repo, "checkout", "-q", "main")
+    (repo / "shared.txt").write_text("ours\n", encoding="utf-8")
+    git_run(repo, "commit", "-q", "-am", "ours")
+    git_run(repo, "merge", "other", check=False)
+
+    assert git.in_progress(repo) == "a merge"
 
 
 def test_a_wedged_git_call_is_bounded_and_treated_as_a_failure(

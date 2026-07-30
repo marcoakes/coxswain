@@ -21,13 +21,15 @@ _ISOLATED = [
 ]
 
 
-def _git(cwd: Path, *args: str) -> str:
+def _git(cwd: Path, *args: str, check: bool = True) -> str:
+    """Run git in a scratch repo. `check=False` for commands whose failure is
+    the point — a conflicted merge, say."""
     proc = subprocess.run(
         ["git", *_ISOLATED, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
-        check=True,
+        check=check,
     )
     return proc.stdout.strip()
 
