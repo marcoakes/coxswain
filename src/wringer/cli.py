@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from wringer import __version__, config, detect, evidence, gates, git, redact, summary
+from wringer import __version__, config, detect, evidence, gates, git, summary, verify
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -145,11 +145,52 @@ def _ignore_runs(root: Path) -> str | None:
 def cmd_verify(args: argparse.Namespace) -> int:
     root = git.find_root(Path.cwd())
 
-    # Preconditions first: a bundle that describes an unsafe or unknowable
-    # state is worse than no bundle, so neither one gets written.
+    refused = _refuse_unverifiable(root, "verify")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        planned = verify.plan(cfg, args.gate)
+    except config.ConfigError as exc:
+        print(f"wring verify: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    try:
+        outcome = verify.run(
+            root,
+            cfg,
+            planned,
+            output=args.output,
+            # Printed as each gate finishes, so a long run reports as it
+            # happens; --json wants one object and nothing else.
+            on_gate=None if args.json else _report_gate,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring verify: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        _report_json(outcome.bundle, root, outcome.failed_gate, outcome.status)
+    else:
+        _report_run(
+            outcome.bundle, root, outcome.results, outcome.failed_gate, outcome.status
+        )
+
+    if outcome.interrupted is not None:
+        return EXIT_INTERRUPTED
+    return EXIT_GATE_FAILED if outcome.failed_gate is not None else EXIT_OK
+
+
+def _refuse_unverifiable(root: Path, command: str) -> int | None:
+    """The preconditions every verifying command shares, or None to proceed.
+
+    A bundle that describes an unsafe or unknowable state is worse than no
+    bundle, so neither one gets written.
+    """
     if not git.is_repo(root):
         print(
-            f"wring verify: {Path.cwd()} is not a git repository — verification "
+            f"wring {command}: {Path.cwd()} is not a git repository — verification "
             "records which commit and which changes were proven, so it needs "
             "one. Run 'git init', or verify from inside your repo.",
             file=sys.stderr,
@@ -159,120 +200,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
     unfinished = git.in_progress(root)
     if unfinished is not None:
         print(
-            f"wring verify: refusing to verify in the middle of {unfinished} — "
+            f"wring {command}: refusing to verify in the middle of {unfinished} — "
             "HEAD and the working tree describe a state nobody chose. Finish "
             "or abort it, then verify.",
             file=sys.stderr,
         )
         return EXIT_REFUSED
-
-    try:
-        cfg = config.load(root / config.CONFIG_FILENAME)
-        planned = _plan(cfg, args.gate)
-    except config.ConfigError as exc:
-        print(f"wring verify: {exc}", file=sys.stderr)
-        return EXIT_CONFIG
-
-    # Snapshot git before the bundle exists, so Wringer's own run directory
-    # is never what makes the tree look dirty — or shows up in its own
-    # evidence as an untracked file.
-    state = git.inspect(root)
-    patch = git.diff(root, state.head_sha)
-    status_text = git.status(root)
-    # Built from the environment this run inherits, so the gates' own
-    # secrets are the ones erased.
-    redactor = redact.Redactor.from_config(cfg.evidence)
-    try:
-        if args.output is not None:
-            bundle = evidence.Bundle.at(Path(args.output), redactor=redactor)
-        else:
-            bundle = evidence.Bundle.create(
-                root / evidence.RUNS_DIRNAME, redactor=redactor
-            )
-    except evidence.EvidenceError as exc:
-        print(f"wring verify: {exc}", file=sys.stderr)
-        return EXIT_CONFIG
-
-    bundle.event(
-        "run.started",
-        run_id=bundle.run_id,
-        wringer_version=__version__,
-        repo=root.name,
-        sha=state.head_sha,
-    )
-    bundle.event(
-        "git.status",
-        dirty=state.dirty,
-        changed_files=list(state.changed_files),
-        # Only when there are any, so the event stays the spec's shape for
-        # the common case.
-        **({"untracked": list(state.untracked)} if state.untracked else {}),
-    )
-    if patch is not None:
-        bundle.write_capture(evidence.DIFF_FILENAME, patch)
-    if status_text is not None:
-        bundle.write_capture(evidence.STATUS_FILENAME, status_text)
-
-    results: list[gates.GateResult] = []
-    skipped: list[config.Gate] = []
-    failed_gate: str | None = None
-
-    interrupted: summary.Interrupted | None = None
-
-    for offset, (index, gate) in enumerate(planned):
-        try:
-            result = _run_gate(bundle, gate, index, root)
-        except KeyboardInterrupt:
-            # Ctrl-C: finish the bundle rather than abandon it half-written.
-            # A run that stopped is evidence too, as long as it says so.
-            # The gate that was running is neither passed nor skipped, so it
-            # is carried separately — its directory already exists and holds
-            # whatever it printed before it was killed.
-            interrupted = summary.Interrupted(
-                gate=gate, directory=bundle.gate_dir(index, gate.id)
-            )
-            skipped = [pending for _, pending in planned[offset + 1 :]]
-            break
-        results.append(result)
-        if not args.json:
-            _report_gate(result)
-        if not result.passed and not gate.optional:
-            # Stop on the first required failure; everything after it is
-            # unrun, not passed, and the summary says so.
-            failed_gate = gate.id
-            skipped = [pending for _, pending in planned[offset + 1 :]]
-            break
-
-    if interrupted is not None:
-        status = "interrupted"
-    elif failed_gate is not None:
-        status = "failed"
-    else:
-        status = "passed"
-    bundle.event(
-        "run.finished",
-        status=status,
-        **({"failed_gate": failed_gate} if failed_gate is not None else {}),
-    )
-    bundle.write_manifest(state=state, status=status, failed_gate=failed_gate)
-    summary.write(
-        bundle,
-        state,
-        results=results,
-        skipped=skipped,
-        failed_gate=failed_gate,
-        status=status,
-        interrupted=interrupted,
-    )
-
-    if args.json:
-        _report_json(bundle, root, failed_gate, status)
-    else:
-        _report_run(bundle, root, results, failed_gate, status)
-
-    if interrupted is not None:
-        return EXIT_INTERRUPTED
-    return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
+    return None
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
@@ -476,59 +410,6 @@ def _explain_changes(recorded: list[dict]) -> None:
         shown = ", ".join(untracked[:5])
         more = f", … {len(untracked) - 5} more" if len(untracked) > 5 else ""
         print(f"{lead}Untracked ({len(untracked)}): {shown}{more}")
-
-
-def _plan(
-    cfg: config.Config, requested: str | None
-) -> list[tuple[int, config.Gate]]:
-    """The gates this run will attempt, each with its declared position.
-
-    Every gate by default, in declared order (the config decides what runs
-    cheapest first). `--gate ID` narrows the run to one gate but keeps its
-    number, so its evidence lands where a full run would have put it.
-    """
-    numbered = list(enumerate(cfg.gates, start=1))
-    if requested is None:
-        return numbered
-
-    for index, gate in numbered:
-        if gate.id == requested:
-            return [(index, gate)]
-    known = ", ".join(gate.id for gate in cfg.gates)
-    raise config.ConfigError(
-        f"no gate '{requested}' in {config.CONFIG_FILENAME} (declared: {known})"
-    )
-
-
-def _run_gate(
-    bundle: evidence.Bundle, gate: config.Gate, index: int, root: Path
-) -> gates.GateResult:
-    """Run one gate and record everything it produced."""
-    bundle.event("gate.started", gate_id=gate.id, command=gate.run)
-    gate_dir = bundle.gate_dir(index, gate.id)
-    result = gates.run(
-        gate,
-        cwd=root,
-        stdout_path=gate_dir / "stdout.log",
-        stderr_path=gate_dir / "stderr.log",
-        redactor=bundle.redactor,
-    )
-    bundle.write_gate_result(gate_dir, result)
-
-    finished: dict[str, object] = {
-        "gate_id": gate.id,
-        "exit_code": result.exit_code,
-        "duration_ms": result.duration_ms,
-    }
-    if not result.passed:
-        # The spec carries `log` on the failing gate only — that is the one
-        # a reader is being sent to.
-        finished["log"] = bundle.relative(result.stdout_path)
-    if result.truncated:
-        # Only when true: an absent key means the log is whole.
-        finished["truncated"] = True
-    bundle.event("gate.finished", **finished)
-    return result
 
 
 def _gate_line(
