@@ -96,6 +96,39 @@ def test_duplicate_gate_ids_raise():
         parse({"version": 1, "gates": [gate(), gate()]})
 
 
+@pytest.mark.parametrize(
+    "gate_id",
+    [
+        "../../escape",  # would write outside the bundle
+        "..",
+        "sub/dir",
+        "back\\slash",
+        "with space",
+        "trailing.",
+        "dots.in.id",
+        "-leading-dash",
+        "_leading_underscore",
+        "héllo",  # unicode lookalike
+        "tab\there",
+        "new\nline",
+        "a" * 65,
+    ],
+)
+def test_gate_ids_that_are_not_slugs_are_rejected(gate_id):
+    """A gate id names a directory, so a bad one must fail loudly at parse
+    time rather than quietly writing somewhere unexpected."""
+    with pytest.raises(config.ConfigError, match="'id'"):
+        parse({"version": 1, "gates": [gate(id=gate_id)]})
+
+
+@pytest.mark.parametrize(
+    "gate_id", ["t", "test", "Test", "lint-2", "unit_tests", "3rd", "a" * 64]
+)
+def test_slug_gate_ids_are_accepted(gate_id):
+    cfg = parse({"version": 1, "gates": [gate(id=gate_id)]})
+    assert cfg.gates[0].id == gate_id
+
+
 def test_load_missing_file_raises(tmp_path):
     with pytest.raises(config.ConfigError, match="cox init"):
         config.load(tmp_path / config.CONFIG_FILENAME)

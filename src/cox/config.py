@@ -7,6 +7,7 @@ in a gate definition must not silently change what "verified" means.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,12 @@ import yaml
 
 CONFIG_FILENAME = ".cox.yaml"
 DEFAULT_TIMEOUT_SECONDS = 120
+
+# A gate id becomes a directory name in the bundle (`gates/NNN_<id>/`), so it
+# is a slug rather than free text: no path separators, no spaces, no unicode
+# lookalikes. A config typo must never write outside the run directory.
+GATE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+MAX_GATE_ID_LENGTH = 64
 
 _TOP_LEVEL_KEYS = {"version", "gates", "evidence"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
@@ -97,8 +104,19 @@ def _parse_gate(raw: Any, index: int, source: str) -> Gate:
         raise ConfigError(f"{where}: unknown keys: {', '.join(unknown)}")
 
     gate_id = raw.get("id")
-    if not isinstance(gate_id, str) or not gate_id.strip():
+    if not isinstance(gate_id, str) or not gate_id:
         raise ConfigError(f"{where}: 'id' must be a non-empty string")
+    if len(gate_id) > MAX_GATE_ID_LENGTH:
+        raise ConfigError(
+            f"{where} ('{gate_id}'): 'id' must be at most "
+            f"{MAX_GATE_ID_LENGTH} characters"
+        )
+    if not GATE_ID_PATTERN.fullmatch(gate_id):
+        raise ConfigError(
+            f"{where} ('{gate_id}'): 'id' must start with a letter or digit and "
+            "use only letters, digits, '-' and '_' — it becomes a directory "
+            "name in the evidence bundle"
+        )
 
     run = raw.get("run")
     if not isinstance(run, str) or not run.strip():
