@@ -28,9 +28,11 @@ star; [ROADMAP.md](ROADMAP.md) governs execution order.
   listed), say so in an issue. Conformance-first: the suite is the
   contract, adapters are community-maintainable.
 
-## Once code exists (Phase 0+)
+## Now that code exists
 
-- `make verify` green is the only law. No PR merges red.
+- **The gate is green tests.** Today that is `.venv/bin/pytest` (setup in
+  [AGENTS.md](AGENTS.md#build-test-run)); from Bolt 5 onward it is
+  `cox verify` on this repo, mirrored in CI. No PR merges red.
 - Small, reviewable PRs; conventional commits; evidence in the PR
   description.
 - Respect the package-boundary matrix (enforced by lint).
