@@ -7,6 +7,7 @@
 *The coxswain steers the boat, calls the stroke rate, and never rows.*
 *The harness steers the work, sets the loop cadence, and never writes the code itself.*
 
+[![tests](https://github.com/marcoakes/coxswain/actions/workflows/tests.yml/badge.svg)](https://github.com/marcoakes/coxswain/actions/workflows/tests.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![v0.1.0: Sep 30, 2026](https://img.shields.io/badge/v0.1.0-Sep%2030%2C%202026-orange.svg)](ROADMAP.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
