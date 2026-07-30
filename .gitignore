@@ -25,3 +25,5 @@ build/
 .idea/
 .vscode/
 *.log
+# ...except the committed demo bundle, whose gate logs ARE the demonstration
+!.wringer.example/**/*.log
