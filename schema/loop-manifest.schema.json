@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/loop-manifest.schema.json",
+  "title": "Wringer loop manifest",
+  "description": "manifest.json of a `wring run` loop bundle — the index of one repair loop. Schema version wringer.loop.v1, versioned independently of the evidence bundle (wringer.evidence.v1) that each iteration writes.",
+  "type": "object",
+  "required": ["schema_version", "loop_id", "started_at", "repo", "config", "result"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.loop.v1"
+    },
+    "loop_id": {
+      "description": "The loop directory's name, YYYYMMDD-HHMMSS-<4 hex>.",
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "description": "Local time with UTC offset, seconds precision.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "repo": {
+      "description": "The tree as it was when the loop started — not after it ran.",
+      "type": "object",
+      "required": ["root", "head_sha", "branch", "dirty"],
+      "additionalProperties": false,
+      "properties": {
+        "root": { "type": "string" },
+        "head_sha": { "type": ["string", "null"] },
+        "branch": { "type": ["string", "null"] },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "config": {
+      "description": "What the loop was told to do, redacted.",
+      "type": "object",
+      "required": ["max_iterations", "worker"],
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": {
+          "description": "The budget actually used, after any --max-iterations override.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "worker": {
+          "description": "The declared worker command, before placeholder substitution.",
+          "type": "string"
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": ["status", "reason", "iterations", "final_run"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "description": "converged = the gates passed. stopped = they did not. interrupted = Ctrl-C.",
+          "enum": ["converged", "stopped", "interrupted"]
+        },
+        "reason": {
+          "description": "Why it ended. no_progress means the worker left the tree byte-identical, so the gates would only repeat themselves.",
+          "enum": ["converged", "max_iterations", "no_progress", "interrupted"]
+        },
+        "iterations": {
+          "description": "How many verifications ran, including the one that converged.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_run": {
+          "description": "Repo-relative path of the last evidence bundle, or null if no verification completed.",
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

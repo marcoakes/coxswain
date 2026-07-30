@@ -24,6 +24,7 @@ no network, no uploads — ever.
 | Document | Authority |
 |---|---|
 | [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) | **binding** for v0.1 implementation — CLI surface, exit codes, bundle format, build order, release bar |
+| [SPEC_RUN_V0.md](SPEC_RUN_V0.md) | **binding** for v0.2 slice 1 — `wring run`, the `run:` config section, the loop's rulings and `wringer.loop.v1` |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
@@ -37,7 +38,8 @@ Where they disagree about v0.1, the spec wins.
 There **is** code now: `wring init` and `wring verify` work — `verify` runs a
 repo's whole declared gate set and writes a real bundle, `wring explain`
 diagnoses a finished run, `--json` feeds agents, and secrets never reach the
-disk — with 196 tests passing on Python 3.11–3.13 (plus macOS) in CI.
+disk — with 233 tests passing on Python 3.11–3.13 (plus macOS) in CI.
+On the `run-v0.2` branch, `wring run` closes the loop around all of it.
 
 **Wringer now verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares
 this repo's own gates, CI runs `wring verify` and uploads the bundle, and a
@@ -53,6 +55,7 @@ maintainer's to do.
 | 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `wring verify --json`, `wring explain` |
 | 4 — redaction & safety | Day 4 | ✅ env redaction before write, capped logs with a declared note, binary + textconv exclusion, exit 2 outside a repo, exit 3 mid-merge/rebase, exit 4 on SIGINT with the gate killed |
 | 5 — dogfood | Day 5 | ✅ `wring init` detects real commands (pyproject / package.json / Makefile) and gitignores `.wringer/`, `wring verify --output`, Wringer's own `.wringer.yaml`, CI runs `wring verify` + uploads the bundle, committed bundle in `.wringer.example/` |
+| v0.2 slice 1 — the loop | — | ✅ `wring run`: `run:` config, verify→brief→worker→verify, plateau fingerprint, `wringer.loop.v1` bundle, loop schemas ([SPEC_RUN_V0.md](SPEC_RUN_V0.md)) |
 | 5.5 — pre-publish hardening | — | ✅ interrupted runs named in `summary.md` and diagnosed by `explain`, `latest_run` ordered by time not name, reused `--output` cleared before writing, post-kill drain bounded, event lists scrubbed, `evidence.include` shape-checked |
 
 The `v0.1.0` tag is gated on the spec's
@@ -129,15 +132,21 @@ block first — the clean console is the product.
 | `evidence.py` | allocate `.wringer/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) — scrubbing every write, because the `Bundle` holds the redactor | decide *what* counts as a secret — that is `redact.py` |
 | `redact.py` | turn env-var name patterns into the set of secret values, and erase them from text or bytes | look anywhere but the environment |
 | `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
+| `verify.py` | one verification as a **callable**: snapshot git, open a bundle, run the planned gates, stop on the first required failure, write manifest + summary, return an `Outcome`. Also `plan()` and the `--json` shape both commands share | print anything, or decide an exit code — that is `cli.py`'s |
+| `loop.py` | v0.2's `wring run`: verify → brief → worker → verify, the plateau fingerprint, and the `wringer.loop.v1` bundle under `.wringer/loops/` | call an LLM, touch git, or nest a verify bundle inside a loop bundle (runs are referenced by path) |
 
 Every module in the spec's layout now exists.
 
 ### Do not add these early
 
-The spec's [Non-goals](SPEC_VERIFY_V0.md#non-goals-for-v010-binding)
-are **binding**: no `wring run`, no LLM judge, no issue ingestion, no PR
-creation, no Temporal, no OpenTelemetry, no multi-agent anything, no
-sandboxing beyond recording repo state.
+v0.1's [Non-goals](SPEC_VERIFY_V0.md#non-goals-for-v010-binding) still bind
+everything under `wring verify`. `wring run` now exists, but only the slice
+[SPEC_RUN_V0.md](SPEC_RUN_V0.md) defines: still **no LLM judge, no issue
+ingestion, no PR creation, no commits or pushes, no Temporal, no
+OpenTelemetry, no multi-agent anything**, and no anti-thrash beyond the
+plateau fingerprint. Wringer itself makes **no LLM call and no network call**
+— the worker is the user's own program, and every worker in the test suite is
+a shell one-liner.
 
 Also: a flag that half-works is worse than a missing flag, because agents
 consume this CLI. `--changed-only` stays **unregistered**.

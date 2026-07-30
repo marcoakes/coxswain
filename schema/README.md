@@ -10,6 +10,13 @@ rather than reverse-engineer it — the point of
 | [`manifest.schema.json`](manifest.schema.json) | `manifest.json` — the run's index |
 | [`evidence-event.schema.json`](evidence-event.schema.json) | **one line** of `evidence.jsonl`, not the file |
 | [`gate-result.schema.json`](gate-result.schema.json) | `gates/NNN_<id>/result.json` |
+| [`loop-manifest.schema.json`](loop-manifest.schema.json) | `manifest.json` of a `wring run` loop bundle |
+| [`loop-event.schema.json`](loop-event.schema.json) | **one line** of a loop's `loop.jsonl` |
+
+The loop schemas carry their own version, **`wringer.loop.v1`**, moving
+independently of the evidence bundle: a loop *references* the runs it drove
+(`evidence_dir`) rather than containing them, so the two formats can change
+without dragging each other along.
 
 `summary.md`, `diff.patch` and `status.txt` have no schema: they are for
 people, and machines should read the three files above instead.
@@ -29,6 +36,9 @@ Several keys appear only in the case they describe, and a reader must treat
 - **`failed_gate`** on `run.finished` — present only when a required gate
   failed.
 
+In a loop, the same convention holds: **`failed_gate`** on `verify.finished`
+and **`timed_out`** on `worker.finished` appear only in the case they name.
+
 Two absences carry more weight than any field:
 
 - **A `gate.started` with no matching `gate.finished`** means the run was
@@ -38,6 +48,8 @@ Two absences carry more weight than any field:
 - **A gate that was skipped leaves nothing at all** — no event, no directory.
   It did not run, so the bundle says nothing about it. `summary.md` is the one
   place the full declared set appears.
+- **A `worker.started` with no `worker.finished`** is the same story one level
+  up: the loop was interrupted while the worker was running.
 
 ## Stability
 

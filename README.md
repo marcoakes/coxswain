@@ -83,6 +83,33 @@ same id, so the transcript and the bundle are the same event rather than two
 similar ones. That bundle is the answer to "how do I know?" — read it rather
 than trust the badge.
 
+## The loop is real now — `wring run`
+
+`wring verify` proves a change; `wring run` closes the loop around it. While
+the gates fail it writes the failure into a brief, hands it to **your** coding
+agent as a subprocess, and verifies again. Wringer still never calls an LLM
+itself. Captured from a scratch repo with a planted bug and a scripted worker:
+
+```
+$ wring run
+
+iteration 1/3
+✗ test failed        0.2s
+→ worker             0.0s  (exit 0)
+
+iteration 2/3
+✓ test passed        0.1s
+
+Converged in 2 iterations.
+Loop evidence: .wringer/loops/20260730-234410-7c70/
+```
+
+A worker's exit code never ends the loop — the evidence decides — and a worker
+that changes nothing stops it without re-running the gates to prove the
+obvious. `wring run` never touches git. Contract:
+**[SPEC_RUN_V0.md](SPEC_RUN_V0.md)**; walkthrough in the
+[quickstart](QUICKSTART.md#the-loop--wring-run).
+
 ## The format is targetable, not just readable
 
 The bundle is the interface, so it is [published as JSON

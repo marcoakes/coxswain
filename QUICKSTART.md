@@ -266,6 +266,74 @@ the directory you gave it — clearing the previous run's bundle first, because
 one directory describes one run. Anything else you keep in that directory is
 left alone.
 
+## The loop — `wring run`
+
+`wring verify` proves a change. `wring run` closes the loop around it: while
+the gates fail, it writes the failure into a brief, hands it to **your** coding
+agent, and verifies again. Wringer never calls an LLM itself — the worker is
+whatever command you declare, spawned as a subprocess.
+
+Add a `run:` section:
+
+```yaml
+run:
+  worker: claude -p "$(cat {brief})"
+  max_iterations: 3
+  worker_timeout: 900
+```
+
+`{brief}` is the path to this iteration's brief; `{evidence_dir}` and
+`{iteration}` are also available. There is **no default worker** — Wringer
+runs the command you wrote down, never one it guessed.
+
+A real run, captured from a scratch repo whose `add()` returned `a - b`, with
+a shell script standing in for the agent:
+
+```
+$ wring run
+
+iteration 1/3
+✗ test failed        0.2s
+→ worker             0.0s  (exit 0)
+
+iteration 2/3
+✓ test passed        0.1s
+
+Converged in 2 iterations.
+Loop evidence: .wringer/loops/20260730-234410-7c70/
+```
+
+Exit `0` converged · `1` stopped without converging · `2` config error ·
+`3` refused · `4` interrupted. `wring run --json` emits one object with
+`status`, `reason`, `iterations`, `loop_dir` and the last verify's `--json`.
+
+The loop leaves its own evidence beside the run bundles, referencing rather
+than swallowing them:
+
+```
+.wringer/loops/20260730-234410-7c70/
+  manifest.json     summary.md     loop.jsonl
+  iterations/001/{brief.md, worker.stdout.log, worker.stderr.log}
+```
+
+```
+| iteration | verify | worker | evidence |
+|---|---|---|---|
+| 1 | failed (`test`) | exit 0 | `.wringer/runs/20260730-234410-9984` |
+| 2 | passed | — | `.wringer/runs/20260730-234411-b2e7` |
+```
+
+Two rules worth knowing before you point it at a real agent:
+
+- **A worker's exit code never ends the loop.** The evidence decides. A worker
+  that crashed after fixing the bug converges on the next lap; one that exited
+  cleanly having changed nothing stops with `no_progress` — and stops *without*
+  re-running the gates, because an identical tree gives an identical answer.
+- **`wring run` never touches git.** No commits, no branches, no pushes.
+  Committing what came out is your decision.
+
+`run:` needs Wringer 0.2+; a verify-only config stays valid forever.
+
 ## Not built yet
 
 Everything above is real. This is **not implemented** and does not work if
