@@ -17,16 +17,32 @@ import yaml
 CONFIG_FILENAME = ".wringer.yaml"
 DEFAULT_TIMEOUT_SECONDS = 120
 
+# `wring run` defaults (SPEC_RUN_V0.md §Config). Three laps is enough to show
+# whether a worker is converging without spending an afternoon proving it is
+# not; fifteen minutes is a generous single turn for a coding agent.
+DEFAULT_MAX_ITERATIONS = 3
+DEFAULT_WORKER_TIMEOUT_SECONDS = 900
+
+# What a worker command may ask Wringer to substitute. Anything else in
+# braces is a typo, and a typo that reached the shell would be a command
+# nobody wrote.
+WORKER_PLACEHOLDERS = ("brief", "evidence_dir", "iteration")
+
+# `{name}` not preceded by `$`, so `${SHELL_VAR}` is the shell's business and
+# passes through untouched.
+_PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-z_]+)\}")
+
 # A gate id becomes a directory name in the bundle (`gates/NNN_<id>/`), so it
 # is a slug rather than free text: no path separators, no spaces, no unicode
 # lookalikes. A config typo must never write outside the run directory.
 GATE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 MAX_GATE_ID_LENGTH = 64
 
-_TOP_LEVEL_KEYS = {"version", "gates", "evidence"}
+_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
+_RUN_KEYS = {"worker", "max_iterations", "worker_timeout"}
 
 
 class ConfigError(Exception):
@@ -42,12 +58,28 @@ class Gate:
 
 
 @dataclass(frozen=True)
+class Run:
+    """The `run:` section — what `wring run` drives (SPEC_RUN_V0.md).
+
+    `worker` has no default and never will. Wringer runs the command a repo
+    wrote down; inventing one would be the same sin as inventing a gate.
+    """
+
+    worker: str
+    max_iterations: int = DEFAULT_MAX_ITERATIONS
+    worker_timeout: int = DEFAULT_WORKER_TIMEOUT_SECONDS
+
+
+@dataclass(frozen=True)
 class Config:
     version: int
     gates: tuple[Gate, ...]
     # The `evidence:` section (include lists, redaction patterns) is
     # parsed for shape only until the Day-3/Day-4 bolts consume it.
     evidence: dict[str, Any] = field(default_factory=dict)
+    # None when the repo has not opted into the loop. `wring verify` neither
+    # needs nor reads this; `wring run` refuses without it.
+    run: Run | None = None
 
 
 def load(path: Path) -> Config:
@@ -94,7 +126,77 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         raise ConfigError(f"{source}: 'evidence' must be a mapping")
     _validate_evidence(evidence, source)
 
-    return Config(version=version, gates=gates, evidence=evidence)
+    return Config(
+        version=version,
+        gates=gates,
+        evidence=evidence,
+        run=_parse_run(raw.get("run"), source),
+    )
+
+
+def _parse_run(raw: Any, source: str) -> Run | None:
+    """The `run:` section, or None when the repo has not opted into the loop."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'run' must be a mapping")
+
+    unknown = sorted(set(raw) - _RUN_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'run': {', '.join(unknown)}")
+
+    worker = raw.get("worker")
+    if not isinstance(worker, str) or not worker.strip():
+        raise ConfigError(
+            f"{source}: 'run.worker' must be a non-empty string — the command "
+            "that edits the code, e.g. 'claude -p \"$(cat {brief})\"'. There is "
+            "no default: Wringer runs the worker you wrote down, never one it "
+            "guessed"
+        )
+
+    unknown_placeholders = sorted(
+        set(_PLACEHOLDER_PATTERN.findall(worker)) - set(WORKER_PLACEHOLDERS)
+    )
+    if unknown_placeholders:
+        raise ConfigError(
+            f"{source}: 'run.worker' uses unknown placeholder(s) "
+            f"{', '.join('{' + name + '}' for name in unknown_placeholders)} — "
+            f"available: {', '.join('{' + p + '}' for p in WORKER_PLACEHOLDERS)}"
+        )
+
+    return Run(
+        worker=worker,
+        max_iterations=_positive_int(
+            raw, "max_iterations", DEFAULT_MAX_ITERATIONS, source
+        ),
+        worker_timeout=_positive_int(
+            raw, "worker_timeout", DEFAULT_WORKER_TIMEOUT_SECONDS, source
+        ),
+    )
+
+
+def _positive_int(raw: dict, key: str, default: int, source: str) -> int:
+    value = raw.get(key, default)
+    if not _is_int(value) or value < 1:
+        raise ConfigError(
+            f"{source}: 'run.{key}' must be an integer of at least 1 "
+            f"(got {value!r})"
+        )
+    return value
+
+
+def substitute(command: str, **values: Any) -> str:
+    """Fill a worker command's placeholders.
+
+    Only the declared names, and only `{name}` — `${VAR}` is the shell's, and
+    an unknown placeholder was already rejected at parse time.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        return str(values[name]) if name in values else match.group(0)
+
+    return _PLACEHOLDER_PATTERN.sub(replace, command)
 
 
 def _validate_evidence(evidence: dict[str, Any], source: str) -> None:
