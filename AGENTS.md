@@ -36,7 +36,7 @@ Where they disagree about v0.1, the spec wins.
 There **is** code now: `wring init` and `wring verify` work — `verify` runs a
 repo's whole declared gate set and writes a real bundle, `wring explain`
 diagnoses a finished run, `--json` feeds agents, and secrets never reach the
-disk — with 172 tests passing on Python 3.11–3.13 (plus macOS) in CI.
+disk — with 190 tests passing on Python 3.11–3.13 (plus macOS) in CI.
 
 **Wringer now verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares
 this repo's own gates, CI runs `wring verify` and uploads the bundle, and a
@@ -52,6 +52,7 @@ maintainer's to do.
 | 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `wring verify --json`, `wring explain` |
 | 4 — redaction & safety | Day 4 | ✅ env redaction before write, capped logs with a declared note, binary + textconv exclusion, exit 2 outside a repo, exit 3 mid-merge/rebase, exit 4 on SIGINT with the gate killed |
 | 5 — dogfood | Day 5 | ✅ `wring init` detects real commands (pyproject / package.json / Makefile) and gitignores `.wringer/`, `wring verify --output`, Wringer's own `.wringer.yaml`, CI runs `wring verify` + uploads the bundle, committed bundle in `.wringer.example/` |
+| 5.5 — pre-publish hardening | — | ✅ interrupted runs named in `summary.md` and diagnosed by `explain`, `latest_run` ordered by time not name, reused `--output` cleared before writing, post-kill drain bounded, event lists scrubbed, `evidence.include` shape-checked |
 
 The `v0.1.0` tag is gated on the spec's
 [Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
@@ -119,7 +120,7 @@ block first — the clean console is the product.
 
 | Module | Does | Deliberately does not (yet) |
 |---|---|---|
-| `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, and `wring explain`'s rendering | register `--changed-only` or `--output` — see below |
+| `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, `--output`, and `wring explain`'s rendering | register `--changed-only` — see below |
 | `config.py` | strict `.wringer.yaml` loader → frozen `Config`/`Gate` dataclasses; validates `evidence.redact` because a typo there must not silently disable redaction | consume `evidence.include` (still shape-only) |
 | `detect.py` | find the commands a repo already declares — ruff/mypy/pytest in `pyproject.toml`, npm scripts, Makefile targets — and render `.wringer.yaml`; fall back to a commented template when nothing is found | invent a command nobody wrote down (*"if detection is uncertain, generate comments rather than being clever"*) |
 | `git.py` | root detection, HEAD SHA, branch, dirty flag, changed/untracked lists, `diff`/`status` capture, and the refusal checks (`is_repo`, `in_progress`); read-only, bounded, never fatal | write anything — every call here is a read |
