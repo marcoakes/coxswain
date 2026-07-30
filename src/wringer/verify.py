@@ -41,6 +41,34 @@ class Outcome:
         return self.status == "passed"
 
 
+def bundle_path(bundle: evidence.Bundle, root: Path) -> str:
+    """The bundle's path as a reader would type it — repo-relative when it
+    lives inside the repo, absolute when it somehow does not."""
+    try:
+        return bundle.directory.relative_to(root).as_posix()
+    except ValueError:
+        return str(bundle.directory)
+
+
+def json_summary(outcome: Outcome, root: Path) -> dict[str, object]:
+    """The `--json` object (spec §CLI surface), also embedded in a loop's
+    brief so the worker reads exactly what an agent piping `--json` would.
+
+    Keys are stable and present even when empty: a consumer should never have
+    to distinguish "passed" from "the tool forgot to tell me".
+    """
+    return {
+        "status": outcome.status,
+        "failed_gate": outcome.failed_gate,
+        "rerun": (
+            f"wring verify --gate {outcome.failed_gate}"
+            if outcome.failed_gate is not None
+            else None
+        ),
+        "evidence_dir": bundle_path(outcome.bundle, root),
+    }
+
+
 def plan(cfg: config.Config, requested: str | None) -> list[tuple[int, config.Gate]]:
     """The gates this run will attempt, each with its declared position.
 

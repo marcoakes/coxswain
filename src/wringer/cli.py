@@ -13,7 +13,17 @@ import json
 import sys
 from pathlib import Path
 
-from wringer import __version__, config, detect, evidence, gates, git, summary, verify
+from wringer import (
+    __version__,
+    config,
+    detect,
+    evidence,
+    gates,
+    git,
+    loop,
+    summary,
+    verify,
+)
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -67,6 +77,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_verify.set_defaults(func=cmd_verify)
+
+    parser_run = subparsers.add_parser(
+        "run",
+        help="loop: verify, hand the failure to your worker, verify again",
+    )
+    parser_run.add_argument(
+        "--max-iterations",
+        type=int,
+        metavar="N",
+        help="override the config's max_iterations for this run",
+    )
+    parser_run.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_run.set_defaults(func=cmd_run)
 
     parser_explain = subparsers.add_parser(
         "explain",
@@ -180,6 +207,129 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if outcome.interrupted is not None:
         return EXIT_INTERRUPTED
     return EXIT_GATE_FAILED if outcome.failed_gate is not None else EXIT_OK
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Loop until the evidence says stop (SPEC_RUN_V0.md)."""
+    root = git.find_root(Path.cwd())
+
+    refused = _refuse_unverifiable(root, "run")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        verify.plan(cfg, None)  # fail on a broken gate list before any work
+    except config.ConfigError as exc:
+        print(f"wring run: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.run is None:
+        print(
+            f"wring run: no 'run:' section in {config.CONFIG_FILENAME} — "
+            "the loop needs to know what edits the code. Add one:\n\n"
+            "  run:\n"
+            '    worker: claude -p "$(cat {brief})"\n\n'
+            "There is no default worker: Wringer runs the command you wrote "
+            "down, never one it guessed.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    if args.max_iterations is not None and args.max_iterations < 1:
+        print(
+            f"wring run: --max-iterations must be at least 1 "
+            f"(got {args.max_iterations})",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    quiet = args.json
+    try:
+        outcome = loop.run(
+            root,
+            cfg,
+            max_iterations=args.max_iterations,
+            on_iteration=None if quiet else _report_iteration,
+            on_gate=None if quiet else _report_gate,
+            on_worker=None if quiet else _report_worker,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring run: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": outcome.status,
+                    "reason": outcome.reason,
+                    "iterations": outcome.iterations,
+                    "loop_dir": _relative(outcome.directory, root),
+                    "final": (
+                        verify.json_summary(outcome.final, root)
+                        if outcome.final is not None
+                        else None
+                    ),
+                }
+            )
+        )
+    else:
+        _report_loop(outcome, root)
+
+    if outcome.status == "interrupted":
+        return EXIT_INTERRUPTED
+    return EXIT_OK if outcome.converged else EXIT_GATE_FAILED
+
+
+def _report_iteration(iteration: int, budget: int) -> None:
+    print(f"\niteration {iteration}/{budget}", flush=True)
+
+
+def _report_worker(result: gates.GateResult) -> None:
+    """One line for the worker's turn, shaped like a gate's so the two read
+    as one transcript."""
+    note = "timed out" if result.timed_out else f"exit {result.exit_code}"
+    label = "→ worker"
+    padding = " " * max(1, 21 - len(label))
+    print(f"{label}{padding}{_duration(result.duration_ms)}  ({note})", flush=True)
+
+
+def _duration(duration_ms: int) -> str:
+    """Seconds for a gate, minutes once a worker has been thinking a while."""
+    seconds = duration_ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, seconds = divmod(int(seconds), 60)
+    return f"{minutes}m {seconds:02d}s"
+
+
+_LOOP_ENDINGS = {
+    "converged": "Converged in {n} iteration{s}.",
+    "max_iterations": "Stopped after {n} iteration{s} — the budget ran out and "
+    "the gates still fail.",
+    "no_progress": "Stopped after {n} iteration{s} — the worker changed nothing, "
+    "so the gates would say the same again.",
+    "interrupted": "Interrupted after {n} iteration{s}.",
+}
+
+
+def _report_loop(outcome: loop.Outcome, root: Path) -> None:
+    ending = _LOOP_ENDINGS.get(outcome.reason, "Stopped after {n} iteration{s}.")
+    print(
+        "\n"
+        + ending.format(n=outcome.iterations, s="" if outcome.iterations == 1 else "s")
+    )
+    print(f"Loop evidence: {_relative(outcome.directory, root)}/")
+    if not outcome.converged and outcome.final is not None:
+        print(f"Last verification: {verify.bundle_path(outcome.final.bundle, root)}/")
+
+
+def _relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def _refuse_unverifiable(root: Path, command: str) -> int | None:
