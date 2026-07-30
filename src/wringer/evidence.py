@@ -152,6 +152,35 @@ class Bundle:
 
         raise EvidenceError(f"could not allocate a run directory under {runs_root}")
 
+    @classmethod
+    def at(
+        cls,
+        directory: Path,
+        now: datetime | None = None,
+        redactor: Redactor | None = None,
+    ) -> Bundle:
+        """Use the directory the caller named (`--output`).
+
+        Unlike `create`, this does not refuse an existing directory: naming
+        a path is an instruction, and a caller who says `--output` twice
+        means to overwrite. The run id becomes the directory's own name, so
+        the bundle still identifies itself.
+        """
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            # `evidence.jsonl` is append-only *within* a run. Reusing a
+            # directory starts a new one, so the old log goes rather than
+            # silently growing into a file that describes two runs at once.
+            (directory / EVIDENCE_FILENAME).unlink(missing_ok=True)
+        except OSError as exc:
+            raise EvidenceError(f"cannot create {directory}: {exc}") from exc
+        return cls(
+            directory=directory,
+            run_id=directory.name or new_run_id(datetime.now().astimezone()),
+            started_at=now if now is not None else datetime.now().astimezone(),
+            redactor=redactor or Redactor(),
+        )
+
     def gate_dir(self, index: int, gate_id: str) -> Path:
         """`gates/NNN_<id>/`, NNN being the gate's 1-based position in the
         **declared** order — not its position in this run.

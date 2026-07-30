@@ -447,6 +447,44 @@ def test_a_whole_log_carries_no_truncation_key(
     assert "truncated" not in of_type(events(bundle), "gate.finished")[0]
 
 
+def test_output_writes_the_bundle_where_you_say(
+    repo, write_config, monkeypatch, capsys
+):
+    write_config(repo, ONE_PASSING_GATE)
+    monkeypatch.chdir(repo)
+    target = repo / "somewhere" / "manual-001"
+
+    assert cli.main(["verify", "--output", str(target)]) == cli.EXIT_OK
+
+    assert (target / evidence.MANIFEST_FILENAME).is_file()
+    assert (target / "summary.md").is_file()
+    assert (target / evidence.GATES_DIRNAME / "001_unit").is_dir()
+    # nothing was written to the default location
+    assert bundles(repo) == []
+    # the bundle still identifies itself, by the name it was given
+    assert manifest(target)["run_id"] == "manual-001"
+    assert "somewhere/manual-001/" in capsys.readouterr().out
+
+
+def test_output_reuses_a_directory_because_naming_one_is_an_instruction(
+    repo, write_config, monkeypatch, capsys
+):
+    write_config(repo, ONE_PASSING_GATE)
+    monkeypatch.chdir(repo)
+    target = repo / "fixed"
+
+    assert cli.main(["verify", "--output", str(target)]) == cli.EXIT_OK
+    assert cli.main(["verify", "--output", str(target)]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    # a caller who names the same path twice means it
+    assert manifest(target)["result"]["status"] == "passed"
+    # ...and the log describes THAT run, not both of them stacked up
+    recorded = events(target)
+    assert [event["type"] for event in recorded].count("run.started") == 1
+    assert recorded[0]["run_id"] == manifest(target)["run_id"]
+
+
 def test_a_timeout_fails_the_run_and_says_timed_out(
     repo, write_config, monkeypatch, capsys
 ):

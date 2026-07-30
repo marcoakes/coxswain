@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="run only this gate instead of every declared gate",
     )
     parser_verify.add_argument(
+        "--output",
+        metavar="DIR",
+        help="write the bundle here instead of a new .wringer/runs/<run_id>/",
+    )
+    parser_verify.add_argument(
         "--json",
         action="store_true",
         help="emit one JSON object instead of the human report",
@@ -178,9 +183,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
     # secrets are the ones erased.
     redactor = redact.Redactor.from_config(cfg.evidence)
     try:
-        bundle = evidence.Bundle.create(
-            root / evidence.RUNS_DIRNAME, redactor=redactor
-        )
+        if args.output is not None:
+            bundle = evidence.Bundle.at(Path(args.output), redactor=redactor)
+        else:
+            bundle = evidence.Bundle.create(
+                root / evidence.RUNS_DIRNAME, redactor=redactor
+            )
     except evidence.EvidenceError as exc:
         print(f"wring verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
