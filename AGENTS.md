@@ -37,7 +37,7 @@ Where they disagree about v0.1, the spec wins.
 There **is** code now: `wring init` and `wring verify` work — `verify` runs a
 repo's whole declared gate set and writes a real bundle, `wring explain`
 diagnoses a finished run, `--json` feeds agents, and secrets never reach the
-disk — with 190 tests passing on Python 3.11–3.13 (plus macOS) in CI.
+disk — with 196 tests passing on Python 3.11–3.13 (plus macOS) in CI.
 
 **Wringer now verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares
 this repo's own gates, CI runs `wring verify` and uploads the bundle, and a
