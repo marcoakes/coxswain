@@ -42,14 +42,18 @@ class EvidenceError(Exception):
 def latest_run(runs_root: Path) -> Path | None:
     """The most recent run directory, or None if there are none.
 
-    A run id starts with a sortable timestamp, so lexical order is
-    chronological order — no `stat()` calls, no reliance on mtimes that a
-    copy or a checkout would rewrite.
+    A run id starts with a sortable timestamp, which orders runs down to the
+    second. Within one second the id ends in a *random* suffix, not a
+    counter — so lexical order alone would happily call an older run the
+    latest one. Two runs landing in the same second is not a corner case:
+    it is what a verify-fix-verify loop does all day. mtime breaks the tie.
     """
     if not runs_root.is_dir():
         return None
-    runs = sorted(path for path in runs_root.iterdir() if path.is_dir())
-    return runs[-1] if runs else None
+    runs = [path for path in runs_root.iterdir() if path.is_dir()]
+    if not runs:
+        return None
+    return max(runs, key=lambda path: (path.name[:15], path.stat().st_mtime))
 
 
 def read_manifest(run_dir: Path) -> dict[str, Any]:

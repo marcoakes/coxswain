@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -54,6 +55,39 @@ def test_create_gives_up_rather_than_reusing_a_directory(tmp_path: Path, monkeyp
 
     with pytest.raises(evidence.EvidenceError):
         evidence.Bundle.create(tmp_path, now=NOW)
+
+
+def test_latest_run_is_the_newest_not_the_alphabetically_last(tmp_path: Path):
+    """Two runs in the same second are ordered by a random suffix, not a
+    counter — so the id alone can call an older run the latest one. That is
+    exactly what a verify-fix-verify loop produces."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    earlier = runs / "20260730-201936-ffff"  # lexically last, chronologically first
+    later = runs / "20260730-201936-0000"
+    earlier.mkdir()
+    later.mkdir()
+    os.utime(earlier, (1, 1))
+    os.utime(later, (2, 2))
+
+    assert evidence.latest_run(runs) == later
+
+
+def test_latest_run_prefers_a_newer_second_over_mtime(tmp_path: Path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    older_second = runs / "20260730-201936-ffff"
+    newer_second = runs / "20260730-201937-0000"
+    older_second.mkdir()
+    newer_second.mkdir()
+    os.utime(older_second, (9, 9))  # a misleading mtime must not win
+    os.utime(newer_second, (2, 2))
+
+    assert evidence.latest_run(runs) == newer_second
+
+
+def test_latest_run_with_no_runs_is_none(tmp_path: Path):
+    assert evidence.latest_run(tmp_path / "nothing-here") is None
 
 
 def test_gate_dir_is_named_for_the_declared_position(tmp_path: Path):
