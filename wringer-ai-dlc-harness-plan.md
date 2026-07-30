@@ -1,10 +1,10 @@
 > ⚠️ **AMENDED 2026-07-29 — THE 90-DAY COMPRESSION.** External design review ruled the seven-phase sequence in §6 too slow to market: by its Phase 2, the incumbents will have absorbed the differentiated ideas. Priority INVERTS — ship the differentiated core first (loop contracts, deterministic gates, worker/judge isolation); defer the undifferentiated plumbing (multi-cloud runtime adapters, gateway planes, policy hooks) until the loop exists. §6's Phases 0–2 compress into a 90-day arc; Phases 3–7 defer to post-MVP, pulled by demand rather than pushed by plan. ONE hero runtime adapter: Temporal. Hard deadline for the first installable release: **September 30, 2026**. Everything below remains the architectural north star; **[ROADMAP.md](ROADMAP.md) governs execution order.**
 
-# Coxswain — an open-source, enterprise-grade AI-DLC harness
+# Wringer — an open-source, enterprise-grade AI-DLC harness
 
 **Build plan for Claude Code · v1.0 · July 29, 2026**
 
-> Working title: **Coxswain** (CLI: `cox`). The coxswain steers the boat, calls the stroke rate, and never rows. The harness steers the work, sets the loop cadence, and never writes the code itself. Rename freely.
+> Working title: **Wringer** (CLI: `wring`). The wringer steers the boat, calls the stroke rate, and never rows. The harness steers the work, sets the loop cadence, and never writes the code itself. Rename freely.
 
 ---
 
@@ -12,7 +12,7 @@
 
 The substrate is converging. Every serious AI-DLC implementation lands on the same five-layer architecture: **Intent → Harness → Protocol wire → Interchangeable agents → Sandboxed execution**, with context and governance cross-cutting. The frontier labs are all selling their piece of it: Anthropic Managed Agents, AWS Bedrock AgentCore, Google's Gemini Enterprise Agent Platform (née Vertex AI Agent Builder), Microsoft Foundry. The code layer is commoditizing; what stays defensible is governance, deterministic verification, audit trails, and execution speed on top of the substrate.
 
-**Coxswain's bet:** nobody owns the *neutral* harness layer. Each cloud's harness locks you to its runtime, its identity system, its gateway. The open-source opportunity is a **control-plane-agnostic harness** that:
+**Wringer's bet:** nobody owns the *neutral* harness layer. Each cloud's harness locks you to its runtime, its identity system, its gateway. The open-source opportunity is a **control-plane-agnostic harness** that:
 
 1. Compiles **intent** (tickets, PRDs, Slack messages) into **verified outcomes** (reviewed MRs with evidence).
 2. Treats **loops** and **graphs** as first-class, portable primitives — not framework-specific code.
@@ -26,7 +26,7 @@ This is Kubernetes-vs-managed-containers, replayed one layer up. Apache-2.0, ven
 
 ## 2. The July 2026 landscape (research grounding)
 
-What exists today and what Coxswain must interoperate with:
+What exists today and what Wringer must interoperate with:
 
 ### 2.1 Managed control planes (the "big four")
 
@@ -41,23 +41,23 @@ What exists today and what Coxswain must interoperate with:
 
 - **MCP** — agent↔tool. The universal plug. All four clouds now speak it.
 - **A2A** — agent↔agent. Donated by Google to the Linux Foundation (June 2025); agent cards at `/.well-known/agent-card.json`; supported by AgentCore Runtime and Google's platform.
-- **ACP (Agent Client Protocol)** — harness↔coding-agent. Zed's open standard (Apache-2.0, JSON-RPC over stdio); adopted by Zed, JetBrains, Neovim, Emacs; 25+ agents including Gemini CLI, Codex CLI, OpenCode, and Claude Code (via Zed's bridge adapter). The **ACP Registry** (Jan 2026) gives one-time agent registration → available to every ACP client. This is Coxswain's Layer-4 wire — a primitive that multiple independent harness efforts have now converged on.
-- **agentgateway** — Linux Foundation open-source, Rust data plane, purpose-built for stateful MCP/A2A sessions plus an OpenAI-compatible LLM gateway (budget/spend controls, prompt enrichment, failover across OpenAI/Anthropic/Gemini/Bedrock), Kubernetes Gateway API support via kgateway, OAuth, tool federation, multi-tenancy. This is the default open data plane for Coxswain's gateway abstraction.
+- **ACP (Agent Client Protocol)** — harness↔coding-agent. Zed's open standard (Apache-2.0, JSON-RPC over stdio); adopted by Zed, JetBrains, Neovim, Emacs; 25+ agents including Gemini CLI, Codex CLI, OpenCode, and Claude Code (via Zed's bridge adapter). The **ACP Registry** (Jan 2026) gives one-time agent registration → available to every ACP client. This is Wringer's Layer-4 wire — a primitive that multiple independent harness efforts have now converged on.
+- **agentgateway** — Linux Foundation open-source, Rust data plane, purpose-built for stateful MCP/A2A sessions plus an OpenAI-compatible LLM gateway (budget/spend controls, prompt enrichment, failover across OpenAI/Anthropic/Gemini/Bedrock), Kubernetes Gateway API support via kgateway, OAuth, tool federation, multi-tenancy. This is the default open data plane for Wringer's gateway abstraction.
 
 ### 2.3 Methodology
 
-- **AWS AI-DLC** (published July 2025; workflows open-sourced Nov 2025 at `awslabs/aidlc-workflows`): three phases — **Inception** (AI turns intent into requirements/stories/units of work via "Mob Elaboration"), **Construction**, **Operations** — executed in **bolts** (hours-to-days work cycles replacing sprints), with adaptive rigor (greenfield vs brownfield detection, risk-based ceremony). Explicitly agent/IDE/model-agnostic steering rules. Coxswain encodes this methodology as executable graph templates rather than markdown steering files.
+- **AWS AI-DLC** (published July 2025; workflows open-sourced Nov 2025 at `awslabs/aidlc-workflows`): three phases — **Inception** (AI turns intent into requirements/stories/units of work via "Mob Elaboration"), **Construction**, **Operations** — executed in **bolts** (hours-to-days work cycles replacing sprints), with adaptive rigor (greenfield vs brownfield detection, risk-based ceremony). Explicitly agent/IDE/model-agnostic steering rules. Wringer encodes this methodology as executable graph templates rather than markdown steering files.
 
 ### 2.4 Loop engineering and graph engineering (the June–July 2026 shift)
 
 The discipline stack is now commonly described as **Prompt → Context → Harness → Loop → Graph**, each layer wrapping the one beneath:
 
 - **Loop engineering** (coined June 2026; Boris Cherny: "I don't prompt Claude anymore. I have loops that are running. They're the ones prompting Claude."): design the *system* that prompts the agent — discover → plan → execute → **verify** → repeat until a stop condition. The verifier is the bottleneck. Andrew Ng's nesting: agentic coding loop (minutes) ⊂ developer feedback loop (hours) ⊂ external/user feedback loop (days).
-- **Graph engineering** (crystallized ~July 18, 2026 via Peter Steinberger / OpenClaw): loops made *one agent's behavior* programmable; graphs make *agent organizations* programmable — specialized nodes in parallel, typed edges, state flowing between them, feedback routed through specific paths rather than the whole loop. Resident agents vs ephemeral workers. The skeptics are right that LangGraph / Microsoft Agent Framework Workflows / Google ADK shipped this before the term existed — which is precisely why Coxswain treats those as *compile targets*, not competitors.
+- **Graph engineering** (crystallized ~July 18, 2026 via Peter Steinberger / OpenClaw): loops made *one agent's behavior* programmable; graphs make *agent organizations* programmable — specialized nodes in parallel, typed edges, state flowing between them, feedback routed through specific paths rather than the whole loop. Resident agents vs ephemeral workers. The skeptics are right that LangGraph / Microsoft Agent Framework Workflows / Google ADK shipped this before the term existed — which is precisely why Wringer treats those as *compile targets*, not competitors.
 - **Coupled-loop failure modes** (from the graph-engineering critique): independent loops optimizing local metrics can fight each other (speed loop vs quality loop), targets drift, sensors rot. The graph layer must make loop *interactions* explicit and observable.
 - **AHE** (Fudan, Apr 2026): observability-driven self-evolution of the harness itself — component/experience/decision observability pillars; 10 iterations lifted Terminal-Bench 2 from 69.7 → 77%, transferring across model families at fewer tokens. The endgame loop: the harness improves the harness, gated by falsifiable prediction contracts.
 
-**Design consequence:** Coxswain's core abstraction is a **graph of loops**. A node is not a function call — it's a *loop-bearing agent* with a contract (budget, verifier, exit conditions). The graph wires those loops into an organization with typed edges, parallel fan-out/fan-in, human interrupt nodes, and explicit inter-loop feedback paths.
+**Design consequence:** Wringer's core abstraction is a **graph of loops**. A node is not a function call — it's a *loop-bearing agent* with a contract (budget, verifier, exit conditions). The graph wires those loops into an organization with typed edges, parallel fan-out/fan-in, human interrupt nodes, and explicit inter-loop feedback paths.
 
 ### 2.5 Observability standard
 
@@ -90,15 +90,15 @@ Distilled from published enterprise harness practice (Cloudflare's internal AI e
 │ L1 INTENT        GitHub/GitLab issues · Linear · Jira · Slack   │
 │                  · PRD files · CLI                              │
 ├─────────────────────────────────────────────────────────────────┤
-│ L2 HARNESS (Coxswain)                                           │
-│   cox-ir      portable Graph IR (graphs of loops) + DSLs        │
-│   cox-engine  local durable executor (event-sourced,            │
+│ L2 HARNESS (Wringer)                                           │
+│   wringer-ir      portable Graph IR (graphs of loops) + DSLs        │
+│   wringer-engine  local durable executor (event-sourced,            │
 │               checkpoint/resume)                                │
-│   cox-loops   loop contracts, budgets, judges, oscillation      │
+│   wringer-loops   loop contracts, budgets, judges, oscillation      │
 │               detection                                         │
-│   cox-verify  deterministic gates + rubric judges + evidence    │
-│   cox-context AGENTS.md autogen · skills registry · KG hooks    │
-│   cox-policy  Cedar/OPA policy-as-code hooks                    │
+│   wringer-verify  deterministic gates + rubric judges + evidence    │
+│   wringer-context AGENTS.md autogen · skills registry · KG hooks    │
+│   wringer-policy  Cedar/OPA policy-as-code hooks                    │
 ├─────────────────────────────────────────────────────────────────┤
 │ L3 WIRES (open protocols)                                       │
 │   ACP → coding agents      MCP → tools      A2A → other agents  │
@@ -189,8 +189,8 @@ The engine physically prevents a worker's context from leaking into its judge: j
 
 All LLM, MCP, and A2A traffic flows through a `GatewayProvider` interface:
 
-- **Default: agentgateway** — Coxswain ships config generation (`cox gateway init`) producing agentgateway listeners/targets for: LLM routing with per-workflow budget caps and failover; MCP tool federation (knowledge-graph, ownership/directory, and repo tools appear as one governed MCP surface); A2A exposure of Coxswain runs as agents (agent card publishing).
-- **AgentCore Gateway adapter** — register MCP targets; inbound OAuth per AgentCore Identity; policy checks land in Cedar (same language as cox-policy → policies port cleanly).
+- **Default: agentgateway** — Wringer ships config generation (`wring gateway init`) producing agentgateway listeners/targets for: LLM routing with per-workflow budget caps and failover; MCP tool federation (knowledge-graph, ownership/directory, and repo tools appear as one governed MCP surface); A2A exposure of Wringer runs as agents (agent card publishing).
+- **AgentCore Gateway adapter** — register MCP targets; inbound OAuth per AgentCore Identity; policy checks land in Cedar (same language as wringer-policy → policies port cleanly).
 - **Google Agent Gateway adapter** — route Agent Engine traffic per Google's governed-connectivity model.
 - **Foundry adapter** — tool catalog / APIM-fronted MCP.
 
@@ -202,13 +202,13 @@ Policy hooks (Cedar first, OPA optional) evaluate: which workflows may call whic
 
 ### 4.6 Verification & evidence
 
-`cox-verify` runs gates in a sandbox profile, parses structured output (JUnit XML, ESLint JSON, tsc, custom linter JSON schema), and assembles the **evidence bundle** per run: `run.jsonl` (event log), `plan.md`, per-iteration gate reports, judge verdicts, diffs, optional screen recordings (browser/UI tasks), cost ledger, OTel trace IDs. `cox evidence open <run>` renders it; the MR description embeds the summary + link. This is the S-1-grade audit artifact.
+`wringer-verify` runs gates in a sandbox profile, parses structured output (JUnit XML, ESLint JSON, tsc, custom linter JSON schema), and assembles the **evidence bundle** per run: `run.jsonl` (event log), `plan.md`, per-iteration gate reports, judge verdicts, diffs, optional screen recordings (browser/UI tasks), cost ledger, OTel trace IDs. `wring evidence open <run>` renders it; the MR description embeds the summary + link. This is the S-1-grade audit artifact.
 
 ### 4.7 Context & governance layer
 
-- **AGENTS.md autogen** — `cox context scan` inspects a repo (language, framework, test/lint/build commands, layout, CI config) and generates/refreshes AGENTS.md (the de facto cross-agent standard) + a machine-readable `agents.lock.json` the harness consumes. Cloudflare has demonstrated this at thousands-of-repos scale; this is the ≤1-day-onboarding lever.
-- **Repo readiness scorecard** — `cox context readiness` scores test speed/determinism, lint coverage, build time, docs; the `router` node can gate autonomous modes on readiness tier.
-- **Skills registry** — skills are markdown files in-repo (`.cox/skills/`) with frontmatter; `cox skills eval` runs baseline-vs-skill A/B evals and scores on a rubric (justification, description, gotchas, fallback, structure). Distribution via git; quality enforced at the artifact, no human gatekeeping chokepoint. Registry index is just a git repo + static JSON.
+- **AGENTS.md autogen** — `wring context scan` inspects a repo (language, framework, test/lint/build commands, layout, CI config) and generates/refreshes AGENTS.md (the de facto cross-agent standard) + a machine-readable `agents.lock.json` the harness consumes. Cloudflare has demonstrated this at thousands-of-repos scale; this is the ≤1-day-onboarding lever.
+- **Repo readiness scorecard** — `wring context readiness` scores test speed/determinism, lint coverage, build time, docs; the `router` node can gate autonomous modes on readiness tier.
+- **Skills registry** — skills are markdown files in-repo (`.wringer/skills/`) with frontmatter; `wring skills eval` runs baseline-vs-skill A/B evals and scores on a rubric (justification, description, gotchas, fallback, structure). Distribution via git; quality enforced at the artifact, no human gatekeeping chokepoint. Registry index is just a git repo + static JSON.
 - **Knowledge-graph hook** — a documented MCP interface (`kg.dependencies`, `kg.owners`, `kg.impact`) the scoping stage queries when present; ships with a reference implementation backed by a repo-scan + CODEOWNERS, so the pattern works day one and enterprises swap in their real graph.
 
 ### 4.8 AI-DLC methodology, encoded
@@ -222,7 +222,7 @@ Templates in `templates/aidlc/` map AWS AI-DLC onto graphs:
 
 ### 4.9 Observability
 
-`cox-otel` emits GenAI-semconv spans (`invoke_agent` → `chat` → `execute_tool` nesting; `gen_ai.request.model`, token usage, cost attrs) with attribute strings isolated behind one mapping module (conventions are pre-1.0; pin + wrap). Plus Coxswain-namespaced loop metrics: `cox.loop.iterations_to_green`, `cox.loop.oscillations`, `cox.judge.disagreement_rate`, `cox.run.cost_usd`, `cox.run.hours_saved_estimate`. OTLP export → anything (Grafana/Langfuse/Datadog/AgentCore Observability/Foundry/Cloud Trace).
+`wringer-otel` emits GenAI-semconv spans (`invoke_agent` → `chat` → `execute_tool` nesting; `gen_ai.request.model`, token usage, cost attrs) with attribute strings isolated behind one mapping module (conventions are pre-1.0; pin + wrap). Plus Wringer-namespaced loop metrics: `wringer.loop.iterations_to_green`, `wringer.loop.oscillations`, `wringer.judge.disagreement_rate`, `wringer.run.cost_usd`, `wringer.run.hours_saved_estimate`. OTLP export → anything (Grafana/Langfuse/Datadog/AgentCore Observability/Foundry/Cloud Trace).
 
 ---
 
@@ -231,20 +231,20 @@ Templates in `templates/aidlc/` map AWS AI-DLC onto graphs:
 Monorepo, TypeScript (Node 22), pnpm workspaces, Apache-2.0. (TS because ACP/agentgateway/ADK-TS/Agent Framework all have first-class TS/JSON surfaces and the YAML→IR compiler benefits from Zod; Python SDK is Phase 6+.)
 
 ```
-coxswain/
+wringer/
   AGENTS.md                      # dogfood from day one
   packages/
-    ir/                          # @cox/ir — Zod schemas, YAML+TS DSL → IR compiler, validators
-    engine/                      # @cox/engine — event-sourced local executor, SQLite checkpoints
-    loops/                       # @cox/loops — loop contracts, budgets, oscillation/plateau detectors
-    verify/                      # @cox/verify — gate runners, output parsers, evidence bundler
-    judge/                       # @cox/judge — rubric judge harness, context isolation
-    acp/                         # @cox/acp — ACP client, agent registry integration, session mgmt
-    gateway/                     # @cox/gateway — GatewayProvider iface + agentgateway config gen
-    identity/                    # @cox/identity — IdentityBroker iface + OIDC/local
-    otel/                        # @cox/otel — GenAI semconv mapping layer + cox.* metrics
-    context/                     # @cox/context — AGENTS.md autogen, readiness score, skills evals
-    policy/                      # @cox/policy — Cedar evaluation hooks
+    ir/                          # @wringer/ir — Zod schemas, YAML+TS DSL → IR compiler, validators
+    engine/                      # @wringer/engine — event-sourced local executor, SQLite checkpoints
+    loops/                       # @wringer/loops — loop contracts, budgets, oscillation/plateau detectors
+    verify/                      # @wringer/verify — gate runners, output parsers, evidence bundler
+    judge/                       # @wringer/judge — rubric judge harness, context isolation
+    acp/                         # @wringer/acp — ACP client, agent registry integration, session mgmt
+    gateway/                     # @wringer/gateway — GatewayProvider iface + agentgateway config gen
+    identity/                    # @wringer/identity — IdentityBroker iface + OIDC/local
+    otel/                        # @wringer/otel — GenAI semconv mapping layer + wringer.* metrics
+    context/                     # @wringer/context — AGENTS.md autogen, readiness score, skills evals
+    policy/                      # @wringer/policy — Cedar evaluation hooks
     runtimes/
       local/                     # in-process (wraps engine)
       temporal/                  # durable OSS execution
@@ -252,66 +252,66 @@ coxswain/
       google/                    # Agent Engine (Gemini Enterprise Agent Platform) + Agent Gateway
       foundry/                   # MS Foundry hosted agents (container + Responses API)
       anthropic/                 # Anthropic Managed Agents / Agent SDK
-    cli/                         # @cox/cli — the `cox` binary
+    cli/                         # @wringer/cli — the `wring` binary
   conformance/                   # runtime + gateway adapter conformance suites
   templates/
     aidlc/                       # inception/construction/operations graph templates
     library/                     # repair-pr, best-of-n, docs-sync, dep-bump, overnight-feature
   examples/
   docs/
-  .github/workflows/             # CI = coxswain's own gates
+  .github/workflows/             # CI = wringer's own gates
 ```
 
 ---
 
 ## 6. Phased execution plan (for Claude Code)
 
-**Operating discipline (meta):** build Coxswain *with* AI-DLC. Each phase = a bolt series. For every bolt: Claude Code produces a plan first; human approves; execution runs against the deterministic gates below; every session ends with `make verify` green and a conventional-commit PR small enough to review. Maintain AGENTS.md continuously. Build to delete: no package may import another's internals — interfaces only (enforced by a custom lint gate from Phase 0).
+**Operating discipline (meta):** build Wringer *with* AI-DLC. Each phase = a bolt series. For every bolt: Claude Code produces a plan first; human approves; execution runs against the deterministic gates below; every session ends with `make verify` green and a conventional-commit PR small enough to review. Maintain AGENTS.md continuously. Build to delete: no package may import another's internals — interfaces only (enforced by a custom lint gate from Phase 0).
 
 **Universal gates (Phase 0 onward):** `make verify` = typecheck (tsc strict) + lint (eslint + custom boundary linter) + unit tests (vitest) + build. CI mirrors it. No PR merges red.
 
 ### Phase 0 — Scaffold & dogfood substrate (Days 1–3)
 
-Deliverables: monorepo scaffold; AGENTS.md; CI; `@cox/verify` MVP (run a command, parse pass/fail, emit JSON report); the custom **architecture-boundary linter** (which packages may import which); evidence-bundle v0 (run.jsonl writer).
+Deliverables: monorepo scaffold; AGENTS.md; CI; `@wringer/verify` MVP (run a command, parse pass/fail, emit JSON report); the custom **architecture-boundary linter** (which packages may import which); evidence-bundle v0 (run.jsonl writer).
 Claude Code kickoff prompt:
-> "Using AI-DLC, scaffold the coxswain monorepo per §5 of the plan. pnpm + TS strict + vitest + eslint. Implement @cox/verify with gate runners for tsc/eslint/vitest and a JSON evidence report, plus a custom eslint rule enforcing the package-boundary matrix in docs/boundaries.json. Wire make verify and GitHub Actions. Write AGENTS.md describing how to build/test/lint this repo. Plan first; wait for approval."
-Exit: CI green; `cox` binary prints version; boundary linter fails on a seeded violation (test proves the gate bites).
+> "Using AI-DLC, scaffold the wringer monorepo per §5 of the plan. pnpm + TS strict + vitest + eslint. Implement @wringer/verify with gate runners for tsc/eslint/vitest and a JSON evidence report, plus a custom eslint rule enforcing the package-boundary matrix in docs/boundaries.json. Wire make verify and GitHub Actions. Write AGENTS.md describing how to build/test/lint this repo. Plan first; wait for approval."
+Exit: CI green; `wring` binary prints version; boundary linter fails on a seeded violation (test proves the gate bites).
 
 ### Phase 1 — Graph IR + local engine (Weeks 1–2)
 
-Deliverables: `@cox/ir` (Zod schemas for all §4.1 node kinds; YAML loader; TS DSL; compiler + validator with helpful errors); `@cox/engine` (event-sourced executor over SQLite: run/step events, checkpoint, resume, replay; `human` node parks durably and resumes via `cox approve <run>`); `cox run graph.yaml`, `cox graph validate`, `cox graph viz` (mermaid export).
+Deliverables: `@wringer/ir` (Zod schemas for all §4.1 node kinds; YAML loader; TS DSL; compiler + validator with helpful errors); `@wringer/engine` (event-sourced executor over SQLite: run/step events, checkpoint, resume, replay; `human` node parks durably and resumes via `wring approve <run>`); `wring run graph.yaml`, `wring graph validate`, `wring graph viz` (mermaid export).
 Exit: golden-fixture suite — 12 canonical graphs (linear, branch, fanout/join strategies, nested subgraph, loop with budget exhaustion, human interrupt, crash-mid-run resume) all replay deterministically.
 
 ### Phase 2 — Agent plane via ACP + sandbox + first end-to-end (Weeks 2–3)
 
-Deliverables: `@cox/acp` (spawn/manage ACP agents over stdio; permission brokering; session transcripts into evidence); Claude Code binding (via the ACP bridge) + Gemini CLI binding (native ACP) as proof of interchangeability; sandbox profiles v1 (Docker/Podman: workspace mount, no-network default, credential injection via env broker); `tool` nodes for `git` + GitHub/GitLab MR creation.
-**Milestone: the harness ships its own PR.** A `construction` graph takes a real issue on the coxswain repo → scopes → plans → human approves → Claude Code executes in sandbox → gates pass → MR opens with evidence bundle.
+Deliverables: `@wringer/acp` (spawn/manage ACP agents over stdio; permission brokering; session transcripts into evidence); Claude Code binding (via the ACP bridge) + Gemini CLI binding (native ACP) as proof of interchangeability; sandbox profiles v1 (Docker/Podman: workspace mount, no-network default, credential injection via env broker); `tool` nodes for `git` + GitHub/GitLab MR creation.
+**Milestone: the harness ships its own PR.** A `construction` graph takes a real issue on the wringer repo → scopes → plans → human approves → Claude Code executes in sandbox → gates pass → MR opens with evidence bundle.
 Exit: same graph YAML runs with `agent: claude-code` and `agent: gemini-cli` unchanged.
 
 ### Phase 3 — Loop engine + judge + observability (Weeks 3–5)
 
-Deliverables: `@cox/loops` (repair, evaluator_optimizer, convergence, explore; budgets; failure-signature oscillation detection; plateau detection; escalation edges); `@cox/judge` (isolated judge context; rubric YAML; structured verdicts; cheap-model default with per-workflow override); `@cox/otel` (GenAI semconv spans behind the mapping layer + `cox.*` metrics; OTLP export; docker-compose with Grafana/Tempo for local viewing); cost ledger per run/loop/node.
+Deliverables: `@wringer/loops` (repair, evaluator_optimizer, convergence, explore; budgets; failure-signature oscillation detection; plateau detection; escalation edges); `@wringer/judge` (isolated judge context; rubric YAML; structured verdicts; cheap-model default with per-workflow override); `@wringer/otel` (GenAI semconv spans behind the mapping layer + `wringer.*` metrics; OTLP export; docker-compose with Grafana/Tempo for local viewing); cost ledger per run/loop/node.
 Exit: benchmark script runs the repair loop on 10 seeded-bug fixtures; dashboard shows iterations-to-green, cost-per-task, judge-disagreement; worker context provably absent from judge input (test).
 
 ### Phase 4 — Gateway plane + policy (Weeks 5–6)
 
-Deliverables: `GatewayProvider` interface; **agentgateway integration**: `cox gateway init` generates config (LLM routes w/ budget caps + failover across Anthropic/OpenAI/Gemini/Bedrock; MCP federation of the KG-reference + repo tools; A2A listener exposing runs as agents with generated agent cards); `@cox/policy` Cedar hooks enforced at tool-call and model-call time; red-team tests (policy denies out-of-scope tool, spend cap trips mid-run and loop escalates cleanly).
-Exit: all Phase-2/3 flows run *through* the gateway with policies on; A2A: an external ADK sample agent invokes a Coxswain run via agent card.
+Deliverables: `GatewayProvider` interface; **agentgateway integration**: `wring gateway init` generates config (LLM routes w/ budget caps + failover across Anthropic/OpenAI/Gemini/Bedrock; MCP federation of the KG-reference + repo tools; A2A listener exposing runs as agents with generated agent cards); `@wringer/policy` Cedar hooks enforced at tool-call and model-call time; red-team tests (policy denies out-of-scope tool, spend cap trips mid-run and loop escalates cleanly).
+Exit: all Phase-2/3 flows run *through* the gateway with policies on; A2A: an external ADK sample agent invokes a Wringer run via agent card.
 
 ### Phase 5 — Managed runtime + identity adapters, conformance-tested (Weeks 6–9)
 
 Build the **conformance suite first**: ~25 behaviors every runtime adapter must pass (start/resume/cancel, checkpoint durability, human-interrupt park ≥24h simulated, fanout concurrency, budget enforcement, evidence completeness, identity stamping).
 Then adapters, in order:
 1. **Temporal** (OSS durable baseline — proves the IR maps to industrial durable execution).
-2. **AWS AgentCore**: deploy graph runs on AgentCore Runtime; register Coxswain's MCP surface into AgentCore Gateway; IdentityBroker → AgentCore Identity; optional Memory adapter; export traces to AgentCore Observability.
+2. **AWS AgentCore**: deploy graph runs on AgentCore Runtime; register Wringer's MCP surface into AgentCore Gateway; IdentityBroker → AgentCore Identity; optional Memory adapter; export traces to AgentCore Observability.
 3. **Google**: Agent Engine deployment (via ADK wrapper for runtime compatibility); route through Google **Agent Gateway**; IAM agent identity.
 4. **Microsoft Foundry**: package the engine as a hosted-agent container exposing the Responses protocol; Entra Agent ID; tool catalog wiring.
 5. **Anthropic Managed Agents**: adapter mapping `agent_step` loops onto managed sessions (leveraging Outcomes for the judge where it fits) + Claude Agent SDK path for self-hosted.
-Exit: `cox run graph.yaml --runtime {local|temporal|agentcore|google|foundry|anthropic}` — same YAML, five clouds, conformance badges in CI (cloud adapters behind env-gated integration jobs).
+Exit: `wring run graph.yaml --runtime {local|temporal|agentcore|google|foundry|anthropic}` — same YAML, five clouds, conformance badges in CI (cloud adapters behind env-gated integration jobs).
 
 ### Phase 6 — Context, skills, and intent surfaces (Weeks 9–11)
 
-Deliverables: `cox context scan` (AGENTS.md + agents.lock.json autogen), readiness scorecard, router templates keyed on readiness tier; skills registry + `cox skills eval` (baseline-vs-skill A/B with the judge harness); KG reference MCP server (repo scan + CODEOWNERS); intent adapters: GitHub/GitLab webhook service (`label: cox` → run), Slack app (`/cox run …`, approval buttons resolve `human` nodes), Linear/Jira webhooks.
+Deliverables: `wring context scan` (AGENTS.md + agents.lock.json autogen), readiness scorecard, router templates keyed on readiness tier; skills registry + `wring skills eval` (baseline-vs-skill A/B with the judge harness); KG reference MCP server (repo scan + CODEOWNERS); intent adapters: GitHub/GitLab webhook service (`label: wring` → run), Slack app (`/wring run …`, approval buttons resolve `human` nodes), Linear/Jira webhooks.
 Exit: a stranger's repo goes from clone → scanned → first governed harness PR in under one day, measured.
 
 ### Phase 7 — Self-evolution + benchmark rig + v1.0 (Weeks 11–13)
@@ -324,7 +324,7 @@ Release engineering: docs site, quickstart ("issue → verified MR in 15 minutes
 ## 7. Testing & quality strategy
 
 - **Golden fixtures** for IR/engine (replay determinism is the invariant).
-- **Conformance suites** for runtimes and gateways — the ecosystem contract; publish a "Runs Coxswain" badge program.
+- **Conformance suites** for runtimes and gateways — the ecosystem contract; publish a "Runs Wringer" badge program.
 - **Chaos tests**: kill the engine mid-loop, kill the sandbox, expire tokens mid-run — resume must be clean.
 - **Judge integrity tests**: context isolation, rubric injection resistance (worker output attempting to instruct the judge is treated as data).
 - **Security tests**: sandbox egress denial, credential non-exposure in transcripts/evidence, policy bypass attempts.
@@ -338,13 +338,13 @@ Cost per task; iterations-to-green; judge disagreement rate; oscillation rate; %
 
 - **Semconv/protocol churn** (OTel GenAI pre-1.0; ACP evolving; vendor APIs in beta) → all external strings/surfaces behind mapping layers; pin versions; conformance tests catch drift.
 - **Adapter sprawl** → conformance-first development; cloud adapters are community-maintainable because the contract is executable.
-- **"Reinvented LangGraph" critique** → true and intended: LangGraph/ADK/Agent Framework are *targets and peers*, not competitors; Coxswain's value is the vendor-neutral IR + verification/evidence/governance layer above them. Ship a LangGraph-interop exporter early to make the posture concrete.
+- **"Reinvented LangGraph" critique** → true and intended: LangGraph/ADK/Agent Framework are *targets and peers*, not competitors; Wringer's value is the vendor-neutral IR + verification/evidence/governance layer above them. Ship a LangGraph-interop exporter early to make the posture concrete.
 - **Self-evolution risk** → evolve loop scoped to skills/templates only, prediction-gated, fully audited, off by default.
 - **Judge gaming** → deterministic gates always precede judges; judges see evidence, not persuasion.
 
 ## 10. Non-goals (v1)
 
-A UI builder; a model marketplace; long-horizon consumer memory; replacing CI systems (Coxswain drives them); a proprietary agent (bring any ACP/A2A agent).
+A UI builder; a model marketplace; long-horizon consumer memory; replacing CI systems (Wringer drives them); a proprietary agent (bring any ACP/A2A agent).
 
 ---
 
@@ -352,14 +352,14 @@ A UI builder; a model marketplace; long-horizon consumer memory; replacing CI sy
 
 "Build to delete" already concedes that the code cannot be future-proofed. The position can. Six moves, in priority order:
 
-1. **Extract the spec from the implementation.** The Graph IR, loop-contract schema, and conformance behaviors move into a standalone, semver'd spec repo (`cox-spec`, JSON Schema published) under open governance; the engine becomes the *reference implementation*. Target a second, independent implementation within two quarters of v1.0 — a spec with one implementation is an API; with two it's a standard. Donation path: Linux Foundation (where A2A and agentgateway already live) once two external maintainers exist. End state: when a hyperscaler ships "the neutral layer," the cheapest way for them to do it is to *implement Coxswain conformance* — their entry becomes adoption, not displacement.
-2. **Weaponize the conformance suite.** The suite, not the adapters, is the moat (the Kubernetes-conformance lesson). Split it into its own repo at Phase 5 exit; run a public "Runs Coxswain" badge program with published results. Goal state: vendors maintain *their own* adapters to keep the badge, flipping maintenance cost outward.
+1. **Extract the spec from the implementation.** The Graph IR, loop-contract schema, and conformance behaviors move into a standalone, semver'd spec repo (`wringer-spec`, JSON Schema published) under open governance; the engine becomes the *reference implementation*. Target a second, independent implementation within two quarters of v1.0 — a spec with one implementation is an API; with two it's a standard. Donation path: Linux Foundation (where A2A and agentgateway already live) once two external maintainers exist. End state: when a hyperscaler ships "the neutral layer," the cheapest way for them to do it is to *implement Wringer conformance* — their entry becomes adoption, not displacement.
+2. **Weaponize the conformance suite.** The suite, not the adapters, is the moat (the Kubernetes-conformance lesson). Split it into its own repo at Phase 5 exit; run a public "Runs Wringer" badge program with published results. Goal state: vendors maintain *their own* adapters to keep the badge, flipping maintenance cost outward.
 3. **Compound data, not code.** Orchestration code is perishable; longitudinal data is not. The evidence bundles, prediction ledger, and loop telemetry become an open, anonymized, opt-in dataset: loop/graph designs vs. outcomes (iterations-to-green, cost-per-task, oscillation rates, by pattern × model generation). Publish it as the reference benchmark for loop engineering — the SWE-bench move, one layer up. Accumulated data cannot be leapfrogged by a competitor's launch.
-4. **Bet on invariants.** Whatever models do, enterprises will need verification, audit trails, identity delegation, and cost control *more* every year, and regulation only compounds (ISO 42001; EU AI Act obligations phasing in through 2027). Maintain a living compliance-mapping document from evidence-bundle fields to control frameworks. Coxswain's terminal identity — the one no model improvement obsoletes — is the **evidence and governance layer**.
+4. **Bet on invariants.** Whatever models do, enterprises will need verification, audit trails, identity delegation, and cost control *more* every year, and regulation only compounds (ISO 42001; EU AI Act obligations phasing in through 2027). Maintain a living compliance-mapping document from evidence-bundle fields to control frameworks. Wringer's terminal identity — the one no model improvement obsoletes — is the **evidence and governance layer**.
 5. **Design for capability absorption.** Frontier models will keep eating harness features (planning scaffolds, repair heuristics). Make shedding them a designed path: every harness feature carries a *deprecation predicate* ("disable structured-planning scaffold for model tiers that pass eval Y"), and the evolve loop tests these predicates automatically each model generation. The harness gets thinner as models improve — on purpose, with evidence.
 6. **Anti-rug-pull governance from day zero.** Apache-2.0, neutrally-held trademark, published governance charter, and at least two corporate maintainers before v1.0. Post-HashiCorp, enterprises audit this before adopting; the fork-resistance *is* the sales pitch.
 
-**Plan amendments:** add a spec-extraction workstream at Phase 4.5 (`cox-spec` repo + JSON Schema publication); split the conformance suite into its own repo at Phase 5 exit; build the opt-in telemetry/dataset pipeline in Phase 6; ship the compliance-mapping doc in Phase 7.
+**Plan amendments:** add a spec-extraction workstream at Phase 4.5 (`wringer-spec` repo + JSON Schema publication); split the conformance suite into its own repo at Phase 5 exit; build the opt-in telemetry/dataset pipeline in Phase 6; ship the compliance-mapping doc in Phase 7.
 
 ---
 
@@ -367,7 +367,7 @@ A UI builder; a model marketplace; long-horizon consumer memory; replacing CI sy
 
 Paste at the start of every build session:
 
-> You are building **Coxswain** per `coxswain-ai-dlc-harness-plan.md`. Current phase: {N}. Rules: (1) Using AI-DLC — plan first, wait for approval, execute in bolts. (2) Never merge red: `make verify` must pass. (3) Respect the package-boundary matrix; interfaces only across packages. (4) Small reviewable PRs, conventional commits, evidence in the PR description. (5) Any vendor string, protocol attribute, or external API goes behind the designated mapping layer. (6) Update AGENTS.md when build/test/lint behavior changes. Confirm the phase's exit criteria before proposing the plan.
+> You are building **Wringer** per `wringer-ai-dlc-harness-plan.md`. Current phase: {N}. Rules: (1) Using AI-DLC — plan first, wait for approval, execute in bolts. (2) Never merge red: `make verify` must pass. (3) Respect the package-boundary matrix; interfaces only across packages. (4) Small reviewable PRs, conventional commits, evidence in the PR description. (5) Any vendor string, protocol attribute, or external API goes behind the designated mapping layer. (6) Update AGENTS.md when build/test/lint behavior changes. Confirm the phase's exit criteria before proposing the plan.
 
 ## Appendix B — Key references
 

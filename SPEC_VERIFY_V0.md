@@ -1,4 +1,4 @@
-# SPEC — `cox verify` v0.1.0, the standalone evidence compiler
+# SPEC — `wring verify` v0.1.0, the standalone evidence compiler
 
 *Adopted 2026-07-30 (third external review). This is the **binding
 implementation contract** for v0.1.0. It supersedes the Days 1–30 detail
@@ -10,20 +10,20 @@ builds THIS, in the build order below, and nothing in [Non-goals](#non-goals-for
 > **One command that proves whether this change is mergeable, and leaves
 > behind evidence a human or agent can inspect.**
 
-`cox verify` ships **before** `cox run`, before the graph IR, before
+`wring verify` ships **before** `wring run`, before the graph IR, before
 judges, before Temporal, before any agent integration. It is not "the
-verifier inside Coxswain" — it is a standalone evidence compiler that
-happens to become Coxswain's foundation. After an AI coding session,
-`cox verify` gives a cleaner, more reviewable truth trail than the
-agent's own summary. Once that lands, `cox run` becomes obvious: a loop
-that keeps calling `cox verify` until the evidence says stop.
+verifier inside Wringer" — it is a standalone evidence compiler that
+happens to become Wringer's foundation. After an AI coding session,
+`wring verify` gives a cleaner, more reviewable truth trail than the
+agent's own summary. Once that lands, `wring run` becomes obvious: a loop
+that keeps calling `wring verify` until the evidence says stop.
 
 ## The one job
 
 ```
 input:  repo + config + current git state
 action: run gates in order
-output: .cox/runs/<run_id>/
+output: .wringer/runs/<run_id>/
         manifest.json
         evidence.jsonl
         summary.md
@@ -34,9 +34,9 @@ output: .cox/runs/<run_id>/
 
 ## CLI surface
 
-### `cox init`
+### `wring init`
 
-Detects common project commands and writes `.cox.yaml`. If detection is
+Detects common project commands and writes `.wringer.yaml`. If detection is
 uncertain, **generate comments rather than being clever**.
 
 ```yaml
@@ -57,16 +57,16 @@ evidence:
     - logs
 ```
 
-### `cox verify`
+### `wring verify`
 
 Runs gates, writes the evidence bundle.
 
 ```bash
-cox verify
-cox verify --changed-only
-cox verify --json
-cox verify --output .cox/runs/manual-001
-cox verify --gate test
+wring verify
+wring verify --changed-only
+wring verify --json
+wring verify --output .wringer/runs/manual-001
+wring verify --gate test
 ```
 
 **Exit codes are contract:**
@@ -79,36 +79,36 @@ cox verify --gate test
 | 3 | unsafe dirty state / refused precondition |
 | 4 | interrupted |
 
-`cox verify --json` emits structured back-pressure for agents (Claude
+`wring verify --json` emits structured back-pressure for agents (Claude
 Code, Codex CLI, Gemini CLI — they need structure, not prose):
 
 ```json
 {
   "status": "failed",
   "failed_gate": "test",
-  "rerun": "cox verify --gate test",
-  "evidence_dir": ".cox/runs/20260730-080601-a13f"
+  "rerun": "wring verify --gate test",
+  "evidence_dir": ".wringer/runs/20260730-080601-a13f"
 }
 ```
 
-### `cox explain`
+### `wring explain`
 
 Reads the latest (or named) failed run and gives a compact diagnosis —
 **non-LLM in v0**: failing gate, command, exit code, last useful log
 lines, changed files, and the exact rerun command.
 
 ```bash
-cox explain
-cox explain .cox/runs/2026-07-30T080601Z
+wring explain
+wring explain .wringer/runs/2026-07-30T080601Z
 ```
 
 ## The evidence bundle (this is the product)
 
 Boring, stable, grep-friendly. This format is the interface future
-agents and judges consume — see [RFC #2](https://github.com/marcoakes/coxswain/issues/2).
+agents and judges consume — see [RFC #2](https://github.com/marcoakes/wringer/issues/2).
 
 ```
-.cox/runs/20260730-080601-a13f/
+.wringer/runs/20260730-080601-a13f/
   manifest.json
   evidence.jsonl
   summary.md
@@ -130,7 +130,7 @@ carries `type` and a millisecond-precision local `ts` (amended
 2026-07-30, Bolt 3: an audit trail needs to be placeable in time):
 
 ```json
-{"type":"run.started","ts":"2026-07-30T08:06:01.004+01:00","run_id":"20260730-080601-a13f","cox_version":"0.1.0","repo":"coxswain","sha":"abc123"}
+{"type":"run.started","ts":"2026-07-30T08:06:01.004+01:00","run_id":"20260730-080601-a13f","wringer_version":"0.1.0","repo":"wringer","sha":"abc123"}
 {"type":"git.status","ts":"2026-07-30T08:06:01.031+01:00","dirty":true,"changed_files":["src/foo.py","tests/test_foo.py"]}
 {"type":"gate.started","ts":"2026-07-30T08:06:01.033+01:00","gate_id":"lint","command":"make lint"}
 {"type":"gate.finished","ts":"2026-07-30T08:06:02.875+01:00","gate_id":"lint","exit_code":0,"duration_ms":1842}
@@ -143,7 +143,7 @@ carries `type` and a millisecond-precision local `ts` (amended
 
 ```json
 {
-  "schema_version": "cox.evidence.v1",
+  "schema_version": "wringer.evidence.v1",
   "run_id": "20260730-080601-a13f",
   "started_at": "2026-07-30T08:06:01+01:00",
   "repo": {
@@ -205,15 +205,15 @@ evidence:
 ## Implementation stack
 
 **Python 3.11+** for v0 (third-review ruling: ubiquitous, inspectable,
-easy to package, right audience; `pipx install coxswain`). Keep
+easy to package, right audience; `pipx install wringer`). Keep
 dependencies minimal — **argparse + dataclasses preferred**; add PyYAML
 for config; nothing else without cause. The TypeScript monorepo remains
 the plan's shape for the later graph engine — revisit at v0.2.
 
 ```
-coxswain/
+wringer/
   pyproject.toml
-  src/cox/
+  src/wringer/
     __main__.py
     cli.py
     config.py
@@ -229,7 +229,7 @@ coxswain/
 
 ## Build order (bolts — plan first, verify each before the next)
 
-- **Day 1 — skeleton:** `cox --help`, `cox init`, `cox verify` with
+- **Day 1 — skeleton:** `wring --help`, `wring init`, `wring verify` with
   hardcoded config support, one gate, writes `evidence.jsonl`.
 - **Day 2 — gate runner:** multiple gates, timeouts, stop-on-failure,
   stdout/stderr logs, exit codes, `summary.md`.
@@ -237,43 +237,43 @@ coxswain/
   status, changed files, `diff.patch`, untracked list.
 - **Day 4 — redaction & safety:** env redaction patterns, max log size,
   binary exclusion, safe failure outside a git repo.
-- **Day 5 — dogfood:** Coxswain verifies Coxswain. Commit a sanitized
-  demo bundle (`.cox.example/runs/...`). Wire CI to run `cox verify`.
+- **Day 5 — dogfood:** Wringer verifies Wringer. Commit a sanitized
+  demo bundle (`.wringer.example/runs/...`). Wire CI to run `wring verify`.
 
 ## Definition of PROVEN — the repo must show its own receipts
 
 **Do not tag `v0.1.0` until every line is true:**
 
-- [ ] `pipx install coxswain` works
-- [ ] `cox init` works in an empty-ish Python repo
-- [ ] `cox verify` runs at least two gates
+- [ ] `pipx install wringer` works
+- [ ] `wring init` works in an empty-ish Python repo
+- [ ] `wring verify` runs at least two gates
 - [ ] failed gates produce useful logs
 - [ ] evidence bundle format is stable and documented
-- [ ] **CI runs `cox verify` on this repo** (GitHub Actions example shipped)
-- [ ] **Coxswain itself uses `cox verify`** — a sanitized demo bundle is
+- [ ] **CI runs `wring verify` on this repo** (GitHub Actions example shipped)
+- [ ] **Wringer itself uses `wring verify`** — a sanitized demo bundle is
       committed so the repo carries proof of its own verification
 - [ ] README shows a **real transcript**, not aspirational syntax
 
 The README demo at that point:
 
 ```
-$ cox verify
+$ wring verify
 ✓ git status captured
 ✓ diff captured
 ✓ lint passed        1.8s
 ✗ test failed        9.2s
 
 Evidence written to:
-.cox/runs/20260730-080601-a13f/
+.wringer/runs/20260730-080601-a13f/
 
 Next:
-  open .cox/runs/20260730-080601-a13f/summary.md
-  rerun cox verify --gate test
+  open .wringer/runs/20260730-080601-a13f/summary.md
+  rerun wring verify --gate test
 ```
 
 ## Non-goals for v0.1.0 (binding)
 
-`cox run` · LLM judge · GitHub issue ingestion · PR creation · Temporal ·
+`wring run` · LLM judge · GitHub issue ingestion · PR creation · Temporal ·
 OpenTelemetry · multi-agent anything · cost tracking beyond an optional
 empty `cost.jsonl` placeholder · sandboxing beyond "record current repo
 state". All valuable; all after the first trust moment.
@@ -281,7 +281,7 @@ state". All valuable; all after the first trust moment.
 ## First public benchmark (post-v0.1)
 
 Benchmark against messiness, not against LangGraph: does a coding agent
-fix a bug faster given `cox verify --json` output; does a maintainer
+fix a bug faster given `wring verify --json` output; does a maintainer
 review an AI PR faster with evidence attached; can repeated failures be
 grouped by signature. Three demo repos suffice: pytest package,
 npm-test package, generic make repo.
@@ -292,15 +292,15 @@ npm-test package, generic make repo.
 
 Paste at the start of the implementation session:
 
-> You are implementing **Coxswain v0.1.0** per `SPEC_COX_VERIFY_V0.md` in
-> `~/Claude/coxswain` (github.com/marcoakes/coxswain). Read `AGENTS.md`,
+> You are implementing **Wringer v0.1.0** per `SPEC_VERIFY_V0.md` in
+> `~/Claude/wringer` (github.com/marcoakes/wringer). Read `AGENTS.md`,
 > then the spec end to end, then `ROADMAP.md`. Rules: (1) AI-DLC — plan
 > the current Day-bolt first, wait for approval, then execute. (2) Build
 > order = the spec's Day 1–5; do not skip ahead. (3) The spec's non-goals
-> are binding — no `cox run`, no LLM calls, no PR machinery. (4) Python
-> 3.11+, argparse + dataclasses, PyYAML only; `pyproject.toml`, `src/cox/`
+> are binding — no `wring run`, no LLM calls, no PR machinery. (4) Python
+> 3.11+, argparse + dataclasses, PyYAML only; `pyproject.toml`, `src/wringer/`
 > layout, pytest. (5) Small conventional commits; never claim a bolt done
 > unless its checks actually ran. (6) The finish line is the spec's
-> "Definition of PROVEN" — Coxswain verifies Coxswain, CI runs it, the
+> "Definition of PROVEN" — Wringer verifies Wringer, CI runs it, the
 > committed demo bundle and README transcript are real. Confirm the
 > current day's exit criteria before proposing its plan.

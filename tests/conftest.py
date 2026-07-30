@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from cox import config
+from wringer import config
 
 # Never inherit the developer's identity, hooks, or signing config: a test
 # repo must behave the same on every machine and in CI.
 _ISOLATED = [
     "-c",
-    "user.name=cox test",
+    "user.name=wringer test",
     "-c",
-    "user.email=cox@example.invalid",
+    "user.email=wringer@example.invalid",
     "-c",
     "commit.gpgsign=false",
 ]
@@ -50,7 +50,7 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def write_config():
-    """Write a `.cox.yaml` into a directory and return its path."""
+    """Write a `.wringer.yaml` into a directory and return its path."""
 
     def _write(directory: Path, body: str) -> Path:
         path = directory / config.CONFIG_FILENAME

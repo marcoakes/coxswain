@@ -1,7 +1,7 @@
 # Roadmap — the 90-day compression
 
 *Adopted 2026-07-29 after external design review. This document governs
-execution order. The [full build plan](coxswain-ai-dlc-harness-plan.md)
+execution order. The [full build plan](wringer-ai-dlc-harness-plan.md)
 remains the architectural north star — we are shipping it inside-out:
 the differentiated core first (loop contracts, deterministic gates,
 worker/judge isolation), the undifferentiated plumbing (multi-cloud
@@ -14,20 +14,20 @@ and pulled by demand rather than pushed by plan.*
 
 ### Days 1–30 — v0.1.0, the standalone evidence compiler
 
-⚠️ **Superseded in detail by [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)**
+⚠️ **Superseded in detail by [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)**
 (third external review, 2026-07-30) — the binding implementation
-contract. The essence: **`cox verify` ships first as a standalone
-evidence compiler**, before `cox run`, before the graph IR, before
+contract. The essence: **`wring verify` ships first as a standalone
+evidence compiler**, before `wring run`, before the graph IR, before
 judges, before agents. One command that proves whether a change is
 mergeable and leaves behind evidence a human or agent can inspect.
 
-- `cox init` — detect project commands, write `.cox.yaml`.
-- `cox verify` — run declared gates in order, write the evidence bundle
+- `wring init` — detect project commands, write `.wringer.yaml`.
+- `wring verify` — run declared gates in order, write the evidence bundle
   (`manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, gate
   logs). Exit codes are contract. `--json` for agent consumption.
-- `cox explain` — compact non-LLM diagnosis of the latest failed run.
+- `wring explain` — compact non-LLM diagnosis of the latest failed run.
 - Five-day build order + the "Definition of PROVEN" release bar (CI runs
-  `cox verify` on this repo; a sanitized demo bundle is committed; the
+  `wring verify` on this repo; a sanitized demo bundle is committed; the
   README transcript is real) — all in the spec.
 
 **v0.1.0 tags when the spec's release bar is fully true** — well before
@@ -35,7 +35,7 @@ the Sept 30 outer deadline if the bolts land clean.
 
 **After v0.1.0 (v0.2, inside the 90 days) — the loop closes around it:**
 
-- `cox run` = a loop that keeps calling `cox verify` until the evidence
+- `wring run` = a loop that keeps calling `wring verify` until the evidence
   says stop. Minimal single-loop IR (`loop:repair`), in-memory engine.
 - Worker binding = **your existing coding agent via subprocess** (Claude
   Code first; Codex/Gemini CLI next; ACP as the formal wire later).
@@ -49,7 +49,7 @@ nodes, all cloud adapters, Cedar/OPA, AGENTS.md autogen, skills registry.
 ### Days 31–60 — durable execution & anti-thrash
 
 - Event-sourced engine: SQLite-backed run log, checkpoint/resume — crash
-  on iteration 4 of 6, `cox resume` continues exactly there.
+  on iteration 4 of 6, `wring resume` continues exactly there.
 - Anti-thrash: failure-signature hashing + oscillation detection (same
   signature 3× → exit to `escalate.human`), plateau detection.
 - Cost ledger per loop/run (`cost.jsonl` beside the evidence bundle).
@@ -58,18 +58,18 @@ nodes, all cloud adapters, Cedar/OPA, AGENTS.md autogen, skills registry.
 
 ### Days 61–90 — the "graph of loops" demo
 
-- `@cox/ir` v0.2 — a linear chain of loops: scope → plan → repair →
+- `@wringer/ir` v0.2 — a linear chain of loops: scope → plan → repair →
   deliver, with typed edges and explicit feedback paths.
 - One `human` interrupt node: pause + webhook/Slack message, resume via
-  `cox approve <run-id>`.
-- **The credibility moment: Coxswain ships a Coxswain PR.** Dogfooded,
+  `wring approve <run-id>`.
+- **The credibility moment: Wringer ships a Wringer PR.** Dogfooded,
   with the full evidence bundle and cost ledger in the PR description.
 - 5-minute demo video: issue → scope → plan → 3 repair iterations with
   gate failures → human approval → merged MR with evidence.
 
 ## OKRs
 
-**Q3 2026:** Coxswain reliably turns a GitHub issue into a passing MR for
+**Q3 2026:** Wringer reliably turns a GitHub issue into a passing MR for
 **Python repos** under **$2.00** in LLM spend. (`v0.1.0` ships Sept 30.)
 
 **Q4 2026:** TypeScript target repos + the **Temporal** runtime adapter.
@@ -86,7 +86,7 @@ nodes, all cloud adapters, Cedar/OPA, AGENTS.md autogen, skills registry.
   all wait behind a working, dogfooded loop.
 - **v0 implementation is Python** (third review, 2026-07-30: ubiquitous,
   inspectable, `pipx`-installable, right audience — see
-  [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)). This supersedes the
+  [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)). This supersedes the
   earlier TypeScript-first ruling for v0.1; the TS monorepo remains the
   plan's shape for the later graph engine — revisit at v0.2. Python
   repos are also the first *target* ecosystem (Q3 OKR).

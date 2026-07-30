@@ -1,4 +1,4 @@
-"""`cox verify` — one gate, an evidence bundle, contract exit codes."""
+"""`wring verify` — one gate, an evidence bundle, contract exit codes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from cox import cli, evidence, gates
+from wringer import cli, evidence, gates
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -118,11 +118,11 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
 
     started, git_status, gate_started, gate_finished, finished = recorded
     assert git_status["dirty"] is True
-    assert ".cox.yaml" in git_status["changed_files"] + git_status.get(
+    assert ".wringer.yaml" in git_status["changed_files"] + git_status.get(
         "untracked", []
     )
     assert started["run_id"] == bundle.name
-    assert started["cox_version"] == cli.__version__
+    assert started["wringer_version"] == cli.__version__
     assert started["repo"] == repo.name
     assert SHA.match(started["sha"]), started["sha"]
     assert bare(gate_started) == {
@@ -137,7 +137,7 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
     assert bare(finished) == {"type": "run.finished", "status": "passed"}
 
     recorded_manifest = manifest(bundle)
-    assert recorded_manifest["schema_version"] == "cox.evidence.v1"
+    assert recorded_manifest["schema_version"] == "wringer.evidence.v1"
     assert recorded_manifest["run_id"] == bundle.name
     # local ISO-8601 with a UTC offset
     assert datetime.fromisoformat(recorded_manifest["started_at"]).tzinfo is not None
@@ -145,7 +145,7 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
         "root": ".",
         "head_sha": started["sha"],
         "branch": "main",
-        # the untracked .cox.yaml we just wrote
+        # the untracked .wringer.yaml we just wrote
         "dirty": True,
     }
     assert recorded_manifest["result"] == {"status": "passed", "failed_gate": None}
@@ -155,7 +155,7 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
     out = capsys.readouterr().out
     assert "✓ unit passed" in out
     assert "Evidence written to:" in out
-    assert f".cox/runs/{bundle.name}/" in out
+    assert f".wringer/runs/{bundle.name}/" in out
     assert "rerun" not in out
 
 
@@ -180,7 +180,7 @@ def test_failing_required_gate_exits_one_and_names_the_gate(
 
     out = capsys.readouterr().out
     assert "✗ unit failed" in out
-    assert "rerun cox verify --gate unit" in out
+    assert "rerun wring verify --gate unit" in out
 
 
 def test_optional_gate_failure_is_recorded_but_the_run_passes(
@@ -220,8 +220,8 @@ def test_missing_config_is_a_config_error_and_writes_nothing(
     assert cli.main(["verify"]) == cli.EXIT_CONFIG
 
     err = capsys.readouterr().err
-    assert ".cox.yaml" in err
-    assert "cox init" in err
+    assert ".wringer.yaml" in err
+    assert "wring init" in err
     assert bundles(repo) == []
 
 
@@ -351,8 +351,8 @@ def test_a_required_failure_stops_the_run_and_skips_the_rest(
 
     out = capsys.readouterr().out
     assert "✗ test failed" in out
-    assert f"open .cox/runs/{bundle.name}/summary.md" in out
-    assert "rerun cox verify --gate test" in out
+    assert f"open .wringer/runs/{bundle.name}/summary.md" in out
+    assert "rerun wring verify --gate test" in out
 
 
 def test_the_bundle_captures_the_working_tree(
@@ -374,23 +374,23 @@ def test_the_bundle_captures_the_working_tree(
     assert "-before" in patch
     assert "+after" in patch
     assert "tracked.py" in status
-    assert ".cox.yaml" in status
-    # Coxswain's own run directory must not appear in its own evidence: the
+    assert ".wringer.yaml" in status
+    # Wringer's own run directory must not appear in its own evidence: the
     # capture is taken before the bundle exists.
-    assert ".cox/" not in status
-    assert ".cox/" not in patch
+    assert ".wringer/" not in status
+    assert ".wringer/" not in patch
 
     git_status = of_type(events(bundle), "git.status")[0]
     assert git_status["dirty"] is True
     assert "tracked.py" in git_status["changed_files"]
-    assert git_status["untracked"] == [".cox.yaml"]
+    assert git_status["untracked"] == [".wringer.yaml"]
 
 
 def test_a_clean_repo_captures_an_empty_diff(
     repo, write_config, git_run, monkeypatch
 ):
     write_config(repo, ONE_PASSING_GATE)
-    git_run(repo, "add", ".cox.yaml")
+    git_run(repo, "add", ".wringer.yaml")
     git_run(repo, "commit", "-q", "-m", "add config")
     monkeypatch.chdir(repo)
 
@@ -510,7 +510,7 @@ gates:
     out = capsys.readouterr().out
     assert "✗ format failed" in out
     assert "(optional)" in out
-    assert "rerun cox verify" not in out
+    assert "rerun wring verify" not in out
 
 
 def test_gate_output_is_captured_and_kept_off_the_console(
@@ -607,8 +607,8 @@ def test_verify_finds_the_repo_root_from_a_subdirectory(
 
     # config read from the root, bundle written at the root
     bundle = only_bundle(repo)
-    assert not (nested / ".cox").exists()
-    assert f".cox/runs/{bundle.name}/" in capsys.readouterr().out
+    assert not (nested / ".wringer").exists()
+    assert f".wringer/runs/{bundle.name}/" in capsys.readouterr().out
 
 
 def test_outside_a_git_repo_verify_refuses(tmp_path, write_config, monkeypatch, capsys):

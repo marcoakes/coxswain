@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cox import redact
+from wringer import redact
 
 
 def build(env: dict[str, str], evidence: dict | None = None) -> redact.Redactor:

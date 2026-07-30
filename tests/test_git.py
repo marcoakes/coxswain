@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cox import git
+from wringer import git
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 

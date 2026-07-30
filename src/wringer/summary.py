@@ -1,6 +1,6 @@
 """Render `summary.md` — the human's entry point into a bundle.
 
-Boring, stable, grep-friendly (SPEC_COX_VERIFY_V0.md §The evidence
+Boring, stable, grep-friendly (SPEC_VERIFY_V0.md §The evidence
 bundle): one screen that says what ran, against which commit, what it
 cost, what failed, where the logs are, and the exact command that reruns
 the failure. Machines get `evidence.jsonl` and `manifest.json`; this file
@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cox import evidence
-from cox.config import Gate
-from cox.evidence import Bundle
-from cox.gates import GateResult
-from cox.git import RepoState
+from wringer import evidence
+from wringer.config import Gate
+from wringer.evidence import Bundle
+from wringer.gates import GateResult
+from wringer.git import RepoState
 
 SUMMARY_FILENAME = "summary.md"
 
@@ -30,7 +30,7 @@ def write(
 ) -> Path:
     """Write `summary.md` into the bundle and return its path."""
     lines = [
-        f"# cox verify — {bundle.run_id}",
+        f"# wring verify — {bundle.run_id}",
         "",
         _repo_line(state),
         f"- started: {bundle.started_at.replace(microsecond=0).isoformat()}",
@@ -62,7 +62,7 @@ def write(
             "Rerun the failing gate:",
             "",
             "```",
-            f"cox verify --gate {failed_gate}",
+            f"wring verify --gate {failed_gate}",
             "```",
         ]
 

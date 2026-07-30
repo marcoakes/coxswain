@@ -5,7 +5,7 @@ untracked path lists, and the two captured artifacts a reviewer actually
 reads — `diff.patch` and `status.txt`.
 
 Every git call here is read-only, bounded, and never fatal: outside a
-repository — or with no git binary at all — `cox verify` still runs the
+repository — or with no git binary at all — `wring verify` still runs the
 gates and records nulls. (Formally refusing with exit 3 is a Day-4
 decision.)
 """

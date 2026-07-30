@@ -2,16 +2,16 @@
 
 A bundle captures whatever a gate printed, so a tool that echoes
 `$GITHUB_TOKEN` on failure would otherwise write a live credential to disk —
-and `.cox/` is one `git add -f` away from being public.
+and `.wringer/` is one `git add -f` away from being public.
 
 Redaction happens **before** the write, never as a cleanup pass: the raw
-value must not reach the file at all (SPEC_COX_VERIFY_V0.md §Config design,
+value must not reach the file at all (SPEC_VERIFY_V0.md §Config design,
 rule 5). That is why gate output is captured through a pipe rather than
 handed straight to a file descriptor.
 
 What counts as a secret: the *value* of any environment variable whose
 *name* matches a redaction pattern. Defaults are `*TOKEN*`, `*SECRET*` and
-`*KEY*`; a repo's `.cox.yaml` can add more, but cannot remove the defaults —
+`*KEY*`; a repo's `.wringer.yaml` can add more, but cannot remove the defaults —
 losing token protection should never be one line of config away.
 """
 

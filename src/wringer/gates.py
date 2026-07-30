@@ -1,8 +1,8 @@
 """Run a gate's command: timed, timeout-enforced, streams captured.
 
 Every command gets stdout, stderr, an exit code, a duration and a timeout
-status (SPEC_COX_VERIFY_V0.md §Config design, rule 4). The streams go to
-files, not the console: the bundle is the product, and `cox verify` exists
+status (SPEC_VERIFY_V0.md §Config design, rule 4). The streams go to
+files, not the console: the bundle is the product, and `wring verify` exists
 to replace scrollback rather than reproduce it.
 """
 
@@ -15,8 +15,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from cox.config import Gate
-from cox.redact import Redactor
+from wringer.config import Gate
+from wringer.redact import Redactor
 
 # How long a gate that overran its timeout gets between SIGTERM and SIGKILL.
 KILL_GRACE_SECONDS = 2
@@ -69,7 +69,7 @@ def run(
 
     `shell=True` is deliberate: gate commands are project-authored shell
     strings (`make lint`, `pytest -q && ruff check .`), not argv vectors.
-    Coxswain runs what the repo's own `.cox.yaml` declares — no more
+    Wringer runs what the repo's own `.wringer.yaml` declares — no more
     privilege than the developer typing it.
 
     The gate gets its own process group (`start_new_session`) so that a
@@ -103,7 +103,7 @@ def run(
         # the last lines before a hang are usually the interesting ones.
         out, err = proc.communicate()
     except KeyboardInterrupt:
-        # The gate runs in its own process group, so Ctrl-C reached cox and
+        # The gate runs in its own process group, so Ctrl-C reached wring and
         # not the gate: stopping it is our job, or it outlives the verifier.
         _terminate(proc)
         out, err = proc.communicate()
@@ -150,7 +150,7 @@ def truncate(data: bytes, limit: int) -> tuple[bytes, bool]:
     if len(data) <= limit:
         return data, False
     dropped = len(data) - limit
-    note = f"[cox: {dropped} earlier bytes dropped, keeping the last {limit}]\n"
+    note = f"[wringer: {dropped} earlier bytes dropped, keeping the last {limit}]\n"
     return note.encode() + data[-limit:], True
 
 

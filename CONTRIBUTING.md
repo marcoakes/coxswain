@@ -1,9 +1,9 @@
-# Contributing to Coxswain
+# Contributing to Wringer
 
-Thanks for landing here this early. Coxswain is **building toward
+Thanks for landing here this early. Wringer is **building toward
 `v0.1.0` on September 30, 2026** — the ["One Loop" MVP](ROADMAP.md): a
 GitHub issue in, a verified merge request with evidence out. The
-[build plan](coxswain-ai-dlc-harness-plan.md) is the architectural north
+[build plan](wringer-ai-dlc-harness-plan.md) is the architectural north
 star; [ROADMAP.md](ROADMAP.md) governs execution order.
 
 ## What's valuable right now
@@ -11,7 +11,7 @@ star; [ROADMAP.md](ROADMAP.md) governs execution order.
 - **The open RFCs.** Three abstractions are being locked down in public,
   as issues titled `RFC:` —
   [the loop-contract schema, the gate plugin interface, and the
-  evidence-bundle format](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC).
+  evidence-bundle format](https://github.com/marcoakes/wringer/issues?q=is%3Aissue+RFC).
   If you maintain or use LangGraph, Temporal, CrewAI, or Agent Framework,
   your prior art is exactly what these threads need. Comment before the
   schemas freeze.
@@ -32,7 +32,7 @@ star; [ROADMAP.md](ROADMAP.md) governs execution order.
 
 - **The gate is green tests.** Today that is `.venv/bin/pytest` (setup in
   [AGENTS.md](AGENTS.md#build-test-run)); from Bolt 5 onward it is
-  `cox verify` on this repo, mirrored in CI. No PR merges red.
+  `wring verify` on this repo, mirrored in CI. No PR merges red.
 - Small, reviewable PRs; conventional commits; evidence in the PR
   description.
 - Respect the package-boundary matrix (enforced by lint).

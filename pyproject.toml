@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "coxswain"
+name = "wringer"
 version = "0.1.0.dev0"
-description = "One command that proves whether this change is mergeable — cox verify, a standalone evidence compiler"
+description = "One command that proves whether this change is mergeable — wring verify, a standalone evidence compiler"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -30,12 +30,13 @@ dependencies = ["PyYAML>=6.0"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
-cox = "cox.cli:main"
+wring = "wringer.cli:main"
+wringer = "wringer.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/marcoakes/coxswain"
-Repository = "https://github.com/marcoakes/coxswain"
-Roadmap = "https://github.com/marcoakes/coxswain/blob/main/ROADMAP.md"
+Homepage = "https://github.com/marcoakes/wringer"
+Repository = "https://github.com/marcoakes/wringer"
+Roadmap = "https://github.com/marcoakes/wringer/blob/main/ROADMAP.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -49,5 +50,5 @@ target-version = "py311"
 
 [tool.ruff.lint]
 # pycodestyle, pyflakes, import order, pyupgrade, bugbear — the checks that
-# catch real mistakes. This is the gate Coxswain's own .cox.yaml declares.
+# catch real mistakes. This is the gate Wringer's own .wringer.yaml declares.
 select = ["E", "F", "W", "I", "UP", "B"]

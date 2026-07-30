@@ -1,9 +1,9 @@
-# Coxswain vs LangGraph, CrewAI, and Microsoft Agent Framework — an honest comparison
+# Wringer vs LangGraph, CrewAI, and Microsoft Agent Framework — an honest comparison
 
 If you want graph-orchestrated agents today, **use LangGraph or Microsoft
 Agent Framework — they are mature, well-documented, and battle-tested.**
 This page exists because "reinvented LangGraph" is the obvious critique of
-Coxswain, and the honest answer is: partly true, deliberately so, and the
+Wringer, and the honest answer is: partly true, deliberately so, and the
 differences are exactly the point.
 
 ## Where they are better (today, and probably for a while)
@@ -19,12 +19,12 @@ differences are exactly the point.
 If your need is "orchestrate LLM calls and tools in a graph, in Python,
 with a big ecosystem" — stop reading, use LangGraph.
 
-## Where Coxswain is different by design
+## Where Wringer is different by design
 
-**1. Verification-first, not orchestration-first.** In Coxswain,
+**1. Verification-first, not orchestration-first.** In Wringer,
 deterministic gates (build / test / lint / custom linters) *always* run
 before any LLM judge, and a loop cannot exit "done" without passing its
-declared verifier. Orchestration frameworks let you build this; Coxswain
+declared verifier. Orchestration frameworks let you build this; Wringer
 refuses to work without it. The unit of progress is a *verified outcome*
 (an MR with evidence), not a completed graph run.
 
@@ -56,7 +56,7 @@ framework lock-in is a hard requirement, not a preference.
 ## The actual posture: targets, not competitors
 
 LangGraph, ADK, and Agent Framework shipped graph orchestration before
-"graph engineering" had a name — which is precisely why Coxswain treats
+"graph engineering" had a name — which is precisely why Wringer treats
 them as **compile targets and peers**, not competitors. A
 LangGraph-interop exporter is on the roadmap to make that concrete: bring
 your LangGraph graph, wrap its nodes in loop contracts, get gates,
@@ -69,7 +69,7 @@ isolation, evidence, and cost governance around it.
 - **You've shipped agent code and been burned** — loops that thrash,
   "done" that wasn't, no audit trail, surprise token bills — and you want
   a ticket to become a *verified, evidenced, budgeted* merge request →
-  that is the problem Coxswain exists for.
+  that is the problem Wringer exists for.
 
 *Corrections welcome — this page is honest or it is worthless. PRs and
 issues against any claim here are treated as high-value contributions.*

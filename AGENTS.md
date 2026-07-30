@@ -1,20 +1,20 @@
 # AGENTS.md
 
-Guidance for AI agents (and humans) working in this repository. Coxswain
+Guidance for AI agents (and humans) working in this repository. Wringer
 dogfoods its own principle: *the repo is the agent-experience surface.*
 
-Read this file, then [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md) end to
-end. The spec is the binding contract for everything in `src/cox/`.
+Read this file, then [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) end to
+end. The spec is the binding contract for everything in `src/wringer/`.
 
 ## What this repo is
 
-Coxswain (`cox`) is an open-source, control-plane-agnostic AI-DLC harness:
+Wringer (`wring`) is an open-source, control-plane-agnostic AI-DLC harness:
 it compiles intent (issues, PRDs, Slack messages) into verified outcomes
 (reviewed MRs with evidence), using graphs of loop-bearing agents,
 portable across local, Temporal, AWS AgentCore, Google Agent Engine,
 Microsoft Foundry, and Anthropic Managed Agents runtimes.
 
-**v0.1.0 ships one slice of that: `cox verify`, a standalone evidence
+**v0.1.0 ships one slice of that: `wring verify`, a standalone evidence
 compiler.** One command that runs a repo's declared gates and leaves
 behind an evidence bundle a human or an agent can inspect. No LLM calls,
 no network, no uploads — ever.
@@ -23,33 +23,33 @@ no network, no uploads — ever.
 
 | Document | Authority |
 |---|---|
-| [SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md) | **binding** for v0.1 implementation — CLI surface, exit codes, bundle format, build order, release bar |
+| [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) | **binding** for v0.1 implementation — CLI surface, exit codes, bundle format, build order, release bar |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
-| [coxswain-ai-dlc-harness-plan.md](coxswain-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
+| [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
-| [SECURITY.md](SECURITY.md) | the execution model (`.cox.yaml` is code), what a bundle may contain, reporting channel |
+| [SECURITY.md](SECURITY.md) | the execution model (`.wringer.yaml` is code), what a bundle may contain, reporting channel |
 
 Where they disagree about v0.1, the spec wins.
 
 ## Current state — Bolt 4 shipped
 
-There **is** code now: `cox init` and `cox verify` work — `verify` runs a
-repo's whole declared gate set and writes a real bundle, `cox explain`
+There **is** code now: `wring init` and `wring verify` work — `verify` runs a
+repo's whole declared gate set and writes a real bundle, `wring explain`
 diagnoses a finished run, `--json` feeds agents, and secrets never reach the
 disk — with 151 tests passing on Python 3.11–3.13 (plus macOS) in CI, behind
 a ruff lint gate.
 
 | Bolt | Spec day | State |
 |---|---|---|
-| 1 — skeleton | Day 1 | ✅ packaging, config loader, `cox init`, `cox verify` running one gate, `evidence.jsonl` + `manifest.json`, exit codes 0/1/2 |
+| 1 — skeleton | Day 1 | ✅ packaging, config loader, `wring init`, `wring verify` running one gate, `evidence.jsonl` + `manifest.json`, exit codes 0/1/2 |
 | 2 — gate runner | Day 2 | ✅ every gate in declared order, `timeout` enforced (process-group kill), stop-on-first-required-failure, optional-gate semantics, per-gate `gates/NNN_id/{stdout.log,stderr.log,result.json}`, `summary.md`, CI |
 | 2.5 — review hardening | — | ✅ gate ids validated as slugs, internal git calls bounded, POSIX-only kill declared, ruff lint gate + macOS CI, real transcripts, SECURITY.md |
-| 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `cox verify --json`, `cox explain` |
+| 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `wring verify --json`, `wring explain` |
 | 4 — redaction & safety | Day 4 | ✅ env redaction before write, capped logs with a declared note, binary + textconv exclusion, exit 2 outside a repo, exit 3 mid-merge/rebase, exit 4 on SIGINT with the gate killed |
-| 5 — dogfood | Day 5 | ⬜ next: real command detection in `cox init`, `cox verify --output`, Coxswain verifies Coxswain, CI upgraded to run `cox verify` and upload the bundle, committed sanitized bundle in `.cox.example/`, real README transcript |
+| 5 — dogfood | Day 5 | ⬜ next: real command detection in `wring init`, `wring verify --output`, Wringer verifies Wringer, CI upgraded to run `wring verify` and upload the bundle, committed sanitized bundle in `.wringer.example/`, real README transcript |
 
 The `v0.1.0` tag is gated on the spec's
-[Definition of PROVEN](SPEC_COX_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
+[Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
 not on the code compiling.
 
 ## Build, test, run
@@ -75,15 +75,15 @@ Then:
 
 ```bash
 .venv/bin/pytest                # the gate: all tests, ~10s, must be green
-.venv/bin/cox --help
-.venv/bin/cox init              # writes .cox.yaml (refuses to overwrite)
-.venv/bin/cox verify            # runs every gate, writes .cox/runs/<run_id>/
-.venv/bin/cox verify --gate ID  # one gate, numbered as if the full run happened
-.venv/bin/cox verify --json     # one object on stdout, no human report
-.venv/bin/cox explain           # diagnose the latest run (no LLM)
+.venv/bin/wring --help
+.venv/bin/wring init              # writes .wringer.yaml (refuses to overwrite)
+.venv/bin/wring verify            # runs every gate, writes .wringer/runs/<run_id>/
+.venv/bin/wring verify --gate ID  # one gate, numbered as if the full run happened
+.venv/bin/wring verify --json     # one object on stdout, no human report
+.venv/bin/wring explain           # diagnose the latest run (no LLM)
 ```
 
-**Two commands are the law until Bolt 5, when `cox verify` on this repo
+**Two commands are the law until Bolt 5, when `wring verify` on this repo
 becomes the gate:**
 
 ```bash
@@ -94,8 +94,8 @@ becomes the gate:**
 CI mirrors exactly those two:
 [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs ruff
 once and pytest on 3.11 / 3.12 / 3.13 plus macOS, for every push and PR.
-Bolt 5 upgrades that workflow to run `cox verify` and upload the bundle —
-and these two commands are the gates Coxswain's own `.cox.yaml` will
+Bolt 5 upgrades that workflow to run `wring verify` and upload the bundle —
+and these two commands are the gates Wringer's own `.wringer.yaml` will
 declare. Ruff config lives in `pyproject.toml` (`E,F,W,I,UP,B`,
 line-length 88); there is still no `Makefile`, and any further dependency
 is a decision to ask about.
@@ -105,16 +105,16 @@ files, and only a failing required gate gets a 20-line tail on the
 console. If you are tempted to add `--verbose`, read the spec's demo
 block first — the clean console is the product.
 
-## Module map (`src/cox/`)
+## Module map (`src/wringer/`)
 
 | Module | Does | Deliberately does not (yet) |
 |---|---|---|
-| `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, and `cox explain`'s rendering | register `--changed-only` or `--output` — see below |
-| `config.py` | strict `.cox.yaml` loader → frozen `Config`/`Gate` dataclasses; validates `evidence.redact` because a typo there must not silently disable redaction | consume `evidence.include` (still shape-only) |
-| `detect.py` | the commented `.cox.yaml` template `cox init` writes | actually detect project commands (static template is Day-1-legal per the spec: *"if detection is uncertain, generate comments rather than being clever"*) |
+| `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, and `wring explain`'s rendering | register `--changed-only` or `--output` — see below |
+| `config.py` | strict `.wringer.yaml` loader → frozen `Config`/`Gate` dataclasses; validates `evidence.redact` because a typo there must not silently disable redaction | consume `evidence.include` (still shape-only) |
+| `detect.py` | the commented `.wringer.yaml` template `wring init` writes | actually detect project commands (static template is Day-1-legal per the spec: *"if detection is uncertain, generate comments rather than being clever"*) |
 | `git.py` | root detection, HEAD SHA, branch, dirty flag, changed/untracked lists, `diff`/`status` capture, and the refusal checks (`is_repo`, `in_progress`); read-only, bounded, never fatal | write anything — every call here is a read |
 | `gates.py` | run one gate through the shell in the repo root: own process group, `timeout` enforced by SIGTERM→SIGKILL on the group, output captured **through a pipe** so it can be scrubbed and capped before it is written, duration in ms | decide anything about *which* gates run — that is `cli.py`'s sequencing |
-| `evidence.py` | allocate `.cox/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) — scrubbing every write, because the `Bundle` holds the redactor | decide *what* counts as a secret — that is `redact.py` |
+| `evidence.py` | allocate `.wringer/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) — scrubbing every write, because the `Bundle` holds the redactor | decide *what* counts as a secret — that is `redact.py` |
 | `redact.py` | turn env-var name patterns into the set of secret values, and erase them from text or bytes | look anywhere but the environment |
 | `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
 
@@ -122,8 +122,8 @@ Every module in the spec's layout now exists.
 
 ### Do not add these early
 
-The spec's [Non-goals](SPEC_COX_VERIFY_V0.md#non-goals-for-v010-binding)
-are **binding**: no `cox run`, no LLM judge, no issue ingestion, no PR
+The spec's [Non-goals](SPEC_VERIFY_V0.md#non-goals-for-v010-binding)
+are **binding**: no `wring run`, no LLM judge, no issue ingestion, no PR
 creation, no Temporal, no OpenTelemetry, no multi-agent anything, no
 sandboxing beyond recording repo state.
 
@@ -147,8 +147,8 @@ semantics in the spec before building it.
 | 4 | interrupted |
 
 **The evidence bundle is the product** — boring, stable, grep-friendly,
-and the interface future judges and agents consume ([RFC #2](https://github.com/marcoakes/coxswain/issues/2)).
-`manifest.json` carries `"schema_version": "cox.evidence.v1"`;
+and the interface future judges and agents consume ([RFC #2](https://github.com/marcoakes/wringer/issues/2)).
+`manifest.json` carries `"schema_version": "wringer.evidence.v1"`;
 `evidence.jsonl` is append-only, one JSON object per line, `type` first.
 Changing either shape is a spec change, not an implementation detail —
 bump the schema version and say so in the commit.
@@ -156,7 +156,7 @@ bump the schema version and say so in the commit.
 Three conventions inside the bundle are load-bearing:
 
 - **`gates/NNN_<id>/` numbering follows the *declared* order, not the run.**
-  `cox verify --gate test` on a three-gate config still writes
+  `wring verify --gate test` on a three-gate config still writes
   `gates/003_test/`, so a directory name means the same thing in a full
   run, a partial run and a single-gate run.
 - **Every event carries `ts`** (local ISO-8601, milliseconds). The spec's
@@ -164,7 +164,7 @@ Three conventions inside the bundle are load-bearing:
 - **`git.status` carries `untracked` only when there is something
   untracked**, so the common case stays exactly the spec's shape.
 - **The git capture happens before the bundle directory exists**, or
-  Coxswain's own `.cox/` would show up as an untracked file in its own
+  Wringer's own `.wringer/` would show up as an untracked file in its own
   evidence. Order matters in `cmd_verify`; do not reshuffle it.
 - **A `log` field appears on `gate.finished` for failing gates only** —
   it is a pointer to where the reader is being sent, not an inventory
@@ -196,9 +196,9 @@ because a typo in a gate definition must not silently change what
 accepted as its negation (the spec spells it both ways); both together
 is an error.
 
-**Bundle location:** `.cox/` is gitignored — real runs stay local
+**Bundle location:** `.wringer/` is gitignored — real runs stay local
 (nothing uploads, ever). The one committed bundle lives in
-`.cox.example/runs/…` and is sanitized by hand.
+`.wringer.example/runs/…` and is sanitized by hand.
 
 ## Operating rules
 
@@ -206,7 +206,7 @@ is an error.
    approval → execute → verify → commit → report → pause. Do not start
    the next bolt on your own initiative.
 2. **Never claim a bolt done unless its checks actually ran.** Paste the
-   real command output — `pytest` summary and a `cox` transcript — into
+   real command output — `pytest` summary and a `wring` transcript — into
    the report. Fabricated or "should work" output is the one unforgivable
    sin in a repo whose entire product is evidence.
 3. **Tests come with the commit that needs them**, not later. The existing
@@ -230,15 +230,15 @@ is an error.
   locally and the maintainer pushes, or publishing happens through the
   browser against his logged-in GitHub session — his call, per bolt.
   Never work around it, never handle a token — surface the block and ask.
-- **`.cox.yaml` is arbitrary code execution by design** — gates run
+- **`.wringer.yaml` is arbitrary code execution by design** — gates run
   through a shell with the user's privileges. Never add a feature that
   widens that (no fetching a config over the network, no running a gate
   from an untrusted source) without a spec change and a SECURITY.md
   update. Bundles are redacted before write, but redaction only knows about
   values in the environment — a secret a gate reads from a file and prints
   is still yours to catch, so read a bundle before pasting it anywhere.
-- **Don't run `cox verify` on this repo casually while iterating** — each
-  run writes a new `.cox/runs/<id>/`. Harmless (gitignored), just noisy.
+- **Don't run `wring verify` on this repo casually while iterating** — each
+  run writes a new `.wringer/runs/<id>/`. Harmless (gitignored), just noisy.
 - **Test repos must be isolated from the developer's git config.**
   `tests/conftest.py` pins `user.name`, `user.email` and
   `commit.gpgsign=false` for exactly this reason.

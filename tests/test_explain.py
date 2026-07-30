@@ -1,10 +1,10 @@
-"""`cox explain` — a non-LLM diagnosis read back out of a bundle."""
+"""`wring explain` — a non-LLM diagnosis read back out of a bundle."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from cox import cli, evidence
+from wringer import cli, evidence
 
 FAILING = """\
 version: 1
@@ -56,8 +56,8 @@ def test_explain_diagnoses_the_latest_failed_run(
     assert "exit code  1" in out
     assert "--- gates/002_test/stdout.log ---" in out
     assert "boom-in-the-log" in out
-    assert f"Full report:\n  .cox/runs/{run_id}/summary.md" in out
-    assert "Rerun:\n  cox verify --gate test" in out
+    assert f"Full report:\n  .wringer/runs/{run_id}/summary.md" in out
+    assert "Rerun:\n  wring verify --gate test" in out
 
 
 def test_explain_on_a_passing_run_says_there_is_nothing_to_diagnose(
@@ -93,7 +93,7 @@ def test_explain_lists_the_changed_files(
     out = capsys.readouterr().out
     assert "Changed files (1):" in out
     assert "  calc.py" in out
-    assert "Untracked (1): .cox.yaml" in out
+    assert "Untracked (1): .wringer.yaml" in out
 
 
 def test_explain_reads_a_named_run(repo, write_config, monkeypatch, capsys):
@@ -117,7 +117,7 @@ def test_explain_without_any_runs_is_a_config_error(repo, monkeypatch, capsys):
 
     err = capsys.readouterr().err
     assert "no runs" in err
-    assert "cox verify" in err
+    assert "wring verify" in err
 
 
 def test_explain_of_a_missing_directory_is_a_config_error(

@@ -1,6 +1,6 @@
-"""cox — command-line entry points.
+"""wring — command-line entry points.
 
-Exit codes are contract (SPEC_COX_VERIFY_V0.md):
+Exit codes are contract (SPEC_VERIFY_V0.md):
 0 = all required gates passed · 1 = a required gate failed ·
 2 = config or environment error · 3 = unsafe dirty state / refused
 precondition · 4 = interrupted.
@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from cox import __version__, config, detect, evidence, gates, git, redact, summary
+from wringer import __version__, config, detect, evidence, gates, git, redact, summary
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
@@ -25,21 +25,21 @@ EXIT_INTERRUPTED = 4
 # in the bundle; this is just enough to see what broke without opening it.
 LOG_TAIL_LINES = 20
 
-# `cox explain` is meant to be compact; a 400-file diff is a scroll, not a
+# `wring explain` is meant to be compact; a 400-file diff is a scroll, not a
 # diagnosis.
 EXPLAIN_FILE_LIMIT = 20
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cox",
+        prog="wring",
         description=(
             "One command that proves whether this change is mergeable, "
             "and leaves behind evidence a human or agent can inspect."
         ),
     )
     parser.add_argument(
-        "--version", action="version", version=f"cox {__version__}"
+        "--version", action="version", version=f"wring {__version__}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -82,14 +82,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     target = Path.cwd() / config.CONFIG_FILENAME
     if target.exists():
         print(
-            f"cox init: refusing to overwrite existing {target.name}",
+            f"wring init: refusing to overwrite existing {target.name}",
             file=sys.stderr,
         )
         return EXIT_CONFIG
     target.write_text(detect.template(), encoding="utf-8")
     print(
         f"Wrote {target.name} — edit the gates to match this project, "
-        "then run: cox verify"
+        "then run: wring verify"
     )
     return EXIT_OK
 
@@ -101,7 +101,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     # state is worse than no bundle, so neither one gets written.
     if not git.is_repo(root):
         print(
-            f"cox verify: {Path.cwd()} is not a git repository — verification "
+            f"wring verify: {Path.cwd()} is not a git repository — verification "
             "records which commit and which changes were proven, so it needs "
             "one. Run 'git init', or verify from inside your repo.",
             file=sys.stderr,
@@ -111,7 +111,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     unfinished = git.in_progress(root)
     if unfinished is not None:
         print(
-            f"cox verify: refusing to verify in the middle of {unfinished} — "
+            f"wring verify: refusing to verify in the middle of {unfinished} — "
             "HEAD and the working tree describe a state nobody chose. Finish "
             "or abort it, then verify.",
             file=sys.stderr,
@@ -122,10 +122,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
         cfg = config.load(root / config.CONFIG_FILENAME)
         planned = _plan(cfg, args.gate)
     except config.ConfigError as exc:
-        print(f"cox verify: {exc}", file=sys.stderr)
+        print(f"wring verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
 
-    # Snapshot git before the bundle exists, so Coxswain's own run directory
+    # Snapshot git before the bundle exists, so Wringer's own run directory
     # is never what makes the tree look dirty — or shows up in its own
     # evidence as an untracked file.
     state = git.inspect(root)
@@ -139,13 +139,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
             root / evidence.RUNS_DIRNAME, redactor=redactor
         )
     except evidence.EvidenceError as exc:
-        print(f"cox verify: {exc}", file=sys.stderr)
+        print(f"wring verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
 
     bundle.event(
         "run.started",
         run_id=bundle.run_id,
-        cox_version=__version__,
+        wringer_version=__version__,
         repo=root.name,
         sha=state.head_sha,
     )
@@ -230,15 +230,15 @@ def cmd_explain(args: argparse.Namespace) -> int:
     if args.run is not None:
         run_dir = Path(args.run)
         if not run_dir.is_dir():
-            print(f"cox explain: no run directory at {args.run}", file=sys.stderr)
+            print(f"wring explain: no run directory at {args.run}", file=sys.stderr)
             return EXIT_CONFIG
     else:
         runs_root = root / evidence.RUNS_DIRNAME
         found = evidence.latest_run(runs_root)
         if found is None:
             print(
-                f"cox explain: no runs under {runs_root.as_posix()} — "
-                "run 'cox verify' first",
+                f"wring explain: no runs under {runs_root.as_posix()} — "
+                "run 'wring verify' first",
                 file=sys.stderr,
             )
             return EXIT_CONFIG
@@ -249,7 +249,7 @@ def cmd_explain(args: argparse.Namespace) -> int:
         recorded = evidence.read_events(run_dir)
         rows = evidence.read_gate_results(run_dir)
     except evidence.EvidenceError as exc:
-        print(f"cox explain: {exc}", file=sys.stderr)
+        print(f"wring explain: {exc}", file=sys.stderr)
         return EXIT_CONFIG
 
     _explain(run_dir, manifest, recorded, rows)
@@ -299,7 +299,7 @@ def _explain(
         shown = report.as_posix()
     print(f"\nFull report:\n  {shown}")
     if failed_gate is not None:
-        print(f"\nRerun:\n  cox verify --gate {failed_gate}")
+        print(f"\nRerun:\n  wring verify --gate {failed_gate}")
 
 
 def _explain_repo_line(started: dict, repo: dict, manifest: dict) -> str:
@@ -473,7 +473,7 @@ def _report_json(
                 "status": status,
                 "failed_gate": failed_gate,
                 "rerun": (
-                    f"cox verify --gate {failed_gate}"
+                    f"wring verify --gate {failed_gate}"
                     if failed_gate is not None
                     else None
                 ),
@@ -503,7 +503,7 @@ def _report_run(
     if failed_gate is not None:
         print(
             f"\nNext:\n  open {shown}/summary.md\n"
-            f"  rerun cox verify --gate {failed_gate}"
+            f"  rerun wring verify --gate {failed_gate}"
         )
 
 
@@ -532,5 +532,5 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         # A Ctrl-C between the phases that handle it themselves still owes the
         # caller the contract's exit code, not a traceback.
-        print("\ncox: interrupted", file=sys.stderr)
+        print("\nwring: interrupted", file=sys.stderr)
         return EXIT_INTERRUPTED

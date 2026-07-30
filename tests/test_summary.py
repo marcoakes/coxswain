@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from cox import evidence, summary
-from cox.config import Gate
-from cox.gates import GateResult
-from cox.git import RepoState
+from wringer import evidence, summary
+from wringer.config import Gate
+from wringer.gates import GateResult
+from wringer.git import RepoState
 
 NOW = datetime(2026, 7, 30, 8, 6, 1, tzinfo=timezone(timedelta(hours=1)))
 
@@ -22,7 +22,7 @@ FORMAT = Gate(id="format", run="make format-check", optional=True)
 
 @pytest.fixture
 def bundle(tmp_path: Path) -> evidence.Bundle:
-    return evidence.Bundle.create(tmp_path / ".cox" / "runs", now=NOW)
+    return evidence.Bundle.create(tmp_path / ".wringer" / "runs", now=NOW)
 
 
 def state(**overrides) -> RepoState:
@@ -65,7 +65,7 @@ def test_a_passing_run_reads_as_passed(bundle):
 
     text = written.read_text(encoding="utf-8")
     assert written.name == "summary.md"
-    assert f"# cox verify — {bundle.run_id}" in text
+    assert f"# wring verify — {bundle.run_id}" in text
     assert "- repo: **demo** @ `bc0d4c5` (branch `main`, clean)" in text
     assert "- started: 2026-07-30T08:06:01+01:00" in text
     assert "- result: **passed** — all required gates passed" in text
@@ -74,7 +74,7 @@ def test_a_passing_run_reads_as_passed(bundle):
     assert "[stdout](gates/001_lint/stdout.log)" in text
     assert "[stderr](gates/002_test/stderr.log)" in text
     # nothing failed, so no rerun instruction
-    assert "cox verify --gate" not in text
+    assert "wring verify --gate" not in text
 
 
 def test_a_failed_run_names_the_gate_skips_the_rest_and_gives_the_rerun(bundle):
@@ -94,7 +94,7 @@ def test_a_failed_run_names_the_gate_skips_the_rest_and_gives_the_rerun(bundle):
     assert "- result: **failed** — required gate `test` failed" in text
     assert "| test | failed | 9.2s |" in text
     assert "| deploy | skipped | — | — |" in text
-    assert "cox verify --gate test" in text
+    assert "wring verify --gate test" in text
 
 
 def test_an_optional_failure_is_labelled_optional(bundle):

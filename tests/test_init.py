@@ -1,6 +1,6 @@
-"""`cox init` behavior."""
+"""`wring init` behavior."""
 
-from cox import cli, config
+from wringer import cli, config
 
 
 def test_init_writes_template_that_parses(tmp_path, monkeypatch, capsys):
@@ -9,7 +9,7 @@ def test_init_writes_template_that_parses(tmp_path, monkeypatch, capsys):
 
     written = tmp_path / config.CONFIG_FILENAME
     assert written.is_file()
-    assert "cox verify" in capsys.readouterr().out
+    assert "wring verify" in capsys.readouterr().out
 
     # The template must be loadable by our own strict parser.
     cfg = config.load(written)

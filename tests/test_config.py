@@ -2,7 +2,7 @@
 
 import pytest
 
-from cox import config
+from wringer import config
 
 
 def parse(raw):
@@ -138,7 +138,7 @@ def test_slug_gate_ids_are_accepted(gate_id):
 
 
 def test_load_missing_file_raises(tmp_path):
-    with pytest.raises(config.ConfigError, match="cox init"):
+    with pytest.raises(config.ConfigError, match="wring init"):
         config.load(tmp_path / config.CONFIG_FILENAME)
 
 

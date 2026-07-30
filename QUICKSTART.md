@@ -4,7 +4,7 @@
 > repo on 2026-07-30, captured and pasted unedited, in the order shown. The
 > single clearly-marked block at the bottom is not built yet and says so.
 >
-> `pipx install coxswain` from PyPI does **not** work yet — the package is
+> `pipx install wringer` from PyPI does **not** work yet — the package is
 > unreleased. Install from git, as below.
 
 ## Install
@@ -13,20 +13,20 @@ Python 3.11+, macOS or Linux.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install "git+https://github.com/marcoakes/coxswain"
+.venv/bin/python -m pip install "git+https://github.com/marcoakes/wringer"
 ```
 
 That is the form verified for this page. `pipx install
-git+https://github.com/marcoakes/coxswain` puts `cox` on your PATH globally
+git+https://github.com/marcoakes/wringer` puts `wring` on your PATH globally
 and installs the same package.
 
 ## Declare your gates
 
-`cox init` writes a commented `.cox.yaml`:
+`wring init` writes a commented `.wringer.yaml`:
 
 ```
-$ cox init
-Wrote .cox.yaml — edit the gates to match this project, then run: cox verify
+$ wring init
+Wrote .wringer.yaml — edit the gates to match this project, then run: wring verify
 ```
 
 Edit it to your project's real commands. They run in your repo root, in the
@@ -48,18 +48,18 @@ gates:
 ## Verify
 
 ```
-$ cox verify
+$ wring verify
 ✓ lint passed        0.1s
 ✓ test passed        0.2s
 
 Evidence written to:
-.cox/runs/20260730-160103-3547/
+.wringer/runs/20260730-160103-3547/
 ```
 
 Exit code `0`. Now an off-by-one slips into `calc.py`:
 
 ```
-$ cox verify
+$ wring verify
 ✓ lint passed        0.1s
 ✗ test failed        0.2s
 
@@ -79,11 +79,11 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.cox/runs/20260730-160105-830a/
+.wringer/runs/20260730-160105-830a/
 
 Next:
-  open .cox/runs/20260730-160105-830a/summary.md
-  rerun cox verify --gate test
+  open .wringer/runs/20260730-160105-830a/summary.md
+  rerun wring verify --gate test
 ```
 
 Exit code `1`. Gate output is captured, never echoed: a passing run stays
@@ -93,28 +93,28 @@ gates listed after a required failure are not run at all.
 ## What it leaves behind
 
 ```
-$ find .cox/runs/20260730-160105-830a | sort
-.cox/runs/20260730-160105-830a
-.cox/runs/20260730-160105-830a/diff.patch
-.cox/runs/20260730-160105-830a/evidence.jsonl
-.cox/runs/20260730-160105-830a/gates
-.cox/runs/20260730-160105-830a/gates/001_lint
-.cox/runs/20260730-160105-830a/gates/001_lint/result.json
-.cox/runs/20260730-160105-830a/gates/001_lint/stderr.log
-.cox/runs/20260730-160105-830a/gates/001_lint/stdout.log
-.cox/runs/20260730-160105-830a/gates/002_test
-.cox/runs/20260730-160105-830a/gates/002_test/result.json
-.cox/runs/20260730-160105-830a/gates/002_test/stderr.log
-.cox/runs/20260730-160105-830a/gates/002_test/stdout.log
-.cox/runs/20260730-160105-830a/manifest.json
-.cox/runs/20260730-160105-830a/status.txt
-.cox/runs/20260730-160105-830a/summary.md
+$ find .wringer/runs/20260730-160105-830a | sort
+.wringer/runs/20260730-160105-830a
+.wringer/runs/20260730-160105-830a/diff.patch
+.wringer/runs/20260730-160105-830a/evidence.jsonl
+.wringer/runs/20260730-160105-830a/gates
+.wringer/runs/20260730-160105-830a/gates/001_lint
+.wringer/runs/20260730-160105-830a/gates/001_lint/result.json
+.wringer/runs/20260730-160105-830a/gates/001_lint/stderr.log
+.wringer/runs/20260730-160105-830a/gates/001_lint/stdout.log
+.wringer/runs/20260730-160105-830a/gates/002_test
+.wringer/runs/20260730-160105-830a/gates/002_test/result.json
+.wringer/runs/20260730-160105-830a/gates/002_test/stderr.log
+.wringer/runs/20260730-160105-830a/gates/002_test/stdout.log
+.wringer/runs/20260730-160105-830a/manifest.json
+.wringer/runs/20260730-160105-830a/status.txt
+.wringer/runs/20260730-160105-830a/summary.md
 ```
 
 `summary.md` is the human's entry point:
 
 ````markdown
-# cox verify — 20260730-160105-830a
+# wring verify — 20260730-160105-830a
 
 - repo: **demo5** @ `d8970f8` (branch `main`, dirty)
 - started: 2026-07-30T16:01:05+01:00
@@ -129,7 +129,7 @@ $ find .cox/runs/20260730-160105-830a | sort
 Rerun the failing gate:
 
 ```
-cox verify --gate test
+wring verify --gate test
 ```
 ````
 
@@ -137,7 +137,7 @@ cox verify --gate test
 line:
 
 ```json
-{"type": "run.started", "ts": "2026-07-30T16:01:05.176+01:00", "run_id": "20260730-160105-830a", "cox_version": "0.1.0.dev0", "repo": "demo5", "sha": "d8970f808ec2b607e764d941bab0656cccfcc83f"}
+{"type": "run.started", "ts": "2026-07-30T16:01:05.176+01:00", "run_id": "20260730-160105-830a", "wringer_version": "0.1.0.dev0", "repo": "demo5", "sha": "d8970f808ec2b607e764d941bab0656cccfcc83f"}
 {"type": "git.status", "ts": "2026-07-30T16:01:05.177+01:00", "dirty": true, "changed_files": ["calc.py"]}
 {"type": "gate.started", "ts": "2026-07-30T16:01:05.178+01:00", "gate_id": "lint", "command": "ruff check ."}
 {"type": "gate.finished", "ts": "2026-07-30T16:01:05.311+01:00", "gate_id": "lint", "exit_code": 0, "duration_ms": 130}
@@ -168,22 +168,22 @@ Exit codes are contract, and all five are live: `0` all required gates
 passed · `1` a required gate failed · `2` config or environment error ·
 `3` refused (see below) · `4` interrupted.
 
-`cox verify` refuses with `3` when the tree is in the middle of a merge,
+`wring verify` refuses with `3` when the tree is in the middle of a merge,
 rebase, cherry-pick, revert or bisect — HEAD and the working tree then
 describe a state nobody chose, and "passing" would be a claim about a commit
 that does not exist yet. Finish or abort the operation, then verify.
 
 Press Ctrl-C and you get `4`: the gate is stopped (it runs in its own process
-group, so Coxswain has to do that deliberately) and the partial bundle is
+group, so Wringer has to do that deliberately) and the partial bundle is
 written and marked `interrupted` rather than abandoned half-finished.
 
-## `cox explain` — what just happened
+## `wring explain` — what just happened
 
 Reads the last run, or one you name. No LLM is involved: every line comes
 straight out of the bundle.
 
 ```
-$ cox explain
+$ wring explain
 Run 20260730-160105-830a — failed
 demo5 @ d8970f8 (branch main, dirty) · started 2026-07-30T16:01:05+01:00
 
@@ -213,20 +213,20 @@ Changed files (1):
   calc.py
 
 Full report:
-  .cox/runs/20260730-160105-830a/summary.md
+  .wringer/runs/20260730-160105-830a/summary.md
 
 Rerun:
-  cox verify --gate test
+  wring verify --gate test
 ```
 
 ## For agents: `--json`
 
-`cox verify --json` prints exactly one object and nothing else — no ✓ lines,
+`wring verify --json` prints exactly one object and nothing else — no ✓ lines,
 no log tails — so a coding agent can act on the result without parsing prose:
 
 ```
-$ cox verify --json
-{"status": "failed", "failed_gate": "test", "rerun": "cox verify --gate test", "evidence_dir": ".cox/runs/20260730-160105-d217"}
+$ wring verify --json
+{"status": "failed", "failed_gate": "test", "rerun": "wring verify --gate test", "evidence_dir": ".wringer/runs/20260730-160105-d217"}
 ```
 
 Every key is always present, so a consumer never has to tell "passed" apart
@@ -237,16 +237,16 @@ either way.
 Everything else that works today:
 
 ```bash
-cox verify --gate test        # one gate; its evidence keeps its declared number
-cox explain .cox/runs/<id>    # diagnose a specific run
-cox --version
+wring verify --gate test        # one gate; its evidence keeps its declared number
+wring explain .wringer/runs/<id>    # diagnose a specific run
+wring --version
 ```
 
-## ⚠️ `.cox.yaml` is code
+## ⚠️ `.wringer.yaml` is code
 
-`cox verify` runs the commands the repo declares, through a shell, with your
+`wring verify` runs the commands the repo declares, through a shell, with your
 privileges — exactly as if you had typed them. **Read a repository's
-`.cox.yaml` before running `cox verify` in it**, the same way you would read
+`.wringer.yaml` before running `wring verify` in it**, the same way you would read
 its `Makefile`. See [SECURITY.md](SECURITY.md).
 
 ## Not built yet — arrives with `v0.1.0`
@@ -255,18 +255,18 @@ Everything above is real. This is **not implemented** and does not work if
 you type it:
 
 ```bash
-cox verify --changed-only  # gate only what changed
+wring verify --changed-only  # gate only what changed
 ```
 
-Also landing before the tag: real command detection in `cox init`,
-`cox verify --output`, and `pipx install coxswain` from PyPI. Progress is tracked in
+Also landing before the tag: real command detection in `wring init`,
+`wring verify --output`, and `pipx install wringer` from PyPI. Progress is tracked in
 [AGENTS.md](AGENTS.md); the release bar is the spec's
-[Definition of PROVEN](SPEC_COX_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts).
+[Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts).
 
 ## Secrets
 
 Gate output is captured, so a tool that echoes a token would otherwise write
-it into the bundle. Before anything is written, Coxswain erases the *values*
+it into the bundle. Before anything is written, Wringer erases the *values*
 of environment variables whose *names* match `*TOKEN*`, `*SECRET*` or
 `*KEY*`, replacing each with `[REDACTED]`. Add your own patterns — the
 defaults always stay on:
@@ -292,4 +292,4 @@ contents never enter `diff.patch`.
 
 Write code (the harness never writes code — agents do), call any LLM, open
 PRs, replace your CI, or upload anything anywhere. Evidence stays on your
-disk; `.cox/` is gitignored by the template.
+disk; `.wringer/` is gitignored by the template.

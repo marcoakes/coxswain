@@ -1,13 +1,13 @@
 # Security
 
-Coxswain is pre-release software (`0.1.0.dev0`). Read this before running
-`cox verify` in a repository you did not write.
+Wringer is pre-release software (`0.1.0.dev0`). Read this before running
+`wring verify` in a repository you did not write.
 
 ## Reporting a vulnerability
 
 Use GitHub's private reporting: **Security → Advisories → Report a
 vulnerability** on
-[this repository](https://github.com/marcoakes/coxswain/security/advisories/new).
+[this repository](https://github.com/marcoakes/wringer/security/advisories/new).
 That channel is private to the maintainer. Please do not open a public
 issue for anything exploitable.
 
@@ -15,24 +15,24 @@ Expect an acknowledgement within a week. There is no bounty; there is
 credit in the advisory unless you prefer otherwise.
 
 Non-sensitive hardening ideas are welcome as normal
-[issues](https://github.com/marcoakes/coxswain/issues).
+[issues](https://github.com/marcoakes/wringer/issues).
 
-## `.cox.yaml` is code
+## `.wringer.yaml` is code
 
-**`cox verify` executes the commands a repository declares, through a
+**`wring verify` executes the commands a repository declares, through a
 shell, with your privileges.** That is the design — a gate is `make lint`
-or `pytest -q`, and Coxswain claims no more authority than you typing it.
+or `pytest -q`, and Wringer claims no more authority than you typing it.
 The consequence is the same as `Makefile`, `package.json` scripts, or a
 `.pre-commit-config.yaml`:
 
-> Cloning an untrusted repository and running `cox verify` in it runs that
-> repository's chosen commands on your machine. **Read its `.cox.yaml`
+> Cloning an untrusted repository and running `wring verify` in it runs that
+> repository's chosen commands on your machine. **Read its `.wringer.yaml`
 > first.**
 
-Coxswain does not sandbox gates, and v0.1 will not. "Sandboxing beyond
+Wringer does not sandbox gates, and v0.1 will not. "Sandboxing beyond
 recording current repo state" is an explicit
-[non-goal](SPEC_COX_VERIFY_V0.md#non-goals-for-v010-binding) for this
-release. If you need isolation now, run `cox verify` inside your own
+[non-goal](SPEC_VERIFY_V0.md#non-goals-for-v010-binding) for this
+release. If you need isolation now, run `wring verify` inside your own
 container.
 
 Two things it does refuse. It will not verify outside a git repository
@@ -44,7 +44,7 @@ config cannot use it to write outside the run directory.
 
 ## What the evidence bundle contains
 
-A bundle (`.cox/runs/<run_id>/`) captures each gate's **full stdout and
+A bundle (`.wringer/runs/<run_id>/`) captures each gate's **full stdout and
 stderr**, its command string, the repo's HEAD SHA, branch and dirty flag.
 
 **Secrets are redacted before anything is written.** The values of
@@ -66,7 +66,7 @@ environment of the run. It cannot know about:
 
 So the standing advice holds:
 
-- `.cox/` is gitignored by the template Coxswain ships. Keep it that way.
+- `.wringer/` is gitignored by the template Wringer ships. Keep it that way.
 - **Read a bundle before you attach it to a public issue or PR.**
 
 Two further bounds on what a bundle can become: each captured stream is
@@ -75,15 +75,15 @@ and binary file contents never enter `diff.patch` — not even when the
 repository's own `.gitattributes` defines a `textconv` driver that would
 turn them into text.
 
-## What Coxswain never does
+## What Wringer never does
 
-- **No network.** `cox verify` makes no outbound connections. Nothing is
+- **No network.** `wring verify` makes no outbound connections. Nothing is
   uploaded, phoned home, or telemetered — ever, by design, in every
   release.
-- **No writes outside the repo.** Evidence goes to `.cox/runs/` under the
+- **No writes outside the repo.** Evidence goes to `.wringer/runs/` under the
   detected git root. Gate ids are validated as slugs precisely so a config
   cannot direct a write outside the bundle.
-- **No credentials handled.** Coxswain reads git state with read-only
+- **No credentials handled.** Wringer reads git state with read-only
   commands and never authenticates anywhere.
 
 ## Supported versions

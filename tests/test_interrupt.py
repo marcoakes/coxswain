@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from cox import cli, evidence, gates
+from wringer import cli, evidence, gates
 
 TWO_GATES = """\
 version: 1
@@ -89,7 +89,7 @@ def test_json_reports_the_interruption_too(
 
 def test_a_real_sigint_kills_the_gate_and_exits_four(repo, write_config):
     """The gate runs in its own process group, so Ctrl-C never reaches it.
-    If Coxswain does not stop it, it outlives the verifier."""
+    If Wringer does not stop it, it outlives the verifier."""
     write_config(
         repo,
         """\
@@ -101,7 +101,7 @@ gates:
     )
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "cox", "verify"],
+        [sys.executable, "-m", "wringer", "verify"],
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

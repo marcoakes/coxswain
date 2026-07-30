@@ -1,6 +1,6 @@
 """Write the evidence bundle — the product.
 
-Boring, stable, grep-friendly (SPEC_COX_VERIFY_V0.md §The evidence
+Boring, stable, grep-friendly (SPEC_VERIFY_V0.md §The evidence
 bundle). `evidence.jsonl` is append-only, one JSON object per line;
 `manifest.json` is the run's index and carries `schema_version` so future
 readers can tell what they are holding. Day 1 writes those two files;
@@ -19,18 +19,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cox import gates
-from cox.git import RepoState
-from cox.redact import Redactor
+from wringer import gates
+from wringer.git import RepoState
+from wringer.redact import Redactor
 
-SCHEMA_VERSION = "cox.evidence.v1"
+SCHEMA_VERSION = "wringer.evidence.v1"
 EVIDENCE_FILENAME = "evidence.jsonl"
 MANIFEST_FILENAME = "manifest.json"
 RESULT_FILENAME = "result.json"
 DIFF_FILENAME = "diff.patch"
 STATUS_FILENAME = "status.txt"
 GATES_DIRNAME = "gates"
-RUNS_DIRNAME = Path(".cox") / "runs"
+RUNS_DIRNAME = Path(".wringer") / "runs"
 
 _RUN_ID_ATTEMPTS = 64
 
@@ -152,7 +152,7 @@ class Bundle:
         """`gates/NNN_<id>/`, NNN being the gate's 1-based position in the
         **declared** order — not its position in this run.
 
-        So `cox verify --gate test` on the spec's example config still
+        So `wring verify --gate test` on the spec's example config still
         writes `gates/003_test/`: a directory name means the same thing
         whether the run was complete, partial, or a single gate.
         """

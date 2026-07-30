@@ -1,6 +1,6 @@
-"""Load and validate `.cox.yaml`.
+"""Load and validate `.wringer.yaml`.
 
-The config surface is deliberately tiny (SPEC_COX_VERIFY_V0.md §Config
+The config surface is deliberately tiny (SPEC_VERIFY_V0.md §Config
 design). Validation is strict: unknown keys are errors, because a typo
 in a gate definition must not silently change what "verified" means.
 """
@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-CONFIG_FILENAME = ".cox.yaml"
+CONFIG_FILENAME = ".wringer.yaml"
 DEFAULT_TIMEOUT_SECONDS = 120
 
 # A gate id becomes a directory name in the bundle (`gates/NNN_<id>/`), so it
@@ -53,7 +53,7 @@ class Config:
 def load(path: Path) -> Config:
     if not path.is_file():
         raise ConfigError(
-            f"no {path.name} in {path.parent} — run 'cox init' to create one"
+            f"no {path.name} in {path.parent} — run 'wring init' to create one"
         )
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))

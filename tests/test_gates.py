@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from cox import gates
-from cox.config import Gate
+from wringer import gates
+from wringer.config import Gate
 
 
 def execute(command: str, where: Path, timeout: int = 120) -> gates.GateResult:
@@ -90,7 +90,7 @@ def test_an_oversized_log_keeps_the_tail_and_says_so(tmp_path: Path, monkeypatch
     assert result.stdout_truncated is True
     assert result.truncated is True
     written = result.stdout_path.read_text(encoding="utf-8")
-    assert written.startswith("[cox: ")
+    assert written.startswith("[wringer: ")
     assert "earlier bytes dropped" in written
     # the end of the log — where a failure announces itself — survives
     assert "line-200" in written
@@ -125,7 +125,7 @@ def test_timeout_kills_what_the_gate_spawned(tmp_path: Path):
     """The shell gets its own process group so children die with it.
 
     Killing only the shell would leave the real work running against the
-    repo after `cox verify` has already reported.
+    repo after `wring verify` has already reported.
     """
     marker = tmp_path / "child.pid"
     result = execute(f"sleep 30 & echo $! > {marker}; wait", tmp_path, timeout=1)

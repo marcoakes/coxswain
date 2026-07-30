@@ -10,8 +10,8 @@ dist/
 build/
 
 # runtime artifacts — evidence bundles are local by design (nothing
-# uploads, ever); the committed demo bundle lives in .cox.example/
-.cox/
+# uploads, ever); the committed demo bundle lives in .wringer.example/
+.wringer/
 *.sqlite
 *.sqlite-journal
 

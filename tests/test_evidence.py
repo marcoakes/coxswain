@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from cox import evidence
-from cox.git import RepoState
+from wringer import evidence
+from wringer.git import RepoState
 
 RUN_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")
 
@@ -29,10 +29,10 @@ def test_run_ids_differ_within_the_same_second():
 
 
 def test_create_makes_a_fresh_directory(tmp_path: Path):
-    bundle = evidence.Bundle.create(tmp_path / ".cox" / "runs", now=NOW)
+    bundle = evidence.Bundle.create(tmp_path / ".wringer" / "runs", now=NOW)
     assert bundle.directory.is_dir()
     assert bundle.directory.name == bundle.run_id
-    assert bundle.directory.parent == tmp_path / ".cox" / "runs"
+    assert bundle.directory.parent == tmp_path / ".wringer" / "runs"
     assert not any(bundle.directory.iterdir())  # nothing written yet
 
 
@@ -95,8 +95,8 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
 
 
 def test_gate_result_json_is_exactly_the_contract(tmp_path: Path):
-    from cox.config import Gate
-    from cox.gates import GateResult
+    from wringer.config import Gate
+    from wringer.gates import GateResult
 
     bundle = evidence.Bundle.create(tmp_path, now=NOW)
     gate = Gate(id="test", run="make test", timeout=300)
@@ -137,7 +137,7 @@ def test_manifest_matches_the_spec_shape(tmp_path: Path):
         (bundle.directory / evidence.MANIFEST_FILENAME).read_text(encoding="utf-8")
     )
     assert manifest == {
-        "schema_version": "cox.evidence.v1",
+        "schema_version": "wringer.evidence.v1",
         "run_id": bundle.run_id,
         # local time with offset, seconds precision
         "started_at": "2026-07-30T08:06:01+01:00",

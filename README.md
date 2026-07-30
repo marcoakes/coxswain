@@ -1,24 +1,24 @@
 <div align="center">
 
-# ⛵ Coxswain
+# ⛵ Wringer
 
 **The vendor-neutral AI-DLC harness — a control plane for AI-driven development.**
 
-*The coxswain steers the boat, calls the stroke rate, and never rows.*
+*The wringer steers the boat, calls the stroke rate, and never rows.*
 *The harness steers the work, sets the loop cadence, and never writes the code itself.*
 
-[![tests](https://github.com/marcoakes/coxswain/actions/workflows/tests.yml/badge.svg)](https://github.com/marcoakes/coxswain/actions/workflows/tests.yml)
+[![tests](https://github.com/marcoakes/wringer/actions/workflows/tests.yml/badge.svg)](https://github.com/marcoakes/wringer/actions/workflows/tests.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![v0.1.0: Sep 30, 2026](https://img.shields.io/badge/v0.1.0-Sep%2030%2C%202026-orange.svg)](ROADMAP.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Quickstart](QUICKSTART.md) · [v0 spec](SPEC_COX_VERIFY_V0.md) · [90-day roadmap](ROADMAP.md) · [Security](SECURITY.md) · [vs LangGraph](docs/coxswain-vs-langgraph.md) · [Build plan](coxswain-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC)
+[Quickstart](QUICKSTART.md) · [v0 spec](SPEC_VERIFY_V0.md) · [90-day roadmap](ROADMAP.md) · [Security](SECURITY.md) · [vs LangGraph](docs/wringer-vs-langgraph.md) · [Build plan](wringer-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/wringer/issues?q=is%3Aissue+RFC)
 
 </div>
 
 ---
 
-Coxswain (CLI: `cox`) compiles **intent** — tickets, PRDs, Slack messages — into **verified outcomes**: reviewed merge requests with evidence. It treats *loops* and *graphs of loops* as first-class, portable primitives, and runs the **same workflow definition** on your laptop today and on durable runtimes (Temporal first) tomorrow.
+Wringer (CLI: `wring`) compiles **intent** — tickets, PRDs, Slack messages — into **verified outcomes**: reviewed merge requests with evidence. It treats *loops* and *graphs of loops* as first-class, portable primitives, and runs the **same workflow definition** on your laptop today and on durable runtimes (Temporal first) tomorrow.
 
 Every cloud's harness locks you to its runtime, its identity system, its gateway. **Nobody owns the neutral layer.** That's the bet — Kubernetes-vs-managed-containers, replayed one layer up.
 
@@ -31,7 +31,7 @@ Every cloud's harness locks you to its runtime, its identity system, its gateway
 A real run, pasted unedited from a scratch Python repo (`ruff` and `pytest` as the two declared gates, with a bug planted in the code):
 
 ```
-$ cox verify
+$ wring verify
 ✓ lint passed        0.1s
 ✗ test failed        0.2s
 
@@ -45,26 +45,26 @@ FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.cox/runs/20260730-160105-830a/
+.wringer/runs/20260730-160105-830a/
 
 Next:
-  open .cox/runs/20260730-160105-830a/summary.md
-  rerun cox verify --gate test
+  open .wringer/runs/20260730-160105-830a/summary.md
+  rerun wring verify --gate test
 ```
 
-Exit code `1`, and a bundle on disk that a human or an agent can read: `summary.md` for the person reviewing, timestamped `evidence.jsonl` for the machine, `diff.patch` and `status.txt` for what was being verified, per-gate logs for what happened. `cox explain` replays the diagnosis without an LLM; `cox verify --json` emits one object for an agent to act on. The full transcript — and what is still unbuilt — is in the [quickstart](QUICKSTART.md).
+Exit code `1`, and a bundle on disk that a human or an agent can read: `summary.md` for the person reviewing, timestamped `evidence.jsonl` for the machine, `diff.patch` and `status.txt` for what was being verified, per-gate logs for what happened. `wring explain` replays the diagnosis without an LLM; `wring verify --json` emits one object for an agent to act on. The full transcript — and what is still unbuilt — is in the [quickstart](QUICKSTART.md).
 
-It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM, no cloud, no uploads. After an AI coding session, `cox verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)** — including the release bar: *Coxswain verifies Coxswain, in CI, with the demo bundle committed, before v0.1.0 tags.*
+It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM, no cloud, no uploads. After an AI coding session, `wring verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)** — including the release bar: *Wringer verifies Wringer, in CI, with the demo bundle committed, before v0.1.0 tags.*
 
-> ⚠️ **`.cox.yaml` is code.** `cox verify` runs the commands a repository declares, through a shell, with your privileges — the same trust you extend to its `Makefile`. Read a stranger's `.cox.yaml` before running `cox verify` in their repo. Gates are not sandboxed in v0.1; see [SECURITY.md](SECURITY.md), which also explains why an evidence bundle should be read before you share it.
+> ⚠️ **`.wringer.yaml` is code.** `wring verify` runs the commands a repository declares, through a shell, with your privileges — the same trust you extend to its `Makefile`. Read a stranger's `.wringer.yaml` before running `wring verify` in their repo. Gates are not sandboxed in v0.1; see [SECURITY.md](SECURITY.md), which also explains why an evidence bundle should be read before you share it.
 
-Then the loop closes: `cox run` is just a loop that keeps calling `cox verify` until the evidence says stop — worker (your existing coding agent; Coxswain never ships its own) → gates → isolated rubric judge → iterate or exit → MR with the receipts attached. **`v0.1.0` no later than September 30, 2026** — see the [90-day roadmap](ROADMAP.md) and the [quickstart](QUICKSTART.md).
+Then the loop closes: `wring run` is just a loop that keeps calling `wring verify` until the evidence says stop — worker (your existing coding agent; Wringer never ships its own) → gates → isolated rubric judge → iterate or exit → MR with the receipts attached. **`v0.1.0` no later than September 30, 2026** — see the [90-day roadmap](ROADMAP.md) and the [quickstart](QUICKSTART.md).
 
 ## Why
 
 The substrate is converging. Every serious AI-DLC implementation lands on the same five-layer architecture — and the frontier labs are each selling their piece of it. The code layer is commoditizing. What stays defensible is **governance, deterministic verification, audit trails, and execution speed** on top of the substrate.
 
-Coxswain is:
+Wringer is:
 
 - **Verified, not vibed.** Deterministic gates (build / test / lint / custom linters) always run before any LLM judge. A loop cannot claim "done" without passing its declared verifier.
 - **A graph of loops.** A node isn't a function call — it's a *loop-bearing agent* with a contract: budget, verifier, exit conditions. The graph wires those loops into an organization with typed edges and explicit inter-loop feedback paths.
@@ -72,7 +72,7 @@ Coxswain is:
 - **Auditable as a byproduct.** Every run emits intent → plan → steps → evidence → delivery as queryable JSONL plus OpenTelemetry GenAI traces, with a per-loop cost ledger.
 - **Vendor-neutral by construction.** The Graph IR references *capabilities*, never vendor resources. Adapters map capabilities to runtimes; a conformance suite proves each mapping.
 
-Already using LangGraph, CrewAI, or Microsoft Agent Framework? Read the [honest comparison](docs/coxswain-vs-langgraph.md) — they're compile targets and peers here, not competitors.
+Already using LangGraph, CrewAI, or Microsoft Agent Framework? Read the [honest comparison](docs/wringer-vs-langgraph.md) — they're compile targets and peers here, not competitors.
 
 ## A loop is a contract
 
@@ -97,7 +97,7 @@ loop:
   evidence: full           # every iteration captured to the run bundle
 ```
 
-Anti-thrash machinery is core, not optional: failure-signature hashing, score-plateau detection, judge-disagreement tracking, per-loop cost ledgers. The schema is an open spec — [RFC discussion here](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC).
+Anti-thrash machinery is core, not optional: failure-signature hashing, score-plateau detection, judge-disagreement tracking, per-loop cost ledgers. The schema is an open spec — [RFC discussion here](https://github.com/marcoakes/wringer/issues?q=is%3Aissue+RFC).
 
 ## A graph is an organization
 
@@ -123,14 +123,14 @@ The worker never sees the judge; the judge never sees the worker's chain of reas
 
 ## Architecture (the north star)
 
-The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable runtime/gateway/identity/memory planes, sandbox layer, self-evolution loop — is specified in the **[build plan](coxswain-ai-dlc-harness-plan.md)**. We are shipping it inside-out: the differentiated core first, the plumbing when the loop has earned it. Execution order is governed by **[ROADMAP.md](ROADMAP.md)**.
+The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable runtime/gateway/identity/memory planes, sandbox layer, self-evolution loop — is specified in the **[build plan](wringer-ai-dlc-harness-plan.md)**. We are shipping it inside-out: the differentiated core first, the plumbing when the loop has earned it. Execution order is governed by **[ROADMAP.md](ROADMAP.md)**.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ L1 INTENT        GitHub/GitLab issues · Linear · Jira · Slack   │
 ├─────────────────────────────────────────────────────────────────┤
-│ L2 HARNESS       cox-ir · cox-engine · cox-loops · cox-verify   │
-│                  cox-context · cox-policy                       │
+│ L2 HARNESS       wringer-ir · wringer-engine · wringer-loops · wringer-verify   │
+│                  wringer-context · wringer-policy                       │
 ├─────────────────────────────────────────────────────────────────┤
 │ L3 WIRES         ACP → coding agents · MCP → tools ·            │
 │                  A2A → other agents                             │
@@ -148,9 +148,9 @@ The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable run
 
 | When | What | Proof |
 |---|---|---|
-| **Days 1–30** | **v0.1.0 — the evidence compiler** ([spec](SPEC_COX_VERIFY_V0.md)): `cox init` · `cox verify` · `cox explain`, evidence bundles, Python/pipx. Then the loop closes: `cox run` = verify-in-a-loop with your existing agent as worker | **Coxswain verifies Coxswain in CI + committed demo bundle** |
-| **Days 31–60** | Durable execution (SQLite event log, `cox resume`), anti-thrash (oscillation + plateau detection), cost ledger, OTel GenAI traces | crash-and-resume on camera |
-| **Days 61–90** | Graph of loops (scope → plan → repair → deliver), one `human` interrupt node, **Coxswain ships a Coxswain PR** | the dogfooded PR, public |
+| **Days 1–30** | **v0.1.0 — the evidence compiler** ([spec](SPEC_VERIFY_V0.md)): `wring init` · `wring verify` · `wring explain`, evidence bundles, Python/pipx. Then the loop closes: `wring run` = verify-in-a-loop with your existing agent as worker | **Wringer verifies Wringer in CI + committed demo bundle** |
+| **Days 31–60** | Durable execution (SQLite event log, `wring resume`), anti-thrash (oscillation + plateau detection), cost ledger, OTel GenAI traces | crash-and-resume on camera |
+| **Days 61–90** | Graph of loops (scope → plan → repair → deliver), one `human` interrupt node, **Wringer ships a Wringer PR** | the dogfooded PR, public |
 
 **Q3 2026 OKR:** a GitHub issue becomes a passing MR for Python repos under $2.00 LLM spend. **Q4 2026:** TypeScript targets + the Temporal adapter. Everything else in the plan — gateway plane, policy, context autogen, skills, self-evolution — is deferred behind the working loop, [with reasons](ROADMAP.md#rulings-that-changed-from-the-v10-plan).
 
@@ -165,11 +165,11 @@ The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable run
 7. Cost per task is a first-class metric.
 8. Build to delete.
 
-The full eleven, with rationale, are in [the plan](coxswain-ai-dlc-harness-plan.md#3-design-principles).
+The full eleven, with rationale, are in [the plan](wringer-ai-dlc-harness-plan.md#3-design-principles).
 
 ## Contributing
 
-The highest-value contributions right now are **design review and prior art** on the open RFCs — the [loop-contract schema, the gate plugin interface, and the evidence-bundle format](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC). Code has started landing (`cox init` and `cox verify` work — see [AGENTS.md](AGENTS.md) for state and setup); green tests are the only law. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The highest-value contributions right now are **design review and prior art** on the open RFCs — the [loop-contract schema, the gate plugin interface, and the evidence-bundle format](https://github.com/marcoakes/wringer/issues?q=is%3Aissue+RFC). Code has started landing (`wring init` and `wring verify` work — see [AGENTS.md](AGENTS.md) for state and setup); green tests are the only law. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
