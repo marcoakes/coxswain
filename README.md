@@ -11,7 +11,7 @@
 [![v0.1.0: Sep 30, 2026](https://img.shields.io/badge/v0.1.0-Sep%2030%2C%202026-orange.svg)](ROADMAP.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Quickstart](QUICKSTART.md) · [90-day roadmap](ROADMAP.md) · [vs LangGraph](docs/coxswain-vs-langgraph.md) · [Build plan](coxswain-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC)
+[Quickstart](QUICKSTART.md) · [v0 spec](SPEC_COX_VERIFY_V0.md) · [90-day roadmap](ROADMAP.md) · [vs LangGraph](docs/coxswain-vs-langgraph.md) · [Build plan](coxswain-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC)
 
 </div>
 
@@ -23,15 +23,17 @@ Every cloud's harness locks you to its runtime, its identity system, its gateway
 
 ## What ships first
 
-**One working loop beats seven phases of architecture.** The first release is deliberately small:
+**Proof beats orchestration.** v0.1.0 is a standalone evidence compiler — one command:
 
 ```bash
-cox run --issue https://github.com/you/repo/issues/42
+cox verify
 ```
 
-…takes a GitHub issue, runs a **repair loop** in a local sandbox — worker writes code → deterministic gates (build · test · lint) → isolated rubric judge → iterate or exit — and opens a merge request with `evidence.jsonl` and `cost.jsonl` attached. Budgeted, oscillation-proof, auditable.
+> *One command that proves whether this change is mergeable, and leaves behind evidence a human or agent can inspect.*
 
-The worker is **your existing coding agent** — Claude Code, Codex CLI, Gemini CLI — Coxswain never ships its own; it wraps the one you already use in gates, evidence, and budgets. And the first installable artifact is thinner still: **`cox verify`**, standalone gates + evidence bundle around *any* session, usable before the loop even exists. **`v0.1.0` lands September 30, 2026** — see the [90-day roadmap](ROADMAP.md), and the [quickstart](QUICKSTART.md) for the exact developer experience it ships.
+It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `evidence.jsonl`, `manifest.json`, `summary.md`, `diff.patch`, per-gate logs — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM, no cloud, no uploads. After an AI coding session, `cox verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)** — including the release bar: *Coxswain verifies Coxswain, in CI, with the demo bundle committed, before v0.1.0 tags.*
+
+Then the loop closes: `cox run` is just a loop that keeps calling `cox verify` until the evidence says stop — worker (your existing coding agent; Coxswain never ships its own) → gates → isolated rubric judge → iterate or exit → MR with the receipts attached. **`v0.1.0` no later than September 30, 2026** — see the [90-day roadmap](ROADMAP.md) and the [quickstart](QUICKSTART.md).
 
 ## Why
 
@@ -121,7 +123,7 @@ The full five-layer architecture — protocol wires (ACP/MCP/A2A), swappable run
 
 | When | What | Proof |
 |---|---|---|
-| **Days 1–30** | The "One Loop" MVP: `cox verify` standalone first (gates + evidence around any agent session), then `cox run --issue <url>` → repair loop → MR + evidence bundle. Local only, dry-run mode | demo video |
+| **Days 1–30** | **v0.1.0 — the evidence compiler** ([spec](SPEC_COX_VERIFY_V0.md)): `cox init` · `cox verify` · `cox explain`, evidence bundles, Python/pipx. Then the loop closes: `cox run` = verify-in-a-loop with your existing agent as worker | **Coxswain verifies Coxswain in CI + committed demo bundle** |
 | **Days 31–60** | Durable execution (SQLite event log, `cox resume`), anti-thrash (oscillation + plateau detection), cost ledger, OTel GenAI traces | crash-and-resume on camera |
 | **Days 61–90** | Graph of loops (scope → plan → repair → deliver), one `human` interrupt node, **Coxswain ships a Coxswain PR** | the dogfooded PR, public |
 
@@ -142,7 +144,7 @@ The full eleven, with rationale, are in [the plan](coxswain-ai-dlc-harness-plan.
 
 ## Contributing
 
-The highest-value contributions right now are **design review and prior art** on the open RFCs — the [loop-contract schema, the gate plugin interface, and the evidence-bundle format](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC). Once code lands, `make verify` green is the only law. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The highest-value contributions right now are **design review and prior art** on the open RFCs — the [loop-contract schema, the gate plugin interface, and the evidence-bundle format](https://github.com/marcoakes/coxswain/issues?q=is%3Aissue+RFC). Code has started landing (`cox init` and `cox verify` work — see [AGENTS.md](AGENTS.md) for state and setup); green tests are the only law. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
