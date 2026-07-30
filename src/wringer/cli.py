@@ -217,7 +217,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     skipped: list[config.Gate] = []
     failed_gate: str | None = None
 
-    interrupted = False
+    interrupted: summary.Interrupted | None = None
 
     for offset, (index, gate) in enumerate(planned):
         try:
@@ -225,7 +225,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
         except KeyboardInterrupt:
             # Ctrl-C: finish the bundle rather than abandon it half-written.
             # A run that stopped is evidence too, as long as it says so.
-            interrupted = True
+            # The gate that was running is neither passed nor skipped, so it
+            # is carried separately — its directory already exists and holds
+            # whatever it printed before it was killed.
+            interrupted = summary.Interrupted(
+                gate=gate, directory=bundle.gate_dir(index, gate.id)
+            )
             skipped = [pending for _, pending in planned[offset + 1 :]]
             break
         results.append(result)
@@ -238,7 +243,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             skipped = [pending for _, pending in planned[offset + 1 :]]
             break
 
-    if interrupted:
+    if interrupted is not None:
         status = "interrupted"
     elif failed_gate is not None:
         status = "failed"
@@ -257,6 +262,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         skipped=skipped,
         failed_gate=failed_gate,
         status=status,
+        interrupted=interrupted,
     )
 
     if args.json:
@@ -264,7 +270,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     else:
         _report_run(bundle, root, results, failed_gate, status)
 
-    if interrupted:
+    if interrupted is not None:
         return EXIT_INTERRUPTED
     return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
 
@@ -338,6 +344,10 @@ def _explain(
 
     if failed_gate is not None:
         _explain_failure(run_dir, failed_gate, rows)
+    elif status == "interrupted":
+        # An interrupted run has no failing gate, but "nothing to diagnose"
+        # would be a lie: gates after the interruption never ran at all.
+        _explain_interruption(run_dir, recorded)
     else:
         print("\nEvery required gate passed — nothing to diagnose.")
 
@@ -351,6 +361,10 @@ def _explain(
     print(f"\nFull report:\n  {shown}")
     if failed_gate is not None:
         print(f"\nRerun:\n  wring verify --gate {failed_gate}")
+    elif status == "interrupted":
+        # The whole run, not one gate: an interrupt leaves everything from
+        # the stopped gate onwards unproven.
+        print("\nRerun:\n  wring verify")
 
 
 def _explain_repo_line(started: dict, repo: dict, manifest: dict) -> str:
@@ -385,6 +399,57 @@ def _explain_failure(
         path = gate_dir / f"{stream}.log"
         # label it the way the bundle does, so the reader can find the file
         _print_tail(path, path.relative_to(run_dir).as_posix())
+
+
+def _explain_interruption(run_dir: Path, recorded: list[dict]) -> None:
+    """Name the gate that was running when the run stopped.
+
+    It has no `result.json` — it never finished — so the record of it is the
+    `gate.started` event nothing answered, plus whatever it managed to print
+    before it was killed.
+    """
+    answered = {
+        event.get("gate_id")
+        for event in recorded
+        if event.get("type") == "gate.finished"
+    }
+    unanswered = [
+        event
+        for event in recorded
+        if event.get("type") == "gate.started"
+        and event.get("gate_id") not in answered
+    ]
+    if not unanswered:
+        print("\nInterrupted before any gate started.")
+        return
+
+    event = unanswered[-1]
+    gate_id = event.get("gate_id", "?")
+    print(f"\nInterrupted during gate: {gate_id}")
+    print(f"  command    {event.get('command', '?')}")
+
+    gate_dir = _gate_dir_for(run_dir, str(gate_id))
+    if gate_dir is None:
+        return
+    for stream in ("stdout", "stderr"):
+        path = gate_dir / f"{stream}.log"
+        _print_tail(path, path.relative_to(run_dir).as_posix())
+
+
+def _gate_dir_for(run_dir: Path, gate_id: str) -> Path | None:
+    """The `gates/NNN_<id>/` directory for one gate id.
+
+    Matched on the whole name after the numeric prefix, never a suffix
+    search: a gate called `test` must not find `unit_test`'s evidence.
+    """
+    gates_root = run_dir / evidence.GATES_DIRNAME
+    if not gates_root.is_dir():
+        return None
+    for path in sorted(gates_root.iterdir()):
+        name = path.name
+        if path.is_dir() and name[:3].isdigit() and name[3:] == f"_{gate_id}":
+            return path
+    return None
 
 
 def _explain_changes(recorded: list[dict]) -> None:

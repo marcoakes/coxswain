@@ -69,6 +69,31 @@ def test_an_interrupted_run_exits_four_and_marks_the_bundle(
     assert "interrupted" in capsys.readouterr().out
 
 
+def test_the_interrupted_gate_is_named_in_the_summary(
+    repo, write_config, monkeypatch, capsys
+):
+    """The gate that was running when Ctrl-C landed must not vanish.
+
+    It ran, so calling it `skipped` would be false; it never finished, so no
+    pass/fail is available. summary.md is the one place the whole declared
+    set appears, so it needs a word for that.
+    """
+    write_config(repo, TWO_GATES)
+    monkeypatch.chdir(repo)
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(gates, "run", interrupt)
+
+    assert cli.main(["verify"]) == cli.EXIT_INTERRUPTED
+
+    summary = (only_bundle(repo) / "summary.md").read_text(encoding="utf-8")
+    # killed before it printed anything, so there is no log to link
+    assert "| first | interrupted | — | — |" in summary
+    assert "| second | skipped |" in summary
+
+
 def test_json_reports_the_interruption_too(
     repo, write_config, monkeypatch, capfd
 ):

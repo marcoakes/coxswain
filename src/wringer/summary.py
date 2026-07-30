@@ -9,6 +9,7 @@ is for the person reviewing the change.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from wringer import evidence
@@ -20,6 +21,19 @@ from wringer.git import RepoState
 SUMMARY_FILENAME = "summary.md"
 
 
+@dataclass(frozen=True)
+class Interrupted:
+    """The gate that was running when the run stopped.
+
+    It has no `GateResult` and no `result.json`: it never finished, and
+    inventing a verdict for it would be a lie. What it does have is a
+    directory holding whatever it printed before it was killed.
+    """
+
+    gate: Gate
+    directory: Path
+
+
 def write(
     bundle: Bundle,
     state: RepoState,
@@ -27,6 +41,7 @@ def write(
     skipped: list[Gate],
     failed_gate: str | None,
     status: str = "passed",
+    interrupted: Interrupted | None = None,
 ) -> Path:
     """Write `summary.md` into the bundle and return its path."""
     lines = [
@@ -49,6 +64,14 @@ def write(
         lines.append(
             f"| {result.gate.id} | {_status(result)} "
             f"| {result.duration_ms / 1000:.1f}s | {_logs(bundle, result)} |"
+        )
+    # The gate a Ctrl-C caught mid-flight: it ran, so "skipped" would be
+    # false, and it never finished, so no status is available. It gets its
+    # own word and keeps its place in the order.
+    if interrupted is not None:
+        lines.append(
+            f"| {interrupted.gate.id} | interrupted | — "
+            f"| {_partial_logs(bundle, interrupted.directory)} |"
         )
     # Gates after a required failure never ran: named here, absent from
     # evidence.jsonl, so the summary is the one place the whole declared
@@ -109,6 +132,20 @@ def _status(result: GateResult) -> str:
         return "passed"
     label = "timed out" if result.timed_out else "failed"
     return f"{label} (optional)" if result.gate.optional else label
+
+
+def _partial_logs(bundle: Bundle, gate_dir: Path) -> str:
+    """Links for a gate that was killed before it finished.
+
+    Only to files that exist: a gate stopped before it wrote anything leaves
+    an empty directory, and a link to a missing log is worse than no link.
+    """
+    links = [
+        f"[{name}]({bundle.relative(path)})"
+        for name in ("stdout", "stderr")
+        if (path := gate_dir / f"{name}.log").is_file()
+    ]
+    return " · ".join(links) if links else "—"
 
 
 def _logs(bundle: Bundle, result: GateResult) -> str:

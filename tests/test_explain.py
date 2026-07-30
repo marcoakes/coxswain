@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wringer import cli, evidence
+from wringer import cli, evidence, gates
 
 FAILING = """\
 version: 1
@@ -74,6 +74,50 @@ def test_explain_on_a_passing_run_says_there_is_nothing_to_diagnose(
     assert "— passed" in out
     assert "Every required gate passed — nothing to diagnose." in out
     assert "Rerun:" not in out
+
+
+def test_explain_diagnoses_an_interrupted_run(
+    repo, write_config, monkeypatch, capsys
+):
+    """An interrupted run has no failing gate — but saying every gate passed
+    would be a lie about the ones that never ran."""
+    write_config(
+        repo,
+        """\
+version: 1
+gates:
+  - id: lint
+    run: "true"
+  - id: test
+    run: sleep 30
+""",
+    )
+    monkeypatch.chdir(repo)
+
+    real_run = gates.run
+    calls = []
+
+    def stop_on_the_second(*args, **kwargs):
+        calls.append(None)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(gates, "run", stop_on_the_second)
+
+    assert cli.main(["verify"]) == cli.EXIT_INTERRUPTED
+    capsys.readouterr()
+
+    assert cli.main(["explain"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "— interrupted" in out
+    assert "✓ lint passed" in out  # the gate that did finish
+    assert "Interrupted during gate: test" in out
+    assert "command    sleep 30" in out
+    assert "Every required gate passed" not in out
+    # the whole run is unproven, not one gate — so no --gate in the rerun
+    assert out.endswith("Rerun:\n  wring verify\n")
 
 
 def test_explain_lists_the_changed_files(
