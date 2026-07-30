@@ -102,12 +102,25 @@ def _validate_evidence(evidence: dict[str, Any], source: str) -> None:
 
     `redact` is consumed now (Day 4), so a typo in it must be an error rather
     than silently switching redaction off — the one failure mode where a
-    quiet default is dangerous. `include` is still parsed for shape only.
+    quiet default is dangerous. `include` is not consumed yet, but its shape
+    is still checked: "unknown keys are errors" and "a malformed known key is
+    fine" cannot both be the rule.
     """
     unknown = sorted(set(evidence) - _EVIDENCE_KEYS)
     if unknown:
         raise ConfigError(
             f"{source}: unknown keys under 'evidence': {', '.join(unknown)}"
+        )
+
+    include = evidence.get("include")
+    if include is not None and (
+        not isinstance(include, list)
+        or not all(isinstance(item, str) and item for item in include)
+    ):
+        raise ConfigError(
+            f"{source}: 'evidence.include' must be a list of non-empty "
+            "strings, e.g. 'git.diff' — v0.1 captures what it can regardless, "
+            "but a typo here must not look like valid configuration"
         )
 
     redact = evidence.get("redact")

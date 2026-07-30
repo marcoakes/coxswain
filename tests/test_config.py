@@ -99,6 +99,39 @@ def test_invalid_gate_entries_raise(entry, match):
         parse({"version": 1, "gates": [entry]})
 
 
+@pytest.mark.parametrize(
+    "evidence, match",
+    [
+        ({"include": 5}, "include"),
+        ({"include": "git.diff"}, "include"),  # one string, not a list of them
+        ({"include": ["git.diff", ""]}, "include"),
+        ({"include": ["git.diff", 7]}, "include"),
+        ({"redact": []}, "redact"),
+        ({"redact": {"env": "*TOKEN*"}}, "redact.env"),
+        ({"redact": {"env": [""]}}, "redact.env"),
+        ({"redact": {"envs": ["*TOKEN*"]}}, "unknown keys under 'evidence.redact'"),
+        ({"included": ["git.diff"]}, "unknown keys under 'evidence'"),
+    ],
+)
+def test_invalid_evidence_sections_raise(evidence, match):
+    """Strict validation is the point: a malformed *known* key must not read
+    as valid configuration just because v0.1 does not consume it yet."""
+    with pytest.raises(config.ConfigError, match=match):
+        parse({"version": 1, "gates": [gate()], "evidence": evidence})
+
+
+def test_a_well_formed_evidence_section_loads():
+    cfg = parse(
+        {
+            "version": 1,
+            "gates": [gate()],
+            "evidence": {"include": ["git.diff"], "redact": {"env": ["*PAT*"]}},
+        }
+    )
+    assert cfg.evidence["include"] == ["git.diff"]
+    assert cfg.evidence["redact"] == {"env": ["*PAT*"]}
+
+
 def test_duplicate_gate_ids_raise():
     with pytest.raises(config.ConfigError, match="duplicate"):
         parse({"version": 1, "gates": [gate(), gate()]})
