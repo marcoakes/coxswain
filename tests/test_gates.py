@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import shlex
+import signal
+import sys
 import time
 from pathlib import Path
 
@@ -119,6 +122,43 @@ def test_timeout_stops_the_gate_and_is_recorded(tmp_path: Path):
     assert result.exit_code < 0
     # waited for the timeout, not for the command
     assert 1000 <= result.duration_ms < 10_000
+
+
+def test_a_process_that_escaped_the_kill_cannot_hang_the_verifier(tmp_path: Path):
+    """The timeout kills the gate's process group — but a child that left
+    that group still holds the stdout it inherited, and `communicate()`
+    waits for the pipe to close, not for the process to die.
+
+    Unbounded, that turns a 1-second gate timeout into a wait for a leaked
+    daemon's whole lifetime. `wring verify` must always return.
+    """
+    marker = tmp_path / "escaped.pid"
+    escape = (
+        "import os, time\n"
+        "if os.fork() == 0:\n"
+        "    os.setsid()\n"  # leave the group the timeout is about to kill
+        f"    open({str(marker)!r}, 'w').write(str(os.getpid()))\n"
+        "    time.sleep(30)\n"  # ...while still holding the gate's stdout
+        "else:\n"
+        "    os._exit(0)\n"
+    )
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(escape)}; sleep 30"
+
+    started = time.monotonic()
+    result = execute(command, tmp_path, timeout=1)
+    elapsed = time.monotonic() - started
+
+    try:
+        assert result.timed_out is True
+        # the escaped child sleeps for 30s; the drain gives up after 5
+        assert elapsed < 20, f"waited {elapsed:.1f}s for a process it had killed"
+        assert b"stopped waiting for output" in result.stderr_path.read_bytes()
+    finally:
+        escaped = int(marker.read_text(encoding="utf-8").strip())
+        try:
+            os.kill(escaped, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def test_timeout_kills_what_the_gate_spawned(tmp_path: Path):

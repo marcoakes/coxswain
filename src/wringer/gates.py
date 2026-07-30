@@ -21,6 +21,12 @@ from wringer.redact import Redactor
 # How long a gate that overran its timeout gets between SIGTERM and SIGKILL.
 KILL_GRACE_SECONDS = 2
 
+# How long to keep reading a killed gate's streams before giving up on them.
+# The gate is dead by this point, but anything it spawned and left running
+# still holds the inherited pipe open, and a verifier that waits for that is
+# a verifier that never returns.
+DRAIN_TIMEOUT_SECONDS = 5
+
 # The most any single captured stream may contribute to a bundle. A runaway
 # gate should not fill the disk, and nobody reads the middle of a 4 GB log.
 # The tail is kept, because that is where a failure announces itself.
@@ -101,12 +107,12 @@ def run(
         exit_code = _terminate(proc)
         # Drain whatever the gate managed to say before it was stopped —
         # the last lines before a hang are usually the interesting ones.
-        out, err = proc.communicate()
+        out, err = _drain(proc)
     except KeyboardInterrupt:
         # The gate runs in its own process group, so Ctrl-C reached wring and
         # not the gate: stopping it is our job, or it outlives the verifier.
         _terminate(proc)
-        out, err = proc.communicate()
+        out, err = _drain(proc)
         _write_logs(stdout_path, stderr_path, out, err, redactor)
         raise
 
@@ -122,6 +128,33 @@ def run(
         stdout_truncated=out_cut,
         stderr_truncated=err_cut,
     )
+
+
+def _drain(proc: subprocess.Popen) -> tuple[bytes, bytes]:
+    """Collect what a killed gate printed, without waiting forever for it.
+
+    `communicate()` returns when the pipes close, not when the process dies.
+    A gate that spawned something which outlived the kill — a daemon, a
+    `setsid` child, anything holding the inherited stdout — keeps those pipes
+    open, and an unbounded wait here turns a 2-second gate timeout into a
+    wait for someone else's lifetime. `wring verify` must always return; the
+    v0.2 loop depends on it more than a human does.
+
+    The partial output comes off the exception, so nothing already read is
+    lost. The reader machinery left behind belongs to a daemon thread that
+    dies with the interpreter — closing the pipes under it would print
+    thread tracebacks onto the console this tool works to keep clean, so it
+    is deliberately left alone.
+    """
+    try:
+        return proc.communicate(timeout=DRAIN_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        note = (
+            f"\n[wringer: stopped waiting for output after "
+            f"{DRAIN_TIMEOUT_SECONDS}s — a process this gate left running "
+            f"still held the stream open]\n"
+        ).encode()
+        return exc.stdout or b"", (exc.stderr or b"") + note
 
 
 def _write_logs(
