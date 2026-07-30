@@ -38,23 +38,23 @@ $ cox verify
 --- gates/002_test/stdout.log ---
     def test_add():
 >       assert add(2, 2) == 4
-E       assert 0 == 4
-E        +  where 0 = add(2, 2)
+E       assert 5 == 4
+E        +  where 5 = add(2, 2)
 
-FAILED test_calc.py::test_add - assert 0 == 4
+FAILED test_calc.py::test_add - assert 5 == 4
 1 failed in 0.01s
 
 Evidence written to:
-.cox/runs/20260730-123036-ec87/
+.cox/runs/20260730-160105-830a/
 
 Next:
-  open .cox/runs/20260730-123036-ec87/summary.md
+  open .cox/runs/20260730-160105-830a/summary.md
   rerun cox verify --gate test
 ```
 
-Exit code `1`, and a bundle on disk that a human or an agent can read. The full transcript — including what the bundle contains and what is still unbuilt — is in the [quickstart](QUICKSTART.md).
+Exit code `1`, and a bundle on disk that a human or an agent can read: `summary.md` for the person reviewing, timestamped `evidence.jsonl` for the machine, `diff.patch` and `status.txt` for what was being verified, per-gate logs for what happened. `cox explain` replays the diagnosis without an LLM; `cox verify --json` emits one object for an agent to act on. The full transcript — and what is still unbuilt — is in the [quickstart](QUICKSTART.md).
 
-It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, per-gate stdout/stderr/`result.json` today, with `diff.patch` and `status.txt` landing before the tag — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM, no cloud, no uploads. After an AI coding session, `cox verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)** — including the release bar: *Coxswain verifies Coxswain, in CI, with the demo bundle committed, before v0.1.0 tags.*
+It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM, no cloud, no uploads. After an AI coding session, `cox verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_COX_VERIFY_V0.md](SPEC_COX_VERIFY_V0.md)** — including the release bar: *Coxswain verifies Coxswain, in CI, with the demo bundle committed, before v0.1.0 tags.*
 
 > ⚠️ **`.cox.yaml` is code.** `cox verify` runs the commands a repository declares, through a shell, with your privileges — the same trust you extend to its `Makefile`. Read a stranger's `.cox.yaml` before running `cox verify` in their repo. Gates are not sandboxed in v0.1; see [SECURITY.md](SECURITY.md), which also explains why an evidence bundle should be read before you share it.
 

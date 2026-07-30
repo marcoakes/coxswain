@@ -31,19 +31,20 @@ no network, no uploads — ever.
 
 Where they disagree about v0.1, the spec wins.
 
-## Current state — Bolt 2 shipped
+## Current state — Bolt 3 shipped
 
 There **is** code now: `cox init` and `cox verify` work — `verify` runs a
-repo's whole declared gate set and writes a real bundle — and 102 tests
-pass on Python 3.11–3.13 (plus macOS) in CI, behind a ruff lint gate.
+repo's whole declared gate set and writes a real bundle, `cox explain`
+diagnoses a finished run, and `--json` feeds agents — with 125 tests
+passing on Python 3.11–3.13 (plus macOS) in CI, behind a ruff lint gate.
 
 | Bolt | Spec day | State |
 |---|---|---|
 | 1 — skeleton | Day 1 | ✅ packaging, config loader, `cox init`, `cox verify` running one gate, `evidence.jsonl` + `manifest.json`, exit codes 0/1/2 |
 | 2 — gate runner | Day 2 | ✅ every gate in declared order, `timeout` enforced (process-group kill), stop-on-first-required-failure, optional-gate semantics, per-gate `gates/NNN_id/{stdout.log,stderr.log,result.json}`, `summary.md`, CI |
 | 2.5 — review hardening | — | ✅ gate ids validated as slugs, internal git calls bounded, POSIX-only kill declared, ruff lint gate + macOS CI, real transcripts, SECURITY.md |
-| 3 — git evidence | Day 3 | ⬜ next: changed files, `diff.patch`, `status.txt`, untracked list, `--changed-only`, `--json`, `cox explain` |
-| 4 — redaction & safety | Day 4 | ⬜ env redaction before write, log truncation, binary exclusion, exit 3 preconditions, exit 4 on SIGINT |
+| 3 — git evidence | Day 3 | ✅ changed/untracked lists, `diff.patch`, `status.txt`, `git.status` event, timestamps on every event, `cox verify --json`, `cox explain` |
+| 4 — redaction & safety | Day 4 | ⬜ next: env redaction before write, log truncation, binary exclusion, exit 3 preconditions, exit 4 on SIGINT |
 | 5 — dogfood | Day 5 | ⬜ Coxswain verifies Coxswain, CI upgraded to run `cox verify` and upload the bundle, committed sanitized bundle in `.cox.example/`, real README transcript |
 
 The `v0.1.0` tag is gated on the spec's
@@ -77,6 +78,8 @@ Then:
 .venv/bin/cox init              # writes .cox.yaml (refuses to overwrite)
 .venv/bin/cox verify            # runs every gate, writes .cox/runs/<run_id>/
 .venv/bin/cox verify --gate ID  # one gate, numbered as if the full run happened
+.venv/bin/cox verify --json     # one object on stdout, no human report
+.venv/bin/cox explain           # diagnose the latest run (no LLM)
 ```
 
 **Two commands are the law until Bolt 5, when `cox verify` on this repo
@@ -105,12 +108,12 @@ block first — the clean console is the product.
 
 | Module | Does | Deliberately does not (yet) |
 |---|---|---|
-| `cli.py` | argparse surface, subcommands, exit codes, console report | register `--json`, `--changed-only`, `--output`, `cox explain` |
+| `cli.py` | argparse surface, subcommands, exit codes, the console report, `--json`, and `cox explain`'s rendering | register `--changed-only` or `--output` — see below |
 | `config.py` | strict `.cox.yaml` loader → frozen `Config`/`Gate` dataclasses | consume `evidence:` (parsed for shape, stored raw for Bolts 3–4) |
 | `detect.py` | the commented `.cox.yaml` template `cox init` writes | actually detect project commands (static template is Day-1-legal per the spec: *"if detection is uncertain, generate comments rather than being clever"*) |
-| `git.py` | repo root detection, HEAD SHA, branch, dirty flag; read-only, never fatal | changed files, `diff.patch`, `status.txt` (Bolt 3) |
+| `git.py` | root detection, HEAD SHA, branch, dirty flag, changed/untracked lists, `diff`/`status` capture; read-only, bounded, never fatal | binary exclusion from the diff (Bolt 4) |
 | `gates.py` | run one gate through the shell in the repo root: own process group, `timeout` enforced by SIGTERM→SIGKILL on the group, stdout/stderr captured to files, duration in ms | decide anything about *which* gates run — that is `cli.py`'s sequencing |
-| `evidence.py` | allocate `.cox/runs/<run_id>/`, append `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` dirs + `result.json` | `diff.patch`, `status.txt` (Bolt 3), redaction (Bolt 4) |
+| `evidence.py` | allocate `.cox/runs/<run_id>/`, append timestamped `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` + `result.json`, capture files, and read a finished bundle back (`latest_run`, `read_*`) | redaction and size limits (Bolt 4) |
 | `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
 
 `redact.py` appears in the spec's layout and does **not** exist yet by
@@ -124,8 +127,11 @@ creation, no Temporal, no OpenTelemetry, no multi-agent anything, no
 sandboxing beyond recording repo state.
 
 Also: a flag that half-works is worse than a missing flag, because agents
-consume this CLI. `--json`, `--changed-only`, `--output` and `cox explain`
-stay **unregistered** until their bolt lands.
+consume this CLI. `--changed-only` and `--output` stay **unregistered**.
+`--changed-only` is deliberately deferred: the spec names it but never
+defines it, and the plausible readings (skip a clean tree · scope gates to
+changed files · limit what is captured) are different products. Pin the
+semantics in the spec before building it.
 
 ## Contracts you must not break
 
@@ -152,6 +158,13 @@ Three conventions inside the bundle are load-bearing:
   `cox verify --gate test` on a three-gate config still writes
   `gates/003_test/`, so a directory name means the same thing in a full
   run, a partial run and a single-gate run.
+- **Every event carries `ts`** (local ISO-8601, milliseconds). The spec's
+  example was amended in Bolt 3 to match; keep them in step.
+- **`git.status` carries `untracked` only when there is something
+  untracked**, so the common case stays exactly the spec's shape.
+- **The git capture happens before the bundle directory exists**, or
+  Coxswain's own `.cox/` would show up as an untracked file in its own
+  evidence. Order matters in `cmd_verify`; do not reshuffle it.
 - **A `log` field appears on `gate.finished` for failing gates only** —
   it is a pointer to where the reader is being sent, not an inventory
   (every gate's logs are on disk and linked from `summary.md`).
