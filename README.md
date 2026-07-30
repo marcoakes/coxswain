@@ -70,15 +70,29 @@ summary, diff, and both gates' logs, exactly as produced:
 
 ```
 $ wring verify
-✓ lint passed        0.0s
-✓ test passed        11.0s
+✓ lint passed        0.1s
+✓ test passed        17.6s
 
 Evidence written to:
-.wringer/runs/20260730-204401-e209/
+.wringer/runs/20260730-221508-d9b9/
 ```
 
-That bundle is the answer to "how do I know?" — read it rather than trust
-the badge.
+That is the run committed at
+[`.wringer.example/runs/20260730-221508-d9b9/`](.wringer.example/runs/) — the
+same id, so the transcript and the bundle are the same event rather than two
+similar ones. That bundle is the answer to "how do I know?" — read it rather
+than trust the badge.
+
+## Put an agent's edits through it
+
+`wring verify --json` exists so an agent can act on the result rather than
+read prose about it. [`examples/claude-code-hook/`](examples/claude-code-hook/)
+wires that into a coding session: after every edit, the gates run; if one
+fails, the agent is handed the structured verdict and `wring explain`'s
+diagnosis and fixes it before carrying on. Passing gates say nothing.
+
+That is the v0.1 shape of the v0.2 loop — worker, gate, evidence — with the
+loop still driven by the agent rather than by `wring run`.
 
 ## Why
 

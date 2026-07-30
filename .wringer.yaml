@@ -7,7 +7,7 @@ version: 1
 
 gates:
   - id: lint
-    run: ruff check src tests
+    run: ruff check src tests examples
     timeout: 120
 
   - id: test

@@ -27,6 +27,7 @@ no network, no uploads — ever.
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
+| [examples/claude-code-hook/](examples/claude-code-hook/) | the agent loop as a Claude Code `PostToolUse` hook — an *example*, not part of the package; it ships no code into `src/` and adds no dependency |
 | [SECURITY.md](SECURITY.md) | the execution model (`.wringer.yaml` is code), what a bundle may contain, reporting channel |
 
 Where they disagree about v0.1, the spec wins.
@@ -93,7 +94,7 @@ Then:
 [`.wringer.yaml`](.wringer.yaml) declares, which are exactly:
 
 ```bash
-.venv/bin/ruff check src tests   # must be clean
+.venv/bin/ruff check src tests examples   # must be clean
 .venv/bin/pytest                 # must be green
 ```
 
