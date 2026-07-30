@@ -79,19 +79,62 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    target = Path.cwd() / config.CONFIG_FILENAME
+    root = Path.cwd()
+    target = root / config.CONFIG_FILENAME
     if target.exists():
         print(
             f"wring init: refusing to overwrite existing {target.name}",
             file=sys.stderr,
         )
         return EXIT_CONFIG
-    target.write_text(detect.template(), encoding="utf-8")
-    print(
-        f"Wrote {target.name} — edit the gates to match this project, "
-        "then run: wring verify"
-    )
+
+    detection = detect.detect(root)
+    target.write_text(detect.template(detection), encoding="utf-8")
+
+    if detection.found:
+        gates = ", ".join(candidate.id for candidate in detection.candidates)
+        print(
+            f"Wrote {target.name} from {', '.join(detection.sources)} — "
+            f"gates: {gates}"
+        )
+        print("Check they are the commands you want proven, then: wring verify")
+    else:
+        print(
+            f"Wrote {target.name} — nothing to detect here, so it is a "
+            "template. Replace the example gates, then run: wring verify"
+        )
+
+    ignored = _ignore_runs(root)
+    if ignored is not None:
+        print(f"Added {evidence.RUNS_DIRNAME.parts[0]}/ to {ignored}")
     return EXIT_OK
+
+
+def _ignore_runs(root: Path) -> str | None:
+    """Keep evidence out of git.
+
+    Bundles hold raw gate output, so a repo that commits them is one
+    `git push` away from publishing whatever a gate printed. Returns the
+    file written, or None if it was already handled.
+    """
+    entry = f"{evidence.RUNS_DIRNAME.parts[0]}/"
+    gitignore = root / ".gitignore"
+
+    if gitignore.is_file():
+        existing = gitignore.read_text(encoding="utf-8")
+        if entry in existing.split():
+            return None
+        separator = "" if existing.endswith("\n") or not existing else "\n"
+        gitignore.write_text(
+            f"{existing}{separator}\n# Wringer evidence stays local\n{entry}\n",
+            encoding="utf-8",
+        )
+        return ".gitignore"
+
+    gitignore.write_text(
+        f"# Wringer evidence stays local\n{entry}\n", encoding="utf-8"
+    )
+    return ".gitignore"
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
