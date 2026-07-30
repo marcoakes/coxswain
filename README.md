@@ -1,11 +1,11 @@
 <div align="center">
 
-# ⛵ Wringer
+# 🗜️ Wringer
 
 **The vendor-neutral AI-DLC harness — a control plane for AI-driven development.**
 
-*The wringer steers the boat, calls the stroke rate, and never rows.*
-*The harness steers the work, sets the loop cadence, and never writes the code itself.*
+*Put every change through the wringer.*
+*The harness runs the gates, keeps the receipts, and never writes the code itself.*
 
 [![tests](https://github.com/marcoakes/wringer/actions/workflows/tests.yml/badge.svg)](https://github.com/marcoakes/wringer/actions/workflows/tests.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)

@@ -4,7 +4,7 @@
 
 **Build plan for Claude Code · v1.0 · July 29, 2026**
 
-> Working title: **Wringer** (CLI: `wring`). The wringer steers the boat, calls the stroke rate, and never rows. The harness steers the work, sets the loop cadence, and never writes the code itself. Rename freely.
+> **Wringer** (CLI: `wring`). Put every change through the wringer: the harness runs the gates, keeps the receipts, and never writes the code itself.
 
 ---
 
