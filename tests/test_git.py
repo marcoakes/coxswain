@@ -47,6 +47,79 @@ def test_uncommitted_edits_make_the_tree_dirty(repo: Path, git_run):
     assert git.inspect(repo).dirty is True
 
 
+def test_changed_and_untracked_are_recorded_separately(repo: Path, git_run):
+    (repo / "tracked.py").write_text("one\n", encoding="utf-8")
+    git_run(repo, "add", "tracked.py")
+    git_run(repo, "commit", "-q", "-m", "add tracked")
+
+    (repo / "tracked.py").write_text("two\n", encoding="utf-8")  # unstaged edit
+    (repo / "staged.py").write_text("new\n", encoding="utf-8")
+    git_run(repo, "add", "staged.py")  # staged addition
+    (repo / "fresh.py").write_text("hi\n", encoding="utf-8")  # untracked
+
+    state = git.inspect(repo)
+
+    assert sorted(state.changed_files) == ["staged.py", "tracked.py"]
+    assert state.untracked == ("fresh.py",)
+    assert state.dirty is True
+
+
+def test_a_rename_records_the_path_that_exists_now(repo: Path, git_run):
+    (repo / "old.py").write_text("x\n", encoding="utf-8")
+    git_run(repo, "add", "old.py")
+    git_run(repo, "commit", "-q", "-m", "add old")
+    git_run(repo, "mv", "old.py", "new.py")
+
+    state = git.inspect(repo)
+
+    assert state.changed_files == ("new.py",)
+    assert state.untracked == ()
+
+
+def test_paths_with_spaces_survive_parsing(repo: Path, git_run):
+    (repo / "a file.py").write_text("x\n", encoding="utf-8")
+
+    state = git.inspect(repo)
+
+    assert state.untracked == ("a file.py",)
+
+
+def test_a_clean_repo_lists_nothing(repo: Path):
+    state = git.inspect(repo)
+
+    assert state.changed_files == ()
+    assert state.untracked == ()
+    assert state.dirty is False
+
+
+def test_diff_captures_staged_and_unstaged_but_not_untracked(repo: Path, git_run):
+    (repo / "tracked.py").write_text("before\n", encoding="utf-8")
+    git_run(repo, "add", "tracked.py")
+    git_run(repo, "commit", "-q", "-m", "add tracked")
+    (repo / "tracked.py").write_text("after\n", encoding="utf-8")
+    (repo / "untracked.py").write_text("invisible\n", encoding="utf-8")
+
+    patch = git.diff(repo, git.inspect(repo).head_sha)
+
+    assert "--- a/tracked.py" in patch
+    assert "-before" in patch
+    assert "+after" in patch
+    # git cannot diff a file it has never seen; status.txt lists it instead
+    assert "untracked.py" not in patch
+
+
+def test_status_is_the_porcelain_form(repo: Path):
+    (repo / "fresh.py").write_text("x\n", encoding="utf-8")
+
+    # verbatim, including the trailing newline and the two status columns
+    assert git.status(repo) == "?? fresh.py\n"
+
+
+def test_diff_and_status_are_none_outside_a_repo(tmp_path: Path):
+    assert git.diff(tmp_path, None) is None
+    assert git.status(tmp_path) is None
+
+
 def test_detached_head_records_no_branch(repo: Path, git_run):
     sha = git_run(repo, "rev-parse", "HEAD")
     git_run(repo, "checkout", "-q", "--detach", sha)

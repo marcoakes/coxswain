@@ -26,6 +26,8 @@ SCHEMA_VERSION = "cox.evidence.v1"
 EVIDENCE_FILENAME = "evidence.jsonl"
 MANIFEST_FILENAME = "manifest.json"
 RESULT_FILENAME = "result.json"
+DIFF_FILENAME = "diff.patch"
+STATUS_FILENAME = "status.txt"
 GATES_DIRNAME = "gates"
 RUNS_DIRNAME = Path(".cox") / "runs"
 
@@ -94,6 +96,14 @@ class Bundle:
     def relative(self, path: Path) -> str:
         """A bundle-relative path, for evidence that points at other files."""
         return path.relative_to(self.directory).as_posix()
+
+    def write_capture(self, filename: str, text: str) -> Path:
+        """Write one captured git artifact (`diff.patch`, `status.txt`)."""
+        if text and not text.endswith("\n"):
+            text += "\n"
+        path = self.directory / filename
+        path.write_text(text, encoding="utf-8")
+        return path
 
     def write_gate_result(self, gate_dir: Path, result: GateResult) -> Path:
         """`gates/NNN_<id>/result.json` — one gate's row of the contract."""

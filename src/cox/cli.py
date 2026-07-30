@@ -82,9 +82,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"cox verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
 
-    # Snapshot git before the bundle exists, so .cox/ is not what makes
-    # the tree look dirty.
+    # Snapshot git before the bundle exists, so Coxswain's own run directory
+    # is never what makes the tree look dirty — or shows up in its own
+    # evidence as an untracked file.
     state = git.inspect(root)
+    patch = git.diff(root, state.head_sha)
+    status = git.status(root)
     try:
         bundle = evidence.Bundle.create(root / evidence.RUNS_DIRNAME)
     except evidence.EvidenceError as exc:
@@ -98,6 +101,18 @@ def cmd_verify(args: argparse.Namespace) -> int:
         repo=root.name,
         sha=state.head_sha,
     )
+    bundle.event(
+        "git.status",
+        dirty=state.dirty,
+        changed_files=list(state.changed_files),
+        # Only when there are any, so the event stays the spec's shape for
+        # the common case.
+        **({"untracked": list(state.untracked)} if state.untracked else {}),
+    )
+    if patch is not None:
+        bundle.write_capture(evidence.DIFF_FILENAME, patch)
+    if status is not None:
+        bundle.write_capture(evidence.STATUS_FILENAME, status)
 
     results: list[gates.GateResult] = []
     skipped: list[config.Gate] = []

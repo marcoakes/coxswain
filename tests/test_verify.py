@@ -64,6 +64,10 @@ def events(bundle: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines()]
 
 
+def of_type(recorded: list[dict], event_type: str) -> list[dict]:
+    return [event for event in recorded if event["type"] == event_type]
+
+
 def bare(event: dict) -> dict:
     """An event without its timestamp, for exact-shape assertions."""
     return {key: value for key, value in event.items() if key != "ts"}
@@ -106,12 +110,17 @@ def test_passing_gate_exits_zero_and_writes_the_full_bundle(
     recorded = events(bundle)
     assert [event["type"] for event in recorded] == [
         "run.started",
+        "git.status",
         "gate.started",
         "gate.finished",
         "run.finished",
     ]
 
-    started, gate_started, gate_finished, finished = recorded
+    started, git_status, gate_started, gate_finished, finished = recorded
+    assert git_status["dirty"] is True
+    assert ".cox.yaml" in git_status["changed_files"] + git_status.get(
+        "untracked", []
+    )
     assert started["run_id"] == bundle.name
     assert started["cox_version"] == cli.__version__
     assert started["repo"] == repo.name
@@ -159,9 +168,10 @@ def test_failing_required_gate_exits_one_and_names_the_gate(
     assert cli.main(["verify"]) == cli.EXIT_GATE_FAILED
 
     bundle = only_bundle(repo)
-    gate_finished, finished = events(bundle)[2:]
+    recorded = events(bundle)
+    gate_finished = of_type(recorded, "gate.finished")[0]
     assert gate_finished["exit_code"] == 1
-    assert bare(finished) == {
+    assert bare(recorded[-1]) == {
         "type": "run.finished",
         "status": "failed",
         "failed_gate": "unit",
@@ -191,9 +201,10 @@ gates:
     assert cli.main(["verify"]) == cli.EXIT_OK
 
     bundle = only_bundle(repo)
-    gate_finished, finished = events(bundle)[2:]
+    recorded = events(bundle)
+    gate_finished = of_type(recorded, "gate.finished")[0]
     assert gate_finished["exit_code"] == 1  # the failure IS recorded
-    assert bare(finished) == {"type": "run.finished", "status": "passed"}
+    assert bare(recorded[-1]) == {"type": "run.finished", "status": "passed"}
     assert manifest(bundle)["result"] == {"status": "passed", "failed_gate": None}
 
     out = capsys.readouterr().out
@@ -237,7 +248,7 @@ def test_gate_flag_selects_a_gate_other_than_the_first(
     assert cli.main(["verify", "--gate", "test"]) == cli.EXIT_OK
 
     bundle = only_bundle(repo)
-    assert events(bundle)[1]["gate_id"] == "test"
+    assert of_type(events(bundle), "gate.started")[0]["gate_id"] == "test"
     # NNN follows the declared order, so a single-gate run's evidence lands
     # where a full run would have put it
     assert gate_dirs(bundle) == ["003_test"]
@@ -259,6 +270,7 @@ def test_every_declared_gate_runs_in_declared_order(
     recorded = events(bundle)
     assert [event["type"] for event in recorded] == [
         "run.started",
+        "git.status",
         "gate.started",
         "gate.finished",
         "gate.started",
@@ -339,6 +351,73 @@ def test_a_required_failure_stops_the_run_and_skips_the_rest(
     assert "✗ test failed" in out
     assert f"open .cox/runs/{bundle.name}/summary.md" in out
     assert "rerun cox verify --gate test" in out
+
+
+def test_the_bundle_captures_the_working_tree(
+    repo, write_config, git_run, monkeypatch
+):
+    write_config(repo, ONE_PASSING_GATE)
+    (repo / "tracked.py").write_text("before\n", encoding="utf-8")
+    git_run(repo, "add", "tracked.py")
+    git_run(repo, "commit", "-q", "-m", "add tracked")
+    (repo / "tracked.py").write_text("after\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+
+    bundle = only_bundle(repo)
+    patch = (bundle / evidence.DIFF_FILENAME).read_text(encoding="utf-8")
+    status = (bundle / evidence.STATUS_FILENAME).read_text(encoding="utf-8")
+
+    assert "-before" in patch
+    assert "+after" in patch
+    assert "tracked.py" in status
+    assert ".cox.yaml" in status
+    # Coxswain's own run directory must not appear in its own evidence: the
+    # capture is taken before the bundle exists.
+    assert ".cox/" not in status
+    assert ".cox/" not in patch
+
+    git_status = of_type(events(bundle), "git.status")[0]
+    assert git_status["dirty"] is True
+    assert "tracked.py" in git_status["changed_files"]
+    assert git_status["untracked"] == [".cox.yaml"]
+
+
+def test_a_clean_repo_captures_an_empty_diff(
+    repo, write_config, git_run, monkeypatch
+):
+    write_config(repo, ONE_PASSING_GATE)
+    git_run(repo, "add", ".cox.yaml")
+    git_run(repo, "commit", "-q", "-m", "add config")
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+
+    bundle = only_bundle(repo)
+    assert (bundle / evidence.DIFF_FILENAME).read_text(encoding="utf-8") == ""
+    assert (bundle / evidence.STATUS_FILENAME).read_text(encoding="utf-8") == ""
+    git_status = of_type(events(bundle), "git.status")[0]
+    # no `untracked` key at all when there is nothing untracked
+    assert bare(git_status) == {
+        "type": "git.status",
+        "dirty": False,
+        "changed_files": [],
+    }
+
+
+def test_outside_a_repo_there_is_no_diff_or_status(
+    tmp_path, write_config, monkeypatch
+):
+    write_config(tmp_path, ONE_PASSING_GATE)
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+
+    bundle = only_bundle(tmp_path)
+    assert not (bundle / evidence.DIFF_FILENAME).exists()
+    assert not (bundle / evidence.STATUS_FILENAME).exists()
+    assert of_type(events(bundle), "git.status")[0]["changed_files"] == []
 
 
 def test_a_timeout_fails_the_run_and_says_timed_out(

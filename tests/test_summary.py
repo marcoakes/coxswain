@@ -126,6 +126,47 @@ def test_a_timeout_says_timed_out(bundle):
     assert "| test | timed out | 1.0s |" in text
 
 
+def test_the_summary_points_at_the_captured_tree(bundle):
+    written = summary.write(
+        bundle,
+        state(changed_files=("calc.py", "test_calc.py"), untracked=("new.py",)),
+        results=[outcome(bundle, 1, TEST)],
+        skipped=[],
+        failed_gate=None,
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert (
+        "- files: 2 changed, 1 untracked "
+        "([diff.patch](diff.patch), [status.txt](status.txt))" in text
+    )
+
+
+def test_with_nothing_untracked_the_summary_says_only_changed(bundle):
+    written = summary.write(
+        bundle,
+        state(changed_files=("calc.py",)),
+        results=[outcome(bundle, 1, TEST)],
+        skipped=[],
+        failed_gate=None,
+    )
+
+    assert "- files: 1 changed (" in written.read_text(encoding="utf-8")
+
+
+def test_outside_a_repo_the_summary_promises_no_capture(bundle):
+    written = summary.write(
+        bundle,
+        state(head_sha=None, branch=None, dirty=False),
+        results=[outcome(bundle, 1, TEST)],
+        skipped=[],
+        failed_gate=None,
+    )
+
+    # nothing was captured, so no dangling links to files that do not exist
+    assert "diff.patch" not in written.read_text(encoding="utf-8")
+
+
 def test_outside_a_git_repo_the_summary_says_so(bundle):
     written = summary.write(
         bundle,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cox import evidence
 from cox.config import Gate
 from cox.evidence import Bundle
 from cox.gates import GateResult
@@ -33,6 +34,11 @@ def write(
         _repo_line(state),
         f"- started: {bundle.started_at.replace(microsecond=0).isoformat()}",
         _result_line(failed_gate),
+    ]
+    changes = _changes_line(state)
+    if changes is not None:
+        lines.append(changes)
+    lines += [
         "",
         "| gate | status | duration | logs |",
         "|---|---|---|---|",
@@ -72,6 +78,20 @@ def _repo_line(state: RepoState) -> str:
         f"- repo: **{name}** @ `{state.head_sha[:7]}` "
         f"(branch `{state.branch or 'detached HEAD'}`, "
         f"{'dirty' if state.dirty else 'clean'})"
+    )
+
+
+def _changes_line(state: RepoState) -> str | None:
+    """Point the reader at the captured tree, with the counts up front."""
+    if state.head_sha is None:
+        return None  # nothing was captured, so promise nothing
+    counts = [f"{len(state.changed_files)} changed"]
+    if state.untracked:
+        counts.append(f"{len(state.untracked)} untracked")
+    return (
+        f"- files: {', '.join(counts)} "
+        f"([{evidence.DIFF_FILENAME}]({evidence.DIFF_FILENAME}), "
+        f"[{evidence.STATUS_FILENAME}]({evidence.STATUS_FILENAME}))"
     )
 
 
