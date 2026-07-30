@@ -83,6 +83,14 @@ same id, so the transcript and the bundle are the same event rather than two
 similar ones. That bundle is the answer to "how do I know?" — read it rather
 than trust the badge.
 
+## It is not a Python tool
+
+Wringer is *written* in Python; nothing about it is *for* Python. It runs the
+commands your repo already declares. [`docs/beyond-python.md`](docs/beyond-python.md)
+is the receipt — real captured output from a Make project whose test suite is
+a shell script, and a Node project's detected gates, neither containing a line
+of Python.
+
 ## Put an agent's edits through it
 
 `wring verify --json` exists so an agent can act on the result rather than

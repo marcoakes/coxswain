@@ -170,13 +170,28 @@ def _detect_python(root: Path) -> tuple[list[Candidate], str]:
         candidates.append(Candidate("lint", "ruff check .", _timeout_for("lint")))
     if "mypy" in tools or (root / "mypy.ini").is_file() or "mypy" in declared:
         candidates.append(Candidate("typecheck", "mypy .", _timeout_for("typecheck")))
-    has_tests = (root / "tests").is_dir() or any(root.glob("test_*.py"))
-    if "pytest" in tools or "pytest" in declared or has_tests:
+    if "pytest" in tools or "pytest" in declared or _has_python_tests(root):
         candidates.append(Candidate("test", "pytest -q", _timeout_for("test")))
 
     if not candidates:
         return [], ""
     return candidates, "pyproject.toml" if pyproject.is_file() else "a Python layout"
+
+
+def _has_python_tests(root: Path) -> bool:
+    """Whether this repo has Python tests — not merely somewhere to put them.
+
+    A `tests/` directory is not evidence of Python. Make, Go, Node and shell
+    projects have one too, and treating the bare directory as a pytest
+    declaration is exactly the cleverness the spec forbids: it invents
+    `pytest -q` for a repo with no Python in it, which then fails `wring
+    verify` with "no tests ran" on a perfectly healthy tree. Python *files*
+    are the evidence.
+    """
+    if any(root.glob("test_*.py")):
+        return True
+    tests = root / "tests"
+    return tests.is_dir() and any(tests.rglob("*.py"))
 
 
 def _python_dependency_names(data: dict) -> set[str]:

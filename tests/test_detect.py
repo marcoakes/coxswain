@@ -48,10 +48,39 @@ def test_tool_sections_count_as_declarations(tmp_path: Path):
     assert ids(tmp_path) == ["lint", "typecheck"]
 
 
-def test_a_tests_directory_alone_is_enough_for_a_test_gate(tmp_path: Path):
+def test_python_test_files_are_enough_for_a_test_gate(tmp_path: Path):
+    """No pyproject, but real Python tests — that is somebody writing pytest
+    down, even if they never said so in a manifest."""
     (tmp_path / "tests").mkdir()
+    write(tmp_path, "tests/test_thing.py", "def test_it():\n    assert True\n")
 
     assert ids(tmp_path) == ["test"]
+
+
+def test_a_test_file_at_the_root_counts_too(tmp_path: Path):
+    write(tmp_path, "test_thing.py", "def test_it():\n    assert True\n")
+
+    assert ids(tmp_path) == ["test"]
+
+
+def test_a_bare_tests_directory_is_not_a_python_project(tmp_path: Path):
+    """A `tests/` directory is somewhere to put tests, not a declaration that
+    they are Python ones."""
+    (tmp_path / "tests").mkdir()
+
+    assert ids(tmp_path) == []
+
+
+def test_a_make_project_with_shell_tests_gets_no_pytest_gate(tmp_path: Path):
+    """The regression this guards: a shell project with `tests/run.sh` was
+    handed an invented `pytest -q` gate, which then failed `wring verify`
+    with "no tests ran" on a healthy repo — and pushed the real `make test`
+    gate out to the id `test-2`."""
+    (tmp_path / "tests").mkdir()
+    write(tmp_path, "tests/run.sh", "#!/bin/sh\necho ok\n")
+    write(tmp_path, "Makefile", "lint:\n\tsh -n src/*.sh\n\ntest:\n\tsh tests/run.sh\n")
+
+    assert runs(tmp_path) == {"lint": "make lint", "test": "make test"}
 
 
 def test_npm_scripts_become_gates(tmp_path: Path):
