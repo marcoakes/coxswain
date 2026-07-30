@@ -16,6 +16,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+# A wedged `git` (a stale index lock, a credential prompt, a network remote)
+# must not hang the verifier. Every internal call is bounded; a call that
+# overruns is treated exactly like a call that failed.
+GIT_TIMEOUT_SECONDS = 10
+
 
 @dataclass(frozen=True)
 class RepoState:
@@ -47,9 +52,15 @@ def _git(args: list[str], cwd: Path) -> str | None:
     """Run a read-only git command; None if git or the repo is unavailable."""
     try:
         proc = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
     except OSError:  # no git on PATH, cwd gone
+        return None
+    except subprocess.TimeoutExpired:  # wedged git — record nulls, keep going
         return None
     if proc.returncode != 0:
         return None

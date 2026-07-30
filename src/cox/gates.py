@@ -20,6 +20,13 @@ from cox.config import Gate
 # How long a gate that overran its timeout gets between SIGTERM and SIGKILL.
 KILL_GRACE_SECONDS = 2
 
+# v0.1 targets macOS and Linux (see pyproject's classifiers). Process groups
+# are the mechanism that makes a timeout stick, and they are POSIX-only.
+_POSIX = os.name == "posix"
+
+# What wait() reports for a process killed by SIGKILL on POSIX.
+_KILLED = -9
+
 
 @dataclass(frozen=True)
 class GateResult:
@@ -62,7 +69,7 @@ def run(
             cwd=cwd,
             stdout=out,
             stderr=err,
-            start_new_session=True,
+            start_new_session=_POSIX,
         )
         timed_out = False
         try:
@@ -82,20 +89,38 @@ def run(
 
 
 def _terminate(proc: subprocess.Popen) -> int:
-    """SIGTERM the gate's process group, SIGKILL whatever survives.
+    """Ask the gate to stop, then make it stop.
 
     Returns the wait status — negative when a signal ended the process,
     which is the honest thing to record next to `timed_out: true`.
     """
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    for hard in (False, True):
         try:
-            os.killpg(os.getpgid(proc.pid), sig)
+            _stop(proc, hard=hard)
         except (ProcessLookupError, PermissionError):
             pass  # already gone, but still needs reaping
         try:
             return proc.wait(timeout=KILL_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
             continue
-    # Unreapable even after SIGKILL: report the kill rather than hang the
+    # Unreapable even after a hard kill: report it rather than hang the
     # verifier waiting on a process the OS will not surrender.
-    return -signal.SIGKILL
+    return proc.returncode if proc.returncode is not None else _KILLED
+
+
+def _stop(proc: subprocess.Popen, hard: bool) -> None:
+    """Signal the gate — its whole process group where the OS has them.
+
+    Off POSIX there is no group to signal, so a gate that spawned children
+    can leave them behind after a timeout. That is a v0.2 problem, and a
+    declared one: v0.1 supports macOS and Linux.
+    """
+    if not _POSIX:
+        if hard:
+            proc.kill()
+        else:
+            proc.terminate()
+        return
+    os.killpg(
+        os.getpgid(proc.pid), signal.SIGKILL if hard else signal.SIGTERM
+    )

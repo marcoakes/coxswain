@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 from cox import git
@@ -53,6 +54,31 @@ def test_detached_head_records_no_branch(repo: Path, git_run):
     state = git.inspect(repo)
     assert state.head_sha == sha
     assert state.branch is None
+
+
+def test_a_wedged_git_call_is_bounded_and_treated_as_a_failure(
+    tmp_path: Path, monkeypatch
+):
+    """The one failure we cannot provoke for real: a `git` that never
+    returns (stale index lock, credential prompt). We simulate the timeout
+    and assert the verifier records nulls instead of hanging — and that the
+    bound is actually passed, since dropping it would be silent.
+    """
+    calls: list[dict] = []
+
+    def hang(*args, **kwargs):
+        calls.append(kwargs)
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(git.subprocess, "run", hang)
+
+    state = git.inspect(tmp_path)
+
+    assert state.head_sha is None
+    assert state.branch is None
+    assert state.dirty is False
+    assert calls, "git was never invoked"
+    assert all(call["timeout"] == git.GIT_TIMEOUT_SECONDS for call in calls)
 
 
 def test_inspect_outside_a_repo_records_nulls(tmp_path: Path):
