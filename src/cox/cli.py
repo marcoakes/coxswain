@@ -73,7 +73,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
-        gate = _select_gate(cfg, args.gate)
+        index, gate = _select_gate(cfg, args.gate)
     except config.ConfigError as exc:
         print(f"cox verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -95,7 +95,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
         sha=state.head_sha,
     )
     bundle.event("gate.started", gate_id=gate.id, command=gate.run)
-    result = gates.run(gate, cwd=root)
+    gate_dir = bundle.gate_dir(index, gate.id)
+    result = gates.run(
+        gate,
+        cwd=root,
+        stdout_path=gate_dir / "stdout.log",
+        stderr_path=gate_dir / "stderr.log",
+    )
     bundle.event(
         "gate.finished",
         gate_id=gate.id,
@@ -117,12 +123,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return EXIT_GATE_FAILED if failed else EXIT_OK
 
 
-def _select_gate(cfg: config.Config, requested: str | None) -> config.Gate:
-    """The one gate this build runs (sequencing them all is the Day-2 bolt)."""
+def _select_gate(
+    cfg: config.Config, requested: str | None
+) -> tuple[int, config.Gate]:
+    """The one gate this build runs, with its 1-based declared position.
+
+    Sequencing every gate is the Day-2 bolt.
+    """
     if requested is not None:
-        for gate in cfg.gates:
+        for index, gate in enumerate(cfg.gates, start=1):
             if gate.id == requested:
-                return gate
+                return index, gate
         known = ", ".join(gate.id for gate in cfg.gates)
         raise config.ConfigError(
             f"no gate '{requested}' in {config.CONFIG_FILENAME} (declared: {known})"
@@ -136,7 +147,7 @@ def _select_gate(cfg: config.Config, requested: str | None) -> config.Gate:
             "Use --gate ID to pick another.",
             file=sys.stderr,
         )
-    return gate
+    return 1, gate
 
 
 def _report(

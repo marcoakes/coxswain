@@ -56,6 +56,17 @@ def test_create_gives_up_rather_than_reusing_a_directory(tmp_path: Path, monkeyp
         evidence.Bundle.create(tmp_path, now=NOW)
 
 
+def test_gate_dir_is_named_for_the_declared_position(tmp_path: Path):
+    bundle = evidence.Bundle.create(tmp_path, now=NOW)
+
+    third = bundle.gate_dir(3, "test")
+
+    assert third.is_dir()
+    # NNN follows the config, not the run — a --gate run keeps its number
+    assert third.relative_to(bundle.directory).as_posix() == "gates/003_test"
+    assert bundle.relative(third / "stdout.log") == "gates/003_test/stdout.log"
+
+
 def test_events_append_one_json_object_per_line(tmp_path: Path):
     bundle = evidence.Bundle.create(tmp_path, now=NOW)
     bundle.event("run.started", run_id=bundle.run_id, sha=None)

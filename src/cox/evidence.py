@@ -24,6 +24,7 @@ from cox.git import RepoState
 SCHEMA_VERSION = "cox.evidence.v1"
 EVIDENCE_FILENAME = "evidence.jsonl"
 MANIFEST_FILENAME = "manifest.json"
+GATES_DIRNAME = "gates"
 RUNS_DIRNAME = Path(".cox") / "runs"
 
 _RUN_ID_ATTEMPTS = 64
@@ -69,6 +70,22 @@ class Bundle:
             return cls(directory=directory, run_id=run_id, started_at=started_at)
 
         raise EvidenceError(f"could not allocate a run directory under {runs_root}")
+
+    def gate_dir(self, index: int, gate_id: str) -> Path:
+        """`gates/NNN_<id>/`, NNN being the gate's 1-based position in the
+        **declared** order — not its position in this run.
+
+        So `cox verify --gate test` on the spec's example config still
+        writes `gates/003_test/`: a directory name means the same thing
+        whether the run was complete, partial, or a single gate.
+        """
+        directory = self.directory / GATES_DIRNAME / f"{index:03d}_{gate_id}"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def relative(self, path: Path) -> str:
+        """A bundle-relative path, for evidence that points at other files."""
+        return path.relative_to(self.directory).as_posix()
 
     def event(self, event_type: str, **fields: Any) -> None:
         """Append one `{"type": ...}` object to `evidence.jsonl`."""
