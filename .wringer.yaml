@@ -1,0 +1,15 @@
+# .wringer.yaml — the gates Wringer runs to prove a change is mergeable.
+#
+# These are the same two commands CI runs and AGENTS.md calls the law.
+# Wringer verifies Wringer: the evidence in .wringer.example/ was produced
+# by this file.
+version: 1
+
+gates:
+  - id: lint
+    run: ruff check src tests
+    timeout: 120
+
+  - id: test
+    run: pytest -q
+    timeout: 600

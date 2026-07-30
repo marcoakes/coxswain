@@ -6,7 +6,11 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  # Wringer verifies Wringer. The gates in .wringer.yaml are the law, and the
+  # bundle is uploaded so a reviewer can read what was proven instead of
+  # trusting a green tick. This job replaces the separate lint job: ruff and
+  # pytest are the two gates the config declares.
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,8 +18,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
-      - run: ruff check src tests
+      - run: wring verify
+      - name: Upload the evidence bundle
+        if: always() # a failed run's evidence is the evidence worth having
+        uses: actions/upload-artifact@v4
+        with:
+          name: wringer-evidence
+          path: .wringer/runs/
 
+  # `verify` proves the tool on one interpreter; this proves the code on every
+  # supported one, and on both operating systems v0.1 claims to support.
   pytest:
     runs-on: ${{ matrix.os }}
     strategy:
