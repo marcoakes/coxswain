@@ -199,6 +199,31 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
     assert parsed == sorted(parsed)
 
 
+def test_events_scrub_secrets_inside_lists(tmp_path: Path):
+    """Redaction covers the bundle, so it cannot hold for some files in it
+    and not others: a path whose *name* carried a secret was reaching
+    evidence.jsonl intact while status.txt beside it said [REDACTED]."""
+    from wringer.redact import Redactor
+
+    bundle = evidence.Bundle.create(
+        tmp_path, now=NOW, redactor=Redactor(("hushhush12345",))
+    )
+
+    bundle.event(
+        "git.status",
+        dirty=True,
+        changed_files=["src/hushhush12345.py"],
+        untracked=["hushhush12345.txt"],
+    )
+
+    written = (bundle.directory / evidence.EVIDENCE_FILENAME).read_text("utf-8")
+    assert "hushhush12345" not in written
+    recorded = json.loads(written)
+    assert recorded["changed_files"] == ["src/[REDACTED].py"]
+    assert recorded["untracked"] == ["[REDACTED].txt"]
+    assert recorded["dirty"] is True  # non-strings pass through untouched
+
+
 def test_gate_result_json_is_exactly_the_contract(tmp_path: Path):
     from wringer.config import Gate
     from wringer.gates import GateResult

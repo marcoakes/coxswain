@@ -282,15 +282,30 @@ class Bundle:
         placed in time is a weaker artifact than one that can, and
         `duration_ms` only tells you how long a gate took, not when.
         """
-        scrubbed = {
-            key: self.redactor.scrub(value) if isinstance(value, str) else value
-            for key, value in fields.items()
-        }
+        scrubbed = {key: self._scrub(value) for key, value in fields.items()}
         line = json.dumps({"type": event_type, "ts": timestamp(), **scrubbed})
         with (self.directory / EVIDENCE_FILENAME).open(
             "a", encoding="utf-8"
         ) as stream:
             stream.write(line + "\n")
+
+    def _scrub(self, value: Any) -> Any:
+        """Erase secrets anywhere inside an event's value, not just at the top.
+
+        `changed_files` and `untracked` are lists, so a file whose *name*
+        carries a secret was reaching `evidence.jsonl` intact while
+        `status.txt` beside it in the same bundle said `[REDACTED]`. The
+        guarantee SECURITY.md makes is about the bundle, so it cannot hold
+        for some files in it and not others.
+        """
+        if isinstance(value, str):
+            return self.redactor.scrub(value)
+        if isinstance(value, (list, tuple)):
+            # JSON has no tuples; a list is what either one is written as
+            return [self._scrub(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self._scrub(item) for key, item in value.items()}
+        return value
 
     def write_manifest(
         self, state: RepoState, status: str, failed_gate: str | None
