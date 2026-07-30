@@ -12,13 +12,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from cox import __version__, config, detect, evidence, gates, git
+from cox import __version__, config, detect, evidence, gates, git, summary
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_REFUSED = 3  # wired in the Day-4 bolt
 EXIT_INTERRUPTED = 4  # wired in the Day-4 bolt
+
+# How much of a failing gate's logs to put on the console. The whole log is
+# in the bundle; this is just enough to see what broke without opening it.
+LOG_TAIL_LINES = 20
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_verify.add_argument(
         "--gate",
         metavar="ID",
-        help="run this gate instead of the first one declared",
+        help="run only this gate instead of every declared gate",
     )
     parser_verify.set_defaults(func=cmd_verify)
 
@@ -73,7 +77,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
-        index, gate = _select_gate(cfg, args.gate)
+        planned = _plan(cfg, args.gate)
     except config.ConfigError as exc:
         print(f"cox verify: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -94,6 +98,63 @@ def cmd_verify(args: argparse.Namespace) -> int:
         repo=root.name,
         sha=state.head_sha,
     )
+
+    results: list[gates.GateResult] = []
+    skipped: list[config.Gate] = []
+    failed_gate: str | None = None
+
+    for offset, (index, gate) in enumerate(planned):
+        result = _run_gate(bundle, gate, index, root)
+        results.append(result)
+        _report_gate(result)
+        if not result.passed and not gate.optional:
+            # Stop on the first required failure; everything after it is
+            # unrun, not passed, and the summary says so.
+            failed_gate = gate.id
+            skipped = [pending for _, pending in planned[offset + 1 :]]
+            break
+
+    status = "failed" if failed_gate is not None else "passed"
+    bundle.event(
+        "run.finished",
+        status=status,
+        **({"failed_gate": failed_gate} if failed_gate is not None else {}),
+    )
+    bundle.write_manifest(state=state, status=status, failed_gate=failed_gate)
+    summary.write(
+        bundle, state, results=results, skipped=skipped, failed_gate=failed_gate
+    )
+
+    _report_run(bundle, root, results, failed_gate)
+    return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
+
+
+def _plan(
+    cfg: config.Config, requested: str | None
+) -> list[tuple[int, config.Gate]]:
+    """The gates this run will attempt, each with its declared position.
+
+    Every gate by default, in declared order (the config decides what runs
+    cheapest first). `--gate ID` narrows the run to one gate but keeps its
+    number, so its evidence lands where a full run would have put it.
+    """
+    numbered = list(enumerate(cfg.gates, start=1))
+    if requested is None:
+        return numbered
+
+    for index, gate in numbered:
+        if gate.id == requested:
+            return [(index, gate)]
+    known = ", ".join(gate.id for gate in cfg.gates)
+    raise config.ConfigError(
+        f"no gate '{requested}' in {config.CONFIG_FILENAME} (declared: {known})"
+    )
+
+
+def _run_gate(
+    bundle: evidence.Bundle, gate: config.Gate, index: int, root: Path
+) -> gates.GateResult:
+    """Run one gate and record everything it produced."""
     bundle.event("gate.started", gate_id=gate.id, command=gate.run)
     gate_dir = bundle.gate_dir(index, gate.id)
     result = gates.run(
@@ -102,74 +163,75 @@ def cmd_verify(args: argparse.Namespace) -> int:
         stdout_path=gate_dir / "stdout.log",
         stderr_path=gate_dir / "stderr.log",
     )
-    bundle.event(
-        "gate.finished",
-        gate_id=gate.id,
-        exit_code=result.exit_code,
-        duration_ms=result.duration_ms,
-    )
+    bundle.write_gate_result(gate_dir, result)
 
-    # An optional gate records its failure without failing the run.
-    failed = not result.passed and not gate.optional
-    status = "failed" if failed else "passed"
-    bundle.event(
-        "run.finished", status=status, **({"failed_gate": gate.id} if failed else {})
-    )
-    bundle.write_manifest(
-        state=state, status=status, failed_gate=gate.id if failed else None
-    )
-
-    _report(result, bundle=bundle, root=root, failed=failed)
-    return EXIT_GATE_FAILED if failed else EXIT_OK
+    finished: dict[str, object] = {
+        "gate_id": gate.id,
+        "exit_code": result.exit_code,
+        "duration_ms": result.duration_ms,
+    }
+    if not result.passed:
+        # The spec carries `log` on the failing gate only — that is the one
+        # a reader is being sent to.
+        finished["log"] = bundle.relative(result.stdout_path)
+    bundle.event("gate.finished", **finished)
+    return result
 
 
-def _select_gate(
-    cfg: config.Config, requested: str | None
-) -> tuple[int, config.Gate]:
-    """The one gate this build runs, with its 1-based declared position.
-
-    Sequencing every gate is the Day-2 bolt.
-    """
-    if requested is not None:
-        for index, gate in enumerate(cfg.gates, start=1):
-            if gate.id == requested:
-                return index, gate
-        known = ", ".join(gate.id for gate in cfg.gates)
-        raise config.ConfigError(
-            f"no gate '{requested}' in {config.CONFIG_FILENAME} (declared: {known})"
-        )
-
-    gate = cfg.gates[0]
-    if len(cfg.gates) > 1:
-        print(
-            f"cox verify: {config.CONFIG_FILENAME} declares {len(cfg.gates)} gates; "
-            f"this build runs one — using '{gate.id}'. "
-            "Use --gate ID to pick another.",
-            file=sys.stderr,
-        )
-    return 1, gate
-
-
-def _report(
-    result: gates.GateResult, bundle: evidence.Bundle, root: Path, failed: bool
-) -> None:
-    outcome = "passed" if result.passed else "failed"
+def _report_gate(result: gates.GateResult) -> None:
+    """One line per gate, printed as it finishes (the spec's demo shape)."""
+    if result.passed:
+        mark, outcome = "✓", "passed"
+    else:
+        mark, outcome = "✗", "timed out" if result.timed_out else "failed"
     label = f"{result.gate.id} {outcome}"
     padding = " " * max(1, 19 - len(label))
     note = "  (optional)" if not result.passed and result.gate.optional else ""
     print(
-        f"{'✓' if result.passed else '✗'} {label}{padding}"
-        f"{result.duration_ms / 1000:.1f}s{note}"
+        f"{mark} {label}{padding}{result.duration_ms / 1000:.1f}s{note}",
+        flush=True,
     )
 
+
+def _report_run(
+    bundle: evidence.Bundle,
+    root: Path,
+    results: list[gates.GateResult],
+    failed_gate: str | None,
+) -> None:
+    if failed_gate is not None:
+        failure = next(r for r in results if r.gate.id == failed_gate)
+        for path in (failure.stdout_path, failure.stderr_path):
+            _print_tail(path, bundle.relative(path))
+
     try:
-        shown = bundle.directory.relative_to(root)
+        shown = bundle.directory.relative_to(root).as_posix()
     except ValueError:  # bundle outside the repo root
-        shown = bundle.directory
+        shown = str(bundle.directory)
     print(f"\nEvidence written to:\n{shown}/")
 
-    if failed:
-        print(f"\nNext:\n  rerun cox verify --gate {result.gate.id}")
+    if failed_gate is not None:
+        print(
+            f"\nNext:\n  open {shown}/summary.md\n"
+            f"  rerun cox verify --gate {failed_gate}"
+        )
+
+
+def _print_tail(path: Path, label: str) -> None:
+    """The tail of a failing gate's log — skipped when it wrote nothing."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return
+    if not lines:
+        return
+
+    shown = lines[-LOG_TAIL_LINES:]
+    elided = len(lines) - len(shown)
+    where = f"{label} (last {len(shown)} of {len(lines)} lines)" if elided else label
+    print(f"\n--- {where} ---")
+    for line in shown:
+        print(line)
 
 
 def main(argv: list[str] | None = None) -> int:
