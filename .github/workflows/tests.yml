@@ -6,12 +6,27 @@ on:
   pull_request:
 
 jobs:
-  pytest:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: ruff check src tests
+
+  pytest:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - { os: ubuntu-latest, python-version: "3.11" }
+          - { os: ubuntu-latest, python-version: "3.12" }
+          - { os: ubuntu-latest, python-version: "3.13" }
+          # the maintainer develops on macOS; the timeout path is POSIX-specific
+          - { os: macos-latest, python-version: "3.12" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

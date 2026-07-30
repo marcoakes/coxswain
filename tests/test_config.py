@@ -40,7 +40,9 @@ def test_explicit_fields_parse():
 
 
 def test_required_is_accepted_as_negated_optional():
-    cfg = parse({"version": 1, "gates": [gate(required=True), gate(id="x", required=False)]})
+    cfg = parse(
+        {"version": 1, "gates": [gate(required=True), gate(id="x", required=False)]}
+    )
     assert cfg.gates[0].optional is False
     assert cfg.gates[1].optional is True
 
@@ -61,8 +63,14 @@ def test_optional_and_required_together_is_an_error():
         ({"version": 1}, "gates"),
         ({"version": 1, "gates": []}, "gates"),
         ({"version": 1, "gates": "make test"}, "gates"),
-        ({"version": 1, "gates": [{"id": "t", "run": "make t"}], "extra": 1}, "unknown top-level"),
-        ({"version": 1, "gates": [{"id": "t", "run": "make t"}], "evidence": []}, "evidence"),
+        (
+            {"version": 1, "gates": [{"id": "t", "run": "make t"}], "extra": 1},
+            "unknown top-level",
+        ),
+        (
+            {"version": 1, "gates": [{"id": "t", "run": "make t"}], "evidence": []},
+            "evidence",
+        ),
     ],
 )
 def test_invalid_top_level_shapes_raise(raw, match):

@@ -115,7 +115,9 @@ def test_a_timeout_says_timed_out(bundle):
     written = summary.write(
         bundle,
         state(),
-        results=[outcome(bundle, 1, TEST, exit_code=-15, timed_out=True, duration_ms=1000)],
+        results=[
+            outcome(bundle, 1, TEST, exit_code=-15, timed_out=True, duration_ms=1000)
+        ],
         skipped=[],
         failed_gate="test",
     )

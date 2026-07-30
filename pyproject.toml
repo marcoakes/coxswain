@@ -27,7 +27,7 @@ classifiers = [
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 cox = "cox.cli:main"
@@ -42,3 +42,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, pyupgrade, bugbear — the checks that
+# catch real mistakes. This is the gate Coxswain's own .cox.yaml declares.
+select = ["E", "F", "W", "I", "UP", "B"]

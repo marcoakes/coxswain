@@ -25,4 +25,5 @@ def test_init_refuses_to_overwrite(tmp_path, monkeypatch, capsys):
     assert cli.main(["init"]) == cli.EXIT_CONFIG
     err = capsys.readouterr().err
     assert "refusing to overwrite" in err
-    assert (tmp_path / config.CONFIG_FILENAME).read_text(encoding="utf-8") == "version: 1\n"
+    kept = (tmp_path / config.CONFIG_FILENAME).read_text(encoding="utf-8")
+    assert kept == "version: 1\n"
