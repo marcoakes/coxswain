@@ -38,6 +38,58 @@ class EvidenceError(Exception):
     """The bundle could not be written (CLI exit code 2)."""
 
 
+def latest_run(runs_root: Path) -> Path | None:
+    """The most recent run directory, or None if there are none.
+
+    A run id starts with a sortable timestamp, so lexical order is
+    chronological order — no `stat()` calls, no reliance on mtimes that a
+    copy or a checkout would rewrite.
+    """
+    if not runs_root.is_dir():
+        return None
+    runs = sorted(path for path in runs_root.iterdir() if path.is_dir())
+    return runs[-1] if runs else None
+
+
+def read_manifest(run_dir: Path) -> dict[str, Any]:
+    return _read_json(run_dir / MANIFEST_FILENAME)
+
+
+def read_events(run_dir: Path) -> list[dict[str, Any]]:
+    path = run_dir / EVIDENCE_FILENAME
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise EvidenceError(f"cannot read {path}: {exc}") from exc
+    try:
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    except json.JSONDecodeError as exc:
+        raise EvidenceError(f"{path} holds a malformed event: {exc}") from exc
+
+
+def read_gate_results(run_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Each executed gate's directory and `result.json`, in declared order —
+    which is what `NNN_` prefixes sort into."""
+    gates_root = run_dir / GATES_DIRNAME
+    if not gates_root.is_dir():
+        return []
+    rows = []
+    for gate_dir in sorted(path for path in gates_root.iterdir() if path.is_dir()):
+        result = gate_dir / RESULT_FILENAME
+        if result.is_file():
+            rows.append((gate_dir, _read_json(result)))
+    return rows
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise EvidenceError(f"cannot read {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise EvidenceError(f"{path} is not valid JSON: {exc}") from exc
+
+
 def timestamp() -> str:
     """Local ISO-8601 with offset, to the millisecond — fine enough to order
     two fast gates, coarse enough to stay readable."""

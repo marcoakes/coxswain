@@ -25,6 +25,10 @@ EXIT_INTERRUPTED = 4  # wired in the Day-4 bolt
 # in the bundle; this is just enough to see what broke without opening it.
 LOG_TAIL_LINES = 20
 
+# `cox explain` is meant to be compact; a 400-file diff is a scroll, not a
+# diagnosis.
+EXPLAIN_FILE_LIMIT = 20
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -58,6 +62,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_verify.set_defaults(func=cmd_verify)
+
+    parser_explain = subparsers.add_parser(
+        "explain",
+        help="diagnose the latest (or a named) run — no LLM involved",
+    )
+    parser_explain.add_argument(
+        "run",
+        nargs="?",
+        metavar="RUN_DIR",
+        help="a run directory; defaults to the most recent one",
+    )
+    parser_explain.set_defaults(func=cmd_explain)
 
     return parser
 
@@ -154,6 +170,150 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
 
 
+def cmd_explain(args: argparse.Namespace) -> int:
+    """Read a finished run and say what happened, without an LLM.
+
+    Everything printed here is already in the bundle — this command exists
+    so a human (or an agent shelling out) does not have to open four files
+    to learn which gate failed and how to rerun it.
+    """
+    root = git.find_root(Path.cwd())
+
+    if args.run is not None:
+        run_dir = Path(args.run)
+        if not run_dir.is_dir():
+            print(f"cox explain: no run directory at {args.run}", file=sys.stderr)
+            return EXIT_CONFIG
+    else:
+        runs_root = root / evidence.RUNS_DIRNAME
+        found = evidence.latest_run(runs_root)
+        if found is None:
+            print(
+                f"cox explain: no runs under {runs_root.as_posix()} — "
+                "run 'cox verify' first",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+        run_dir = found
+
+    try:
+        manifest = evidence.read_manifest(run_dir)
+        recorded = evidence.read_events(run_dir)
+        rows = evidence.read_gate_results(run_dir)
+    except evidence.EvidenceError as exc:
+        print(f"cox explain: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    _explain(run_dir, manifest, recorded, rows)
+    return EXIT_OK
+
+
+def _explain(
+    run_dir: Path,
+    manifest: dict,
+    recorded: list[dict],
+    rows: list[tuple[Path, dict]],
+) -> None:
+    result = manifest.get("result", {})
+    status = result.get("status", "unknown")
+    failed_gate = result.get("failed_gate")
+    repo = manifest.get("repo", {})
+    started = next(
+        (event for event in recorded if event.get("type") == "run.started"), {}
+    )
+
+    print(f"Run {manifest.get('run_id', run_dir.name)} — {status}")
+    print(_explain_repo_line(started, repo, manifest))
+    print()
+
+    for _, row in rows:
+        print(
+            _gate_line(
+                row.get("gate_id", "?"),
+                row.get("status") == "passed",
+                bool(row.get("timed_out")),
+                int(row.get("duration_ms", 0)),
+                bool(row.get("optional")),
+            )
+        )
+
+    if failed_gate is not None:
+        _explain_failure(run_dir, failed_gate, rows)
+    else:
+        print("\nEvery required gate passed — nothing to diagnose.")
+
+    _explain_changes(recorded)
+
+    report = run_dir / summary.SUMMARY_FILENAME
+    try:
+        shown = report.relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        shown = report.as_posix()
+    print(f"\nFull report:\n  {shown}")
+    if failed_gate is not None:
+        print(f"\nRerun:\n  cox verify --gate {failed_gate}")
+
+
+def _explain_repo_line(started: dict, repo: dict, manifest: dict) -> str:
+    name = started.get("repo") or "repo"
+    sha = repo.get("head_sha")
+    where = f"{name} @ {sha[:7]}" if sha else f"{name} (not a git repository)"
+    if repo.get("branch"):
+        tree = "dirty" if repo.get("dirty") else "clean"
+        where += f" (branch {repo['branch']}, {tree})"
+    at = manifest.get("started_at")
+    return f"{where} · started {at}" if at else where
+
+
+def _explain_failure(
+    run_dir: Path, failed_gate: str, rows: list[tuple[Path, dict]]
+) -> None:
+    match = next(
+        ((d, r) for d, r in rows if r.get("gate_id") == failed_gate), None
+    )
+    if match is None:  # a bundle that names a gate it never recorded
+        print(f"\nFailing gate: {failed_gate} (no result.json recorded)")
+        return
+
+    gate_dir, row = match
+    print(f"\nFailing gate: {failed_gate}")
+    print(f"  command    {row.get('command', '?')}")
+    print(f"  exit code  {row.get('exit_code', '?')}")
+    if row.get("timed_out"):
+        print("  timed out  yes")
+
+    for stream in ("stdout", "stderr"):
+        path = gate_dir / f"{stream}.log"
+        # label it the way the bundle does, so the reader can find the file
+        _print_tail(path, path.relative_to(run_dir).as_posix())
+
+
+def _explain_changes(recorded: list[dict]) -> None:
+    git_status = next(
+        (event for event in recorded if event.get("type") == "git.status"), None
+    )
+    if git_status is None:
+        return
+
+    changed = git_status.get("changed_files", [])
+    untracked = git_status.get("untracked", [])
+    if not changed and not untracked:
+        print("\nNo uncommitted changes.")
+        return
+
+    if changed:
+        print(f"\nChanged files ({len(changed)}):")
+        for path in changed[:EXPLAIN_FILE_LIMIT]:
+            print(f"  {path}")
+        if len(changed) > EXPLAIN_FILE_LIMIT:
+            print(f"  … {len(changed) - EXPLAIN_FILE_LIMIT} more")
+    if untracked:
+        lead = "" if changed else "\n"
+        shown = ", ".join(untracked[:5])
+        more = f", … {len(untracked) - 5} more" if len(untracked) > 5 else ""
+        print(f"{lead}Untracked ({len(untracked)}): {shown}{more}")
+
+
 def _plan(
     cfg: config.Config, requested: str | None
 ) -> list[tuple[int, config.Gate]]:
@@ -203,17 +363,33 @@ def _run_gate(
     return result
 
 
-def _report_gate(result: gates.GateResult) -> None:
-    """One line per gate, printed as it finishes (the spec's demo shape)."""
-    if result.passed:
-        mark, outcome = "✓", "passed"
-    else:
-        mark, outcome = "✗", "timed out" if result.timed_out else "failed"
-    label = f"{result.gate.id} {outcome}"
+def _gate_line(
+    gate_id: str,
+    passed: bool,
+    timed_out: bool,
+    duration_ms: int,
+    optional: bool,
+) -> str:
+    """The spec's demo shape, used live by `verify` and replayed by `explain`
+    so one gate never reads two different ways."""
+    mark = "✓" if passed else "✗"
+    outcome = "passed" if passed else ("timed out" if timed_out else "failed")
+    label = f"{gate_id} {outcome}"
     padding = " " * max(1, 19 - len(label))
-    note = "  (optional)" if not result.passed and result.gate.optional else ""
+    note = "  (optional)" if not passed and optional else ""
+    return f"{mark} {label}{padding}{duration_ms / 1000:.1f}s{note}"
+
+
+def _report_gate(result: gates.GateResult) -> None:
+    """One line per gate, printed as it finishes."""
     print(
-        f"{mark} {label}{padding}{result.duration_ms / 1000:.1f}s{note}",
+        _gate_line(
+            result.gate.id,
+            result.passed,
+            result.timed_out,
+            result.duration_ms,
+            result.gate.optional,
+        ),
         flush=True,
     )
 
