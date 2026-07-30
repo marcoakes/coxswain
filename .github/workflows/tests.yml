@@ -2,7 +2,9 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    # run-v0.2 is here so the v0.2 slice gets CI without a PR being open;
+    # it comes back out when that branch merges.
+    branches: [main, run-v0.2]
   pull_request:
 
 jobs:
