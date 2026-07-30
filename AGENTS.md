@@ -30,17 +30,19 @@ no network, no uploads — ever.
 
 Where they disagree about v0.1, the spec wins.
 
-## Current state — Bolt 1 shipped
+## Current state — Bolt 2 shipped
 
-There **is** code now: `cox init` and `cox verify` work, 58 tests pass.
+There **is** code now: `cox init` and `cox verify` work — `verify` runs a
+repo's whole declared gate set and writes a real bundle — and 81 tests
+pass on Python 3.11–3.13 in CI.
 
 | Bolt | Spec day | State |
 |---|---|---|
-| 1 — skeleton | Day 1 | ✅ packaging, config loader, `cox init`, `cox verify` running **one** gate, `evidence.jsonl` + `manifest.json`, exit codes 0/1/2 |
-| 2 — gate runner | Day 2 | ⬜ next: all gates in order, `timeout` enforcement, stop-on-first-required-failure, per-gate `gates/NNN_id/` logs, `summary.md`, full exit-code table |
-| 3 — git evidence | Day 3 | ⬜ changed files, `diff.patch`, `status.txt`, untracked list, `--changed-only`, `--json`, `cox explain` |
+| 1 — skeleton | Day 1 | ✅ packaging, config loader, `cox init`, `cox verify` running one gate, `evidence.jsonl` + `manifest.json`, exit codes 0/1/2 |
+| 2 — gate runner | Day 2 | ✅ every gate in declared order, `timeout` enforced (process-group kill), stop-on-first-required-failure, optional-gate semantics, per-gate `gates/NNN_id/{stdout.log,stderr.log,result.json}`, `summary.md`, CI |
+| 3 — git evidence | Day 3 | ⬜ next: changed files, `diff.patch`, `status.txt`, untracked list, `--changed-only`, `--json`, `cox explain` |
 | 4 — redaction & safety | Day 4 | ⬜ env redaction before write, log truncation, binary exclusion, exit 3 preconditions, exit 4 on SIGINT |
-| 5 — dogfood | Day 5 | ⬜ Coxswain verifies Coxswain, CI workflow, committed sanitized bundle in `.cox.example/`, real README transcript |
+| 5 — dogfood | Day 5 | ⬜ Coxswain verifies Coxswain, CI upgraded to run `cox verify` and upload the bundle, committed sanitized bundle in `.cox.example/`, real README transcript |
 
 The `v0.1.0` tag is gated on the spec's
 [Definition of PROVEN](SPEC_COX_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
@@ -68,15 +70,25 @@ uv pip install -e '.[dev]' --python .venv/bin/python
 Then:
 
 ```bash
-.venv/bin/pytest                # the gate: all tests, ~2s, must be green
+.venv/bin/pytest                # the gate: all tests, ~6s, must be green
 .venv/bin/cox --help
 .venv/bin/cox init              # writes .cox.yaml (refuses to overwrite)
-.venv/bin/cox verify            # runs a gate, writes .cox/runs/<run_id>/
+.venv/bin/cox verify            # runs every gate, writes .cox/runs/<run_id>/
+.venv/bin/cox verify --gate ID  # one gate, numbered as if the full run happened
 ```
 
 **`.venv/bin/pytest` green is the law until Bolt 5, when `cox verify` on
-this repo becomes the gate and CI mirrors it.** There is no `Makefile`
-and no lint gate yet — adding `ruff` is a dependency decision, so ask.
+this repo becomes the gate.** CI already mirrors the current law:
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs pytest
+on 3.11 / 3.12 / 3.13 for every push and PR, and Bolt 5 upgrades that
+workflow to run `cox verify` and upload the bundle. There is still no
+`Makefile` and no lint gate — adding `ruff` is a dependency decision, so
+ask.
+
+Gate output is **captured, never teed**: streams go to the bundle's log
+files, and only a failing required gate gets a 20-line tail on the
+console. If you are tempted to add `--verbose`, read the spec's demo
+block first — the clean console is the product.
 
 ## Module map (`src/cox/`)
 
@@ -86,11 +98,12 @@ and no lint gate yet — adding `ruff` is a dependency decision, so ask.
 | `config.py` | strict `.cox.yaml` loader → frozen `Config`/`Gate` dataclasses | consume `evidence:` (parsed for shape, stored raw for Bolts 3–4) |
 | `detect.py` | the commented `.cox.yaml` template `cox init` writes | actually detect project commands (static template is Day-1-legal per the spec: *"if detection is uncertain, generate comments rather than being clever"*) |
 | `git.py` | repo root detection, HEAD SHA, branch, dirty flag; read-only, never fatal | changed files, `diff.patch`, `status.txt` (Bolt 3) |
-| `gates.py` | run one gate through the shell in the repo root, time it | capture per-gate logs, enforce `timeout`, sequence gates (Bolt 2) |
-| `evidence.py` | allocate `.cox/runs/<run_id>/`, append `evidence.jsonl`, write `manifest.json` | `summary.md`, `diff.patch`, `gates/NNN_id/` (Bolts 2–3) |
+| `gates.py` | run one gate through the shell in the repo root: own process group, `timeout` enforced by SIGTERM→SIGKILL on the group, stdout/stderr captured to files, duration in ms | decide anything about *which* gates run — that is `cli.py`'s sequencing |
+| `evidence.py` | allocate `.cox/runs/<run_id>/`, append `evidence.jsonl`, write `manifest.json`, `gates/NNN_id/` dirs + `result.json` | `diff.patch`, `status.txt` (Bolt 3), redaction (Bolt 4) |
+| `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
 
-`redact.py` and `summary.py` appear in the spec's layout and do **not**
-exist yet by design — they arrive with Bolts 4 and 2.
+`redact.py` appears in the spec's layout and does **not** exist yet by
+design — it arrives with Bolt 4.
 
 ### Do not add these early
 
@@ -122,6 +135,19 @@ and the interface future judges and agents consume ([RFC #2](https://github.com/
 Changing either shape is a spec change, not an implementation detail —
 bump the schema version and say so in the commit.
 
+Three conventions inside the bundle are load-bearing:
+
+- **`gates/NNN_<id>/` numbering follows the *declared* order, not the run.**
+  `cox verify --gate test` on a three-gate config still writes
+  `gates/003_test/`, so a directory name means the same thing in a full
+  run, a partial run and a single-gate run.
+- **A `log` field appears on `gate.finished` for failing gates only** —
+  it is a pointer to where the reader is being sent, not an inventory
+  (every gate's logs are on disk and linked from `summary.md`).
+- **Skipped gates leave no trace in `evidence.jsonl` and no directory.**
+  They were not run, so claiming otherwise would be a lie; `summary.md`
+  is the one place the full declared set appears, marked `skipped`.
+
 **Config semantics:** validation is strict — unknown keys are errors,
 because a typo in a gate definition must not silently change what
 "verified" means. `optional` is the canonical field; `required` is
@@ -141,11 +167,12 @@ is an error.
    real command output — `pytest` summary and a `cox` transcript — into
    the report. Fabricated or "should work" output is the one unforgivable
    sin in a repo whose entire product is evidence.
-3. **Tests come with the commit that needs them**, not later. Bolt 1's
+3. **Tests come with the commit that needs them**, not later. The existing
    suite is the shape to match: contract assertions (event sequence,
-   manifest fields, exit codes), scratch-repo fixtures in
-   [tests/conftest.py](tests/conftest.py), no mocking of git or
-   subprocess.
+   manifest and `result.json` fields, exit codes, `summary.md` rows),
+   scratch-repo fixtures in [tests/conftest.py](tests/conftest.py), and no
+   mocking of git or subprocess — a timeout test really spawns `sleep 30`
+   and really kills it.
 4. **Small conventional commits** — `feat:`, `fix:`, `test:`, `docs:`,
    `chore:`. Evidence in the PR description.
 5. **Vendor strings behind mapping layers.** Any external API surface,
@@ -156,11 +183,11 @@ is an error.
 
 ## Repo-specific gotchas
 
-- **The maintainer's Mac has no git push credential** (no `gh`, no SSH
-  keys, no keychain entry) and no Homebrew. Commits queue locally; the
-  maintainer pushes, or publishing happens through the browser against
-  his logged-in GitHub session. Never work around it, never handle a
-  token — surface the block and ask.
+- **The maintainer's Mac may have no git push credential** (no `gh`, no
+  SSH keys, no Homebrew). Try `git push`; if it fails, commits queue
+  locally and the maintainer pushes, or publishing happens through the
+  browser against his logged-in GitHub session — his call, per bolt.
+  Never work around it, never handle a token — surface the block and ask.
 - **Don't run `cox verify` on this repo casually while iterating** — each
   run writes a new `.cox/runs/<id>/`. Harmless (gitignored), just noisy.
 - **Test repos must be isolated from the developer's git config.**
