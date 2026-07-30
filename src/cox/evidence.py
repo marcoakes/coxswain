@@ -19,11 +19,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from cox.gates import GateResult
 from cox.git import RepoState
 
 SCHEMA_VERSION = "cox.evidence.v1"
 EVIDENCE_FILENAME = "evidence.jsonl"
 MANIFEST_FILENAME = "manifest.json"
+RESULT_FILENAME = "result.json"
 GATES_DIRNAME = "gates"
 RUNS_DIRNAME = Path(".cox") / "runs"
 
@@ -86,6 +88,21 @@ class Bundle:
     def relative(self, path: Path) -> str:
         """A bundle-relative path, for evidence that points at other files."""
         return path.relative_to(self.directory).as_posix()
+
+    def write_gate_result(self, gate_dir: Path, result: GateResult) -> Path:
+        """`gates/NNN_<id>/result.json` — one gate's row of the contract."""
+        payload = {
+            "gate_id": result.gate.id,
+            "command": result.gate.run,
+            "exit_code": result.exit_code,
+            "duration_ms": result.duration_ms,
+            "timed_out": result.timed_out,
+            "optional": result.gate.optional,
+            "status": result.status,
+        }
+        path = gate_dir / RESULT_FILENAME
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return path
 
     def event(self, event_type: str, **fields: Any) -> None:
         """Append one `{"type": ...}` object to `evidence.jsonl`."""

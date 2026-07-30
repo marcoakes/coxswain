@@ -88,6 +88,36 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
     ]
 
 
+def test_gate_result_json_is_exactly_the_contract(tmp_path: Path):
+    from cox.config import Gate
+    from cox.gates import GateResult
+
+    bundle = evidence.Bundle.create(tmp_path, now=NOW)
+    gate = Gate(id="test", run="make test", timeout=300)
+    gate_dir = bundle.gate_dir(2, gate.id)
+    result = GateResult(
+        gate=gate,
+        exit_code=1,
+        duration_ms=9231,
+        timed_out=False,
+        stdout_path=gate_dir / "stdout.log",
+        stderr_path=gate_dir / "stderr.log",
+    )
+
+    written = bundle.write_gate_result(gate_dir, result)
+
+    assert written == gate_dir / "result.json"
+    assert json.loads(written.read_text(encoding="utf-8")) == {
+        "gate_id": "test",
+        "command": "make test",
+        "exit_code": 1,
+        "duration_ms": 9231,
+        "timed_out": False,
+        "optional": False,
+        "status": "failed",
+    }
+
+
 def test_manifest_matches_the_spec_shape(tmp_path: Path):
     bundle = evidence.Bundle.create(tmp_path, now=NOW)
     state = RepoState(
