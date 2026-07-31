@@ -693,7 +693,12 @@ def cmd_judge(args: argparse.Namespace) -> int:
 
     mode = "live" if args.send else "dry_run"
     verdict = judge.Verdict(None)
-    if args.send:
+    unaskable = judge.nothing_to_ask(loaded) if args.send else None
+    if unaskable is not None:
+        # Every criterion needs a human. There is no question to send, so no
+        # socket opens: --send is permission to ask, not an instruction to.
+        verdict = unaskable
+    elif args.send:
         try:
             body = judge.send(
                 request,
@@ -770,9 +775,12 @@ def _report_judge(
 ) -> None:
     if mode == "dry_run":
         print("dry run — the request was built and written; nothing was sent.")
+    human = {c.id for c in loaded.criteria if c.human}
     for row in verdict.criteria:
         mark = {True: "✓", False: "✗", None: "?"}[row["met"]]
         tag = "" if row["required"] else "  (optional)"
+        if row["id"] in human:
+            tag += "  (needs a human)"
         print(f"{mark} {row['id']}{tag}")
     if verdict.verdict is not None:
         print(f"\nVerdict: {verdict.verdict}")

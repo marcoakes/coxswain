@@ -28,7 +28,7 @@ from typing import Any
 
 from wringer import evidence
 from wringer.redact import Redactor
-from wringer.rubric import Rubric
+from wringer.rubric import Criterion, Rubric
 
 SCHEMA_VERSION = "wringer.judge.v1"
 VERDICTS_DIRNAME = Path(".wringer") / "verdicts"
@@ -123,7 +123,7 @@ def build_packet(evidence_dir: Path, rubric: Rubric) -> Packet:
         rubric_title=rubric.title,
         criteria=tuple(
             {"id": c.id, "title": c.title, "guidance": c.guidance,
-             "required": c.required}
+             "required": c.required, "human": c.human}
             for c in rubric.criteria
         ),
         diff=diff,
@@ -145,18 +145,24 @@ def build_packet(evidence_dir: Path, rubric: Rubric) -> Packet:
 
 
 def render_request(packet: Packet, model: str, max_output_tokens: int) -> dict:
-    """The exact chat-completions body. Built from a Packet and nothing else."""
+    """The exact chat-completions body. Built from a Packet and nothing else.
+
+    Criteria marked `human` are left out entirely: they are not in the prompt,
+    not in the reply format, and so cannot be answered. A judge that was never
+    asked cannot be said to have guessed.
+    """
+    asked = [c for c in packet.criteria if not c["human"]]
     criteria_lines = "\n".join(
         f"- {c['id']} ({'required' if c['required'] else 'optional'}): "
         f"{c['title']}" + (f" — {c['guidance']}" if c["guidance"] else "")
-        for c in packet.criteria
+        for c in asked
     )
     gate_lines = "\n".join(
         f"- {g['id']}: {g['status']} (exit {g['exit_code']}, `{g['command']}`)"
         for g in packet.gates
     ) or "- (none recorded)"
 
-    ids = [c["id"] for c in packet.criteria]
+    ids = [c["id"] for c in asked]
     user = (
         f"# Rubric: {packet.rubric_title}\n\n"
         f"Judge the change below against each criterion.\n\n"
@@ -205,7 +211,15 @@ def parse_response(body: Any, rubric: Rubric) -> Verdict:
 
     rows: list[dict[str, Any]] = []
     missing: list[str] = []
+    awaiting: list[str] = []
     for criterion in rubric.criteria:
+        if criterion.human:
+            # Never asked, so whatever the model volunteered about this id is
+            # not read. Unscored is the honest record, not a guess.
+            if criterion.required:
+                awaiting.append(criterion.id)
+            rows.append(_human_row(criterion))
+            continue
         answer = answers.get(criterion.id)
         if answer is None or not isinstance(answer.get("met"), bool):
             missing.append(criterion.id)
@@ -229,11 +243,44 @@ def parse_response(body: Any, rubric: Rubric) -> Verdict:
             tuple(rows),
             f"criteria not scored: {', '.join(missing)}",
         )
-    failed = [r["id"] for r in rows if r["required"] and not r["met"]]
+    # A definite no outranks a pending look: the change is rejected either way,
+    # and "fail" is the more actionable of the two.
+    failed = [r["id"] for r in rows if r["required"] and r["met"] is False]
     if failed:
         return Verdict(FAIL, tuple(rows), f"required criteria unmet: "
                                           f"{', '.join(failed)}")
+    if awaiting:
+        return Verdict(
+            NEEDS_HUMAN,
+            tuple(rows),
+            f"required criteria only a human can score: {', '.join(awaiting)}",
+        )
     return Verdict(PASS, tuple(rows))
+
+
+def _human_row(criterion: Criterion) -> dict[str, Any]:
+    return {
+        "id": criterion.id,
+        "met": None,
+        "required": criterion.required,
+        "reason": "needs a human — not a criterion a judge can score",
+    }
+
+
+def nothing_to_ask(rubric: Rubric) -> Verdict | None:
+    """The verdict when there is no question to send, or None to carry on.
+
+    A rubric whose every criterion is `human` has nothing to ask a model.
+    Opening a socket to ask it anyway would be a network call made for
+    appearance rather than for an answer.
+    """
+    if rubric.machine_criteria:
+        return None
+    return Verdict(
+        NEEDS_HUMAN,
+        tuple(_human_row(c) for c in rubric.criteria),
+        "every criterion needs a human, so nothing was sent",
+    )
 
 
 def _strip_fences(text: str) -> str:

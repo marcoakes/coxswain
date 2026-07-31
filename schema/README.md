@@ -12,6 +12,7 @@ rather than reverse-engineer it — the point of
 | [`gate-result.schema.json`](gate-result.schema.json) | `gates/NNN_<id>/result.json` |
 | [`loop-manifest.schema.json`](loop-manifest.schema.json) | `manifest.json` of a `wring run` loop bundle |
 | [`loop-event.schema.json`](loop-event.schema.json) | **one line** of a loop's `loop.jsonl` |
+| [`rubric.schema.json`](rubric.schema.json) | `wringer.rubric.v1` — the acceptance criteria `wring judge` weighs a bundle against |
 
 The loop schemas carry their own version, **`wringer.loop.v1`**, moving
 independently of the evidence bundle: a loop *references* the runs it drove
@@ -68,8 +69,14 @@ fails. That check is deliberately dependency-free (it compares declared
 property names against written keys) so the repo keeps its "PyYAML and
 nothing else" rule.
 
-They have also been validated with a real JSON Schema engine
-(`jsonschema`, draft 2020-12) against passing, failing and interrupted
-bundles. That engine is **not** a dependency of this project and CI does not
-run it, so treat the in-repo test as the enforced check and the external
-validation as a point-in-time confirmation.
+The same file also runs a real JSON Schema engine (`jsonschema`, draft
+2020-12) over passing, failing and interrupted bundles, which is what catches
+a schema that is itself malformed or a value that breaks a pattern. That
+engine is a **dev-only** dependency — the runtime install is still PyYAML and
+nothing else — and it does run in CI.
+
+The rubric is not evidence; it is source, committed and hand-edited. Its
+schema is published for the same reason as the others: so a tool can target
+the format instead of reverse-engineering it. `human: true` there is the one
+field with a safety meaning — a criterion carrying it is never sent to a
+judge, and comes back unscored rather than guessed at.

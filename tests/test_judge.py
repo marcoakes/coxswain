@@ -492,3 +492,155 @@ def test_verify_and_run_can_never_return_needs_human(repo, monkeypatch, capsys):
     assert cli.main(["verify"]) != cli.EXIT_NEEDS_HUMAN
     assert cli.main(["run"]) != cli.EXIT_NEEDS_HUMAN
     capsys.readouterr()
+
+
+# --- criteria only a human can score (SPEC_INTENT_V0.md §1, defence 3) ---
+#
+# `human: true` is a wringer.rubric.v1 amendment made for `wring spec`, but it
+# has to mean something here or it is decoration. A criterion nobody could
+# check is exactly the "rubric full of vibes" the spec warns about, and a
+# model asked to score one would be guessing with a straight face.
+
+HUMAN_RUBRIC = """\
+schema_version: wringer.rubric.v1
+title: Acceptance criteria
+criteria:
+  - id: docstring-present
+    title: Public functions carry a docstring
+    required: true
+    human: false
+  - id: reads-well
+    title: The copy reads the way our users speak
+    required: true
+    human: true
+"""
+
+
+def test_a_human_criterion_is_never_in_the_request(repo, monkeypatch, capsys):
+    setup_repo(repo)
+    (repo / "rubric.yaml").write_text(HUMAN_RUBRIC, encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["judge", "--print-request"]) == cli.EXIT_OK
+
+    body = json.loads(capsys.readouterr().out)["messages"][1]["content"]
+    assert "docstring-present" in body
+    # not in the criteria list, and not in the set of ids it may answer with
+    assert "reads-well" not in body
+
+
+def test_a_human_criterion_comes_back_unscored_and_needs_a_human(
+    repo, monkeypatch, capsys
+):
+    setup_repo(repo)
+    (repo / "rubric.yaml").write_text(HUMAN_RUBRIC, encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    fake_transport(
+        monkeypatch,
+        reply=reply(json.dumps({"criteria": [
+            {"id": "docstring-present", "met": True, "reason": "present"},
+            # the model volunteers a score for the one it was never asked about
+            {"id": "reads-well", "met": True, "reason": "sounds fine to me"},
+        ]})),
+    )
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_NEEDS_HUMAN
+
+    recorded = verdict_json(repo)
+    assert recorded["verdict"] == judge.NEEDS_HUMAN
+    rows = {row["id"]: row for row in recorded["criteria"]}
+    assert rows["docstring-present"]["met"] is True
+    # the volunteered answer is not read: there was no question to answer
+    assert rows["reads-well"]["met"] is None
+    assert "needs a human" in rows["reads-well"]["reason"]
+    assert "sounds fine to me" not in json.dumps(recorded)
+
+
+def test_a_failing_machine_criterion_still_fails_outright(repo, monkeypatch,
+                                                          capsys):
+    """A definite no outranks a pending look: the change is rejected either
+    way, and 'fail' is the more actionable of the two."""
+    setup_repo(repo)
+    (repo / "rubric.yaml").write_text(HUMAN_RUBRIC, encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    fake_transport(
+        monkeypatch,
+        reply=reply(json.dumps({"criteria": [
+            {"id": "docstring-present", "met": False, "reason": "none"},
+        ]})),
+    )
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_GATE_FAILED
+
+    assert verdict_json(repo)["verdict"] == judge.FAIL
+
+
+def test_an_optional_human_criterion_does_not_block_a_pass(repo, monkeypatch,
+                                                            capsys):
+    setup_repo(repo)
+    (repo / "rubric.yaml").write_text(
+        HUMAN_RUBRIC.replace(
+            "    required: true\n    human: true", "    required: false\n"
+            "    human: true"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    fake_transport(
+        monkeypatch,
+        reply=reply(json.dumps({"criteria": [
+            {"id": "docstring-present", "met": True, "reason": "present"},
+        ]})),
+    )
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_OK
+
+    assert verdict_json(repo)["verdict"] == judge.PASS
+
+
+def test_an_all_human_rubric_opens_no_socket(repo, monkeypatch, capsys):
+    """--send is permission to ask, not an instruction to. With nothing to
+    ask, there is no request to make."""
+    setup_repo(repo)
+    (repo / "rubric.yaml").write_text(
+        HUMAN_RUBRIC.replace("    human: false", "    human: true"),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    sent = fake_transport(monkeypatch, reply=reply("{}"))
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_NEEDS_HUMAN
+
+    assert sent == {}, "a socket was opened to ask nothing"
+    recorded = verdict_json(repo)
+    assert recorded["verdict"] == judge.NEEDS_HUMAN
+    assert "nothing was sent" in recorded["note"]
+    assert not (only_verdict(repo) / judge.RESPONSE_FILENAME).exists()
+
+
+def test_human_defaults_to_false_so_existing_rubrics_are_unchanged(tmp_path):
+    loaded = loaded_rubric(tmp_path)
+
+    assert [c.human for c in loaded.criteria] == [False, False]
+    assert loaded.machine_criteria == loaded.criteria
+
+
+def test_human_must_be_a_boolean(tmp_path):
+    (tmp_path / "rubric.yaml").write_text(
+        RUBRIC.replace(
+            "    required: false\n", "    required: false\n    human: yes please\n"
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(rubric.RubricError, match="'human' must be a boolean"):
+        rubric.load(Path("rubric.yaml"), tmp_path)

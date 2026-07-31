@@ -213,7 +213,7 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
     if not isinstance(gates_raw, list) or not gates_raw:
         raise ConfigError(f"{source}: 'gates' must be a non-empty list")
     gates = tuple(
-        _parse_gate(entry, index, source) for index, entry in enumerate(gates_raw)
+        parse_gate(entry, index, source) for index, entry in enumerate(gates_raw)
     )
 
     seen: set[str] = set()
@@ -588,7 +588,13 @@ def _validate_evidence(evidence: dict[str, Any], source: str) -> None:
         )
 
 
-def _parse_gate(raw: Any, index: int, source: str) -> Gate:
+def parse_gate(raw: Any, index: int, source: str) -> Gate:
+    """Validate one gate definition.
+
+    Public because `wring spec` proposes gates: a gate a drafter suggests goes
+    through exactly the parser `.wringer.yaml` would use, so Wringer can never
+    propose a gate its own config loader would reject.
+    """
     where = f"{source}: gates[{index}]"
     if not isinstance(raw, dict):
         raise ConfigError(f"{where} must be a mapping")

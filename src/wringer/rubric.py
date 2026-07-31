@@ -28,7 +28,7 @@ MAX_RUBRIC_BYTES = 32 * 1024
 MAX_CRITERIA = 20
 
 _TOP_LEVEL_KEYS = {"schema_version", "title", "criteria"}
-_CRITERION_KEYS = {"id", "title", "guidance", "required"}
+_CRITERION_KEYS = {"id", "title", "guidance", "required", "human"}
 
 
 class RubricError(Exception):
@@ -41,6 +41,11 @@ class Criterion:
     title: str
     guidance: str = ""
     required: bool = True
+    # A criterion no judge can decide — "the copy reads well", "this is the
+    # right trade-off". It is never sent, and it comes back unscored, because
+    # a model guessing at it would be exactly the confident-wrong-answer the
+    # rubric exists to prevent (SPEC_INTENT_V0.md §1, defence 3).
+    human: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,12 @@ class Rubric:
     @property
     def required_ids(self) -> tuple[str, ...]:
         return tuple(c.id for c in self.criteria if c.required)
+
+    @property
+    def machine_criteria(self) -> tuple[Criterion, ...]:
+        """The ones a judge may be asked about. Everything else waits for a
+        human, and asking a model anyway would be inventing a verdict."""
+        return tuple(c for c in self.criteria if not c.human)
 
 
 def load(path: Path, root: Path) -> Rubric:
@@ -92,7 +103,7 @@ def load(path: Path, root: Path) -> Rubric:
     except (yaml.YAMLError, UnicodeDecodeError) as exc:
         raise RubricError(f"rubric {path} is not valid YAML: {exc}") from exc
 
-    rubric = _parse(data, str(path))
+    rubric = parse_document(data, str(path))
     return Rubric(
         title=rubric[0],
         criteria=rubric[1],
@@ -101,7 +112,14 @@ def load(path: Path, root: Path) -> Rubric:
     )
 
 
-def _parse(data: Any, where: str) -> tuple[str, tuple[Criterion, ...]]:
+def parse_document(data: Any, where: str) -> tuple[str, tuple[Criterion, ...]]:
+    """Validate an already-loaded rubric mapping.
+
+    Public because `wring spec` builds a rubric in memory and must prove it is
+    one *before* writing it. Running the real parser is what makes
+    "the criteria block is a `wringer.rubric.v1` document by construction"
+    (SPEC_INTENT_V0.md §3) structural rather than aspirational.
+    """
     if not isinstance(data, dict):
         raise RubricError(f"rubric {where}: top level must be a mapping")
 
@@ -183,6 +201,14 @@ def _parse_criterion(raw: Any, index: int, where: str) -> Criterion:
     if not isinstance(required, bool):
         raise RubricError(f"{at} ('{criterion_id}'): 'required' must be a boolean")
 
+    human = raw.get("human", False)
+    if not isinstance(human, bool):
+        raise RubricError(f"{at} ('{criterion_id}'): 'human' must be a boolean")
+
     return Criterion(
-        id=criterion_id, title=title, guidance=guidance, required=required
+        id=criterion_id,
+        title=title,
+        guidance=guidance,
+        required=required,
+        human=human,
     )
