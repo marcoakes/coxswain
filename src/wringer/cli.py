@@ -102,6 +102,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_run.set_defaults(func=cmd_run)
 
+    parser_resume = subparsers.add_parser(
+        "resume",
+        help="continue a loop that was killed before it finished",
+    )
+    parser_resume.add_argument(
+        "loop",
+        nargs="?",
+        metavar="LOOP_DIR",
+        help="a loop directory; defaults to the most recent unfinished one",
+    )
+    parser_resume.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_resume.set_defaults(func=cmd_resume)
+
     parser_judge = subparsers.add_parser(
         "judge",
         help="judge a finished evidence bundle against a rubric",
@@ -373,6 +390,110 @@ def _relative(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Continue a loop whose ledger stopped without `loop.finished`.
+
+    A loop that ended — converged, stopped, or interrupted by a human — is
+    over. Only one that was *killed* leaves a ledger that simply stops, and
+    its completed iterations are facts worth continuing from.
+    """
+    root = git.find_root(Path.cwd())
+
+    refused = _refuse_unverifiable(root, "resume")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        verify.plan(cfg, None)
+    except config.ConfigError as exc:
+        print(f"wring resume: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.run is None:
+        print(
+            f"wring resume: no 'run:' section in {config.CONFIG_FILENAME}",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    if args.loop is not None:
+        loop_dir = Path(args.loop)
+        if not loop_dir.is_dir():
+            print(f"wring resume: no loop directory at {args.loop}", file=sys.stderr)
+            return EXIT_CONFIG
+    else:
+        found = loop.latest_loop(root / loop.LOOPS_DIRNAME)
+        if found is None:
+            print(
+                f"wring resume: no loops under "
+                f"{(root / loop.LOOPS_DIRNAME).as_posix()}",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+        loop_dir = found
+
+    try:
+        resumable = loop.inspect_for_resume(loop_dir)
+    except evidence.EvidenceError as exc:
+        print(f"wring resume: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if resumable is None:
+        print(
+            f"wring resume: {_relative(loop_dir, root)} finished — there is "
+            "nothing to resume. A loop that converged, stopped or was "
+            "interrupted by hand is over; start a new one with 'wring run'.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    quiet = args.json
+    if not quiet:
+        print(
+            f"Resuming {_relative(loop_dir, root)} — "
+            f"{resumable.iterations_done} iteration"
+            f"{'' if resumable.iterations_done == 1 else 's'} already done."
+        )
+
+    try:
+        outcome = loop.run(
+            root,
+            cfg,
+            on_iteration=None if quiet else _report_iteration,
+            on_gate=None if quiet else _report_gate,
+            on_worker=None if quiet else _report_worker,
+            resuming=resumable,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring resume: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": outcome.status,
+                    "reason": outcome.reason,
+                    "iterations": outcome.iterations,
+                    "resumed_from": resumable.iterations_done,
+                    "loop_dir": _relative(outcome.directory, root),
+                    "final": (
+                        verify.json_summary(outcome.final, root)
+                        if outcome.final is not None
+                        else None
+                    ),
+                }
+            )
+        )
+    else:
+        _report_loop(outcome, root)
+
+    if outcome.status == "interrupted":
+        return EXIT_INTERRUPTED
+    return EXIT_OK if outcome.converged else EXIT_GATE_FAILED
 
 
 def cmd_judge(args: argparse.Namespace) -> int:

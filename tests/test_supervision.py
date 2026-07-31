@@ -40,6 +40,33 @@ def result(repo: Path) -> dict:
 # --- the signature: same shape in, same hash out ---
 
 
+def test_the_normalizer_strips_the_noise_that_actually_appears_in_logs():
+    """A unit test, because the loop-level one only catches this when two
+    laps happen to straddle a second boundary — which is how a bare clock
+    time survived the first cut and only failed on a slower machine."""
+    pairs = [
+        ("failed at 10:24:30 after 123ms", "failed at 10:24:31 after 987ms"),
+        ("boom 2026-07-31T10:24:30.123 x", "boom 2026-07-31T11:59:59.999 x"),
+        ("run 20260731-102430-ab12 died", "run 20260731-115959-ff99 died"),
+        ("at 0xdeadbeef in frame", "at 0x0badcafe in frame"),
+        ("took 1.5s to fail", "took 92.25s to fail"),
+        ("wrote /tmp/pytest-abc/x", "wrote /tmp/pytest-zzz/y"),
+        ("worker pid=4821 exited", "worker pid=99 exited"),
+    ]
+    for a, b in pairs:
+        assert loop._normalize(a) == loop._normalize(b), f"{a!r} vs {b!r}"
+
+
+def test_the_normalizer_still_tells_different_failures_apart():
+    """The false-positive guard: stripping noise must not erase the message."""
+    assert loop._normalize("AssertionError: expected 3") != loop._normalize(
+        "AssertionError: expected 4"
+    )
+    assert loop._normalize("ModuleNotFoundError: no module x") != loop._normalize(
+        "SyntaxError: invalid syntax"
+    )
+
+
 def test_the_same_failure_hashes_the_same_through_the_noise(repo, monkeypatch, capsys):
     """Two laps whose logs differ only by timestamps, durations and run ids
     must produce one signature, or the breaker never fires in practice."""
@@ -216,6 +243,187 @@ def test_a_zero_wall_clock_is_a_config_error():
                 "run": {"worker": "true", "wall_clock": 0},
             }
         )
+
+
+# --- resume: a supervisor holds no state that is not on disk ---
+
+
+RESUMABLE = """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED calc.py"
+run:
+  worker: "echo $$ > worker.pid; sleep 30"
+  max_iterations: 5
+  worker_timeout: 60
+"""
+
+
+def test_a_killed_loop_resumes_from_its_ledger(repo):
+    """Really SIGKILL a running loop mid-worker, then really resume it.
+
+    Invariant 7: everything is resumable from the ledger. A supervisor that
+    kept state anywhere else could not survive its own death.
+    """
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(RESUMABLE, encoding="utf-8")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "wringer", "run"],
+        cwd=repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    pid_file = repo / "worker.pid"
+    deadline = time.monotonic() + 30
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert pid_file.exists(), "the worker never started"
+
+    # SIGKILL, not SIGINT: the loop gets no chance to write loop.finished.
+    # wait() rather than communicate(), because the orphaned worker still
+    # holds the inherited pipe — waiting for EOF here would hang the test for
+    # the orphan's lifetime, which is the same trap gates._drain exists for.
+    worker_pid = int(pid_file.read_text(encoding="utf-8").strip())
+    proc.send_signal(signal.SIGKILL)
+    proc.wait(timeout=30)
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            stream.close()
+
+    loop_dir = only_loop(repo)
+    recorded = [e["type"] for e in events(repo)]
+    assert "loop.finished" not in recorded, "the kill was too gentle to test this"
+    assert loop.inspect_for_resume(loop_dir) is not None
+
+    (repo / ".wringer.yaml").write_text(
+        RESUMABLE.replace(
+            'worker: "echo $$ > worker.pid; sleep 30"',
+            'worker: "echo FIXED > calc.py"',
+        ),
+        encoding="utf-8",
+    )
+    resumed = subprocess.run(
+        [sys.executable, "-m", "wringer", "resume"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert resumed.returncode == cli.EXIT_OK, resumed.stderr
+
+    after = events(repo)
+    kinds = [e["type"] for e in after]
+    # one resumed marker between the two lives, and a finish this time
+    assert kinds.count("loop.resumed") == 1
+    assert kinds[-1] == "loop.finished"
+    assert result(repo)["status"] == "converged"
+    # numbering continued rather than restarting
+    resumed_event = next(e for e in after if e["type"] == "loop.resumed")
+    iterations = [e["iteration"] for e in after if e["type"] == "iteration.started"]
+    assert iterations == sorted(iterations) and len(set(iterations)) == len(iterations)
+    assert resumed_event["iterations_done"] >= 1
+
+    try:
+        os.kill(worker_pid, 0)
+        os.kill(worker_pid, signal.SIGKILL)  # tidy up if reaping missed it
+    except ProcessLookupError:
+        pass
+
+
+def test_a_finished_loop_is_not_resumable(repo, monkeypatch, capsys):
+    """Converged, stopped, or interrupted by hand — all over. Only a loop
+    that was killed leaves a ledger that simply stops."""
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED calc.py"
+run:
+  worker: "echo FIXED > calc.py"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["run"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert loop.inspect_for_resume(only_loop(repo)) is None
+    assert cli.main(["resume"]) == cli.EXIT_CONFIG
+    assert "nothing to resume" in capsys.readouterr().err
+
+
+def test_resume_rebuilds_the_breakers_memory(tmp_path):
+    """The signatures are on the ledger precisely so a resumed loop does not
+    start blind and re-spend the budget the first life already proved wasted."""
+    loop_dir = tmp_path / "20260731-101500-abcd"
+    loop_dir.mkdir()
+    (loop_dir / loop.EVENTS_FILENAME).write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "loop.started", "ts": "t", "loop_id": loop_dir.name},
+                {"type": "iteration.started", "ts": "t", "iteration": 1},
+                {"type": "verify.finished", "ts": "t", "iteration": 1,
+                 "status": "failed", "failure_signature": "aaa",
+                 "evidence_dir": "x"},
+                {"type": "worker.started", "ts": "t", "iteration": 1,
+                 "command": "c"},
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # the pgid is an operational file, not an event: written the instant the
+    # worker exists so a SIGKILL still leaves something to reap
+    iteration_dir = loop_dir / loop.ITERATIONS_DIRNAME / "001"
+    iteration_dir.mkdir(parents=True)
+    (iteration_dir / loop.PGID_FILENAME).write_text("4242", encoding="utf-8")
+
+    state = loop.inspect_for_resume(loop_dir)
+
+    assert state is not None
+    assert state.iterations_done == 1
+    assert state.seen_signatures == frozenset({"aaa"})
+    assert state.orphan_pgids == (4242,)
+
+
+def test_reaping_never_signals_our_own_process_group():
+    """A pgid of our own group would kill this very process and its parent.
+    The guard is the difference between reaping an orphan and suicide."""
+    import os
+
+    mine = os.getpgid(0)
+
+    assert loop.reap_orphans((mine,)) == []
+    assert loop.reap_orphans((0, 1)) == []
+
+
+def test_a_ledger_truncated_mid_write_is_still_readable(tmp_path):
+    """A SIGKILL can cut a line in half. Every whole line before it is still
+    a fact, and dropping the partial one is the honest recovery."""
+    loop_dir = tmp_path / "20260731-101500-abcd"
+    loop_dir.mkdir()
+    (loop_dir / loop.EVENTS_FILENAME).write_text(
+        json.dumps({"type": "loop.started", "ts": "t", "loop_id": "x"})
+        + "\n"
+        + '{"type": "verify.finished", "iterat',  # killed mid-write
+        encoding="utf-8",
+    )
+
+    state = loop.inspect_for_resume(loop_dir)
+
+    assert state is not None
+    assert state.iterations_done == 0
 
 
 def test_the_signature_is_recorded_for_every_failure(repo, monkeypatch, capsys):

@@ -16,7 +16,8 @@
         "verify.finished",
         "worker.started",
         "worker.finished",
-        "loop.finished"
+        "loop.finished",
+        "loop.resumed"
       ]
     },
     "ts": {
@@ -229,6 +230,37 @@
         "iterations": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    {
+      "title": "loop.resumed",
+      "description": "A killed loop being continued. Its presence is what distinguishes a loop that lived twice from one that ran straight through; the events before it belong to the earlier life.",
+      "required": [
+        "type",
+        "ts",
+        "iterations_done",
+        "reaped_pgids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "loop.resumed"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "iterations_done": {
+          "description": "Iterations completed by the earlier life, read from this ledger.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "reaped_pgids": {
+          "description": "Worker process groups this resume actually managed to kill \u2014 what it did, not what it attempted.",
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
         }
       }
     }

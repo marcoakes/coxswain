@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 from collections.abc import Callable
@@ -37,6 +38,7 @@ MANIFEST_FILENAME = "manifest.json"
 SUMMARY_FILENAME = "summary.md"
 ITERATIONS_DIRNAME = "iterations"
 BRIEF_FILENAME = "brief.md"
+PGID_FILENAME = "worker.pgid"
 
 # The synthetic gate id the worker runs as. Not a gate anyone declared — it
 # just borrows the gate runner's process-group kill, bounded drain, and
@@ -63,10 +65,16 @@ SIGNATURE_TAIL_LINES = 30
 # genuinely different failures would not be, so these stay conservative.
 _NOISE = (
     re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?"),  # timestamps
+    # A bare clock time, which is what most tools actually print. Without
+    # this, two identical failures a second apart hash differently and the
+    # breaker never fires — it only looked correct on a machine fast enough
+    # to run both laps inside the same second.
+    re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\b"),                 # clock times
     re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}"),                            # run ids
     re.compile(r"0x[0-9a-fA-F]+"),                                     # addresses
-    re.compile(r"\b\d+(?:\.\d+)?\s*m?s\b"),                            # durations
+    re.compile(r"\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b"),      # durations
     re.compile(r"/(?:tmp|private/var|var/folders)/\S+"),               # scratch paths
+    re.compile(r"\bpid[= ]\d+\b", re.IGNORECASE),                      # pids
 )
 
 Reporter = Callable[..., None]
@@ -184,6 +192,118 @@ class Bundle:
         (self.directory / MANIFEST_FILENAME).write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
+
+
+@dataclass(frozen=True)
+class Resumable:
+    """What a ledger says about a loop that never finished.
+
+    Rebuilt from `loop.jsonl` alone. A supervisor that held state anywhere
+    else could not survive its own death, which is the point: kill -9 at any
+    moment and the last recorded fact is still the truth.
+    """
+
+    directory: Path
+    loop_id: str
+    iterations_done: int
+    seen_signatures: frozenset[str]
+    started_at: str | None
+    orphan_pgids: tuple[int, ...]
+
+
+def read_events(loop_dir: Path) -> list[dict[str, Any]]:
+    path = loop_dir / EVENTS_FILENAME
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise evidence.EvidenceError(f"cannot read {path}: {exc}") from exc
+    events: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            # A ledger truncated mid-write by a SIGKILL is exactly the case
+            # resume exists for: keep every whole line and drop the partial.
+            break
+    return events
+
+
+def latest_loop(loops_root: Path) -> Path | None:
+    if not loops_root.is_dir():
+        return None
+    found = [p for p in loops_root.iterdir() if p.is_dir()]
+    if not found:
+        return None
+    return max(found, key=evidence._started_at)
+
+
+def inspect_for_resume(loop_dir: Path) -> Resumable | None:
+    """Read a ledger and say whether it describes an unfinished loop.
+
+    A loop with `loop.finished` is over — including one a human interrupted,
+    because they chose to stop it and can choose to start another. Only a
+    ledger that simply *stops* was killed.
+    """
+    events = read_events(loop_dir)
+    if not events:
+        return None
+    if any(e.get("type") == "loop.finished" for e in events):
+        return None
+
+    started = next((e for e in events if e.get("type") == "loop.started"), {})
+    verifies = [e for e in events if e.get("type") == "verify.finished"]
+    return Resumable(
+        directory=loop_dir,
+        loop_id=started.get("loop_id", loop_dir.name),
+        iterations_done=len(verifies),
+        seen_signatures=frozenset(
+            e["failure_signature"] for e in verifies if e.get("failure_signature")
+        ),
+        started_at=started.get("ts"),
+        orphan_pgids=_orphan_pgids(loop_dir),
+    )
+
+
+def _orphan_pgids(loop_dir: Path) -> tuple[int, ...]:
+    """Worker groups this loop left running, from the files it wrote."""
+    found = []
+    for path in sorted((loop_dir / ITERATIONS_DIRNAME).glob(f"*/{PGID_FILENAME}")):
+        try:
+            found.append(int(path.read_text(encoding="utf-8").strip()))
+        except (OSError, ValueError):
+            continue
+    return tuple(found)
+
+
+def reap_orphans(pgids: tuple[int, ...]) -> list[int]:
+    """Try to kill worker groups the dead loop left behind.
+
+    A SIGKILL of the loop cannot signal the worker's process group, so an
+    orphan can outlive it. Resume knows the pgid because `worker.started`
+    recorded it, so it can try — and reports what it managed, because
+    claiming a kill it did not make would be the usual sin.
+    """
+    import signal
+
+    try:
+        mine = os.getpgid(0)
+    except (AttributeError, OSError):  # pragma: no cover - non-POSIX
+        return []
+
+    killed = []
+    for pgid in pgids:
+        if pgid == mine or pgid <= 1:
+            # Never signal our own group: that would kill this very process,
+            # and its parent, and whatever else shares the group.
+            continue
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            killed.append(pgid)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass  # already gone, or never ours to signal
+    return killed
 
 
 def failure_signature(outcome: verify.Outcome) -> str | None:
@@ -306,26 +426,46 @@ def run(
     on_iteration: Reporter | None = None,
     on_gate: verify.GateReporter | None = None,
     on_worker: Reporter | None = None,
+    resuming: Resumable | None = None,
 ) -> Outcome:
     """Drive the loop. `cfg.run` must not be None — the caller checks that,
-    because a missing `run:` section is a config error with its own message."""
+    because a missing `run:` section is a config error with its own message.
+
+    `resuming` continues a loop whose ledger stopped without `loop.finished`:
+    the same directory is appended to, iteration numbering carries on, and
+    the budget resumes with its *remainder* — spent iterations stay spent.
+    """
     assert cfg.run is not None
     settings = cfg.run
     budget = max_iterations if max_iterations is not None else settings.max_iterations
 
     planned = verify.plan(cfg, None)
     redactor = Redactor.from_config(cfg.evidence)
-    bundle = Bundle.create(root / LOOPS_DIRNAME, redactor=redactor)
     state = git.inspect(root)
 
-    bundle.event(
-        "loop.started",
-        loop_id=bundle.loop_id,
-        wringer_version=__version__,
-        repo=root.name,
-        sha=state.head_sha,
-        max_iterations=budget,
-    )
+    if resuming is not None:
+        bundle = Bundle(
+            directory=resuming.directory,
+            loop_id=resuming.loop_id,
+            started_at=datetime.now().astimezone(),
+            redactor=redactor,
+        )
+        killed = reap_orphans(resuming.orphan_pgids)
+        bundle.event(
+            "loop.resumed",
+            iterations_done=resuming.iterations_done,
+            reaped_pgids=list(killed),
+        )
+    else:
+        bundle = Bundle.create(root / LOOPS_DIRNAME, redactor=redactor)
+        bundle.event(
+            "loop.started",
+            loop_id=bundle.loop_id,
+            wringer_version=__version__,
+            repo=root.name,
+            sha=state.head_sha,
+            max_iterations=budget,
+        )
 
     final: verify.Outcome | None = None
     status = reason = "stopped"
@@ -336,14 +476,21 @@ def run(
     # Every failure shape this loop has already seen. Seeing one twice means
     # the worker is going in circles (A→B→A) or standing still (A→A), and
     # either way the gates will keep saying the same thing.
-    seen_signatures: set[str] = set()
+    seen_signatures: set[str] = set(
+        resuming.seen_signatures if resuming is not None else ()
+    )
+    already = resuming.iterations_done if resuming is not None else 0
     deadline = (
         time.monotonic() + settings.wall_clock
         if settings.wall_clock is not None
         else None
     )
 
-    for iteration in range(1, budget + 1):
+    if already >= budget:
+        # Resumed with nothing left to spend: honest, and not an error.
+        iterations = already
+        status, reason = "stopped", "max_iterations"
+    for iteration in range(already + 1, budget + 1):
         iterations = iteration
         if on_iteration is not None:
             on_iteration(iteration, budget)
@@ -385,7 +532,14 @@ def run(
         # editing things that do not touch the failure (A→A). Spending the
         # rest of the budget on it would be the incident of 2026-07-30 in
         # miniature: twenty retries of a failure that was never transient.
-        if signature is not None and signature in seen_signatures:
+        #
+        # Never on the first lap of *this* life. A repeat only means anything
+        # with a worker's turn between the two sightings, and a resumed loop
+        # opens by re-observing a tree no worker has touched since the kill —
+        # which would otherwise trip the breaker before the worker ever ran.
+        if iteration > already + 1 and signature is not None and (
+            signature in seen_signatures
+        ):
             status, reason = "stopped", "oscillating"
             break
         if signature is not None:
@@ -458,13 +612,26 @@ def _run_worker(
     """Run the worker through the gate runner, for its process-group kill,
     its bounded drain, and its scrub-then-cap log writing."""
     directory = bundle.iteration_dir(iteration)
-    return gates.run(
+    pgid_file = directory / PGID_FILENAME
+
+    def remember(pid: int) -> None:
+        # Written the instant the worker exists, so a SIGKILL of this loop
+        # still leaves `wring resume` something to reap. A plain file rather
+        # than an event: it is operational state, not a claim about the run.
+        pgid_file.write_text(str(pid), encoding="utf-8")
+
+    result = gates.run(
         config.Gate(id=WORKER_ID, run=command, timeout=timeout),
         cwd=root,
         stdout_path=directory / "worker.stdout.log",
         stderr_path=directory / "worker.stderr.log",
         redactor=bundle.redactor,
+        on_spawn=remember,
     )
+    # It finished, so there is nothing to reap and a stale pgid could name a
+    # process the OS has since given to somebody else.
+    pgid_file.unlink(missing_ok=True)
+    return result
 
 
 def _brief(outcome: verify.Outcome, root: Path) -> str:
