@@ -159,8 +159,16 @@ class Bundle:
 
     def event(self, event_type: str, **fields: Any) -> None:
         scrubbed = evidence.deep_scrub(self.redactor, fields)
-        line = json.dumps({"type": event_type, "ts": evidence.timestamp(), **scrubbed})
-        with (self.directory / EVENTS_FILENAME).open("a", encoding="utf-8") as stream:
+        path = self.directory / EVENTS_FILENAME
+        line = json.dumps(
+            {
+                "type": event_type,
+                "ts": evidence.timestamp(),
+                "prev_hash": evidence.chain_head(path),
+                **scrubbed,
+            }
+        )
+        with path.open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")
 
     def write_manifest(

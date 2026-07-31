@@ -12,6 +12,7 @@ Nothing here uploads anywhere. Ever.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import shutil
@@ -146,6 +147,37 @@ def _clear_previous(directory: Path) -> None:
         # Not ignore_errors: a gates/ tree we cannot clear would leave last
         # run's verdicts in this run's bundle, and that must be loud.
         shutil.rmtree(previous_gates)
+
+
+GENESIS_HASH = "0" * 64
+
+
+def chain_head(ledger: Path) -> str:
+    """The hash of the last line of a ledger, or the genesis hash if empty.
+
+    Every event carries the hash of the one before it, so a ledger is a
+    chain rather than a list: altering or removing any line breaks every
+    hash after it, and appending a forged line requires rewriting the tail.
+    This is *tamper-evidence*, not tamper-proofing — anyone who can write
+    the file can rewrite the whole chain — but it turns silent edits into
+    detectable ones, and that is the difference between evidence and a log.
+
+    The field is written now and **not yet verified by any command**: adding
+    it while these schemas are unreleased is nearly free, and adding it
+    later would cost a version bump on every bundle in the world.
+    `wring attest` / `wring audit` are the slice that will consume it.
+    """
+    try:
+        with ledger.open("rb") as stream:
+            last = b""
+            for raw in stream:
+                if raw.strip():
+                    last = raw.rstrip(b"\n")
+    except OSError:
+        return GENESIS_HASH
+    if not last:
+        return GENESIS_HASH
+    return hashlib.sha256(last).hexdigest()
 
 
 def deep_scrub(redactor: Redactor, value: Any) -> Any:
@@ -302,10 +334,16 @@ class Bundle:
         `duration_ms` only tells you how long a gate took, not when.
         """
         scrubbed = {key: self._scrub(value) for key, value in fields.items()}
-        line = json.dumps({"type": event_type, "ts": timestamp(), **scrubbed})
-        with (self.directory / EVIDENCE_FILENAME).open(
-            "a", encoding="utf-8"
-        ) as stream:
+        path = self.directory / EVIDENCE_FILENAME
+        line = json.dumps(
+            {
+                "type": event_type,
+                "ts": timestamp(),
+                "prev_hash": chain_head(path),
+                **scrubbed,
+            }
+        )
+        with path.open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")
 
     def _scrub(self, value: Any) -> Any:

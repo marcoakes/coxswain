@@ -6,7 +6,8 @@
   "type": "object",
   "required": [
     "type",
-    "ts"
+    "ts",
+    "prev_hash"
   ],
   "properties": {
     "type": {
@@ -24,6 +25,11 @@
       "description": "Local ISO-8601 with UTC offset, millisecond precision.",
       "type": "string",
       "format": "date-time"
+    },
+    "prev_hash": {
+      "description": "sha256 of the previous whole line in this ledger, or 64 zeros for the first. Every event links to the one before it, so altering or removing a line breaks every hash after it. Tamper-EVIDENCE, not tamper-proofing: anyone who can write the file can rewrite the chain, but silent edits become detectable. Written now; `wring attest` / `wring audit` are the slice that verifies it.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   },
   "oneOf": [
@@ -36,7 +42,8 @@
         "wringer_version",
         "repo",
         "sha",
-        "max_iterations"
+        "max_iterations",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -64,6 +71,9 @@
         "max_iterations": {
           "type": "integer",
           "minimum": 1
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
@@ -72,7 +82,8 @@
       "required": [
         "type",
         "ts",
-        "iteration"
+        "iteration",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -85,6 +96,9 @@
         "iteration": {
           "type": "integer",
           "minimum": 1
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
@@ -96,7 +110,8 @@
         "ts",
         "iteration",
         "status",
-        "evidence_dir"
+        "evidence_dir",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -127,6 +142,9 @@
         "failure_signature": {
           "description": "sha256 of the normalized failure shape. PRESENT ONLY when a gate failed. Seeing the same signature twice in one loop trips the breaker.",
           "type": "string"
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
@@ -137,7 +155,8 @@
         "type",
         "ts",
         "iteration",
-        "command"
+        "command",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -154,6 +173,9 @@
         "command": {
           "description": "The worker command AFTER placeholder substitution, redacted \u2014 what actually ran.",
           "type": "string"
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
@@ -165,7 +187,8 @@
         "ts",
         "iteration",
         "exit_code",
-        "duration_ms"
+        "duration_ms",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -190,6 +213,9 @@
         "timed_out": {
           "description": "PRESENT ONLY when true.",
           "const": true
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
@@ -200,7 +226,8 @@
         "ts",
         "status",
         "reason",
-        "iterations"
+        "iterations",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -230,6 +257,9 @@
         "iterations": {
           "type": "integer",
           "minimum": 0
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
@@ -240,7 +270,8 @@
         "type",
         "ts",
         "iterations_done",
-        "reaped_pgids"
+        "reaped_pgids",
+        "prev_hash"
       ],
       "additionalProperties": false,
       "properties": {
@@ -261,6 +292,9 @@
           "items": {
             "type": "integer"
           }
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     }

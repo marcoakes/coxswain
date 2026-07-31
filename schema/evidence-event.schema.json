@@ -2,9 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/marcoakes/wringer/blob/main/schema/evidence-event.schema.json",
   "title": "Wringer evidence event",
-  "description": "One line of evidence.jsonl. The file is append-only, one JSON object per line, in the order things happened. This schema describes a single line, not the file. Every event carries `type` and `ts`; the rest depends on `type`. Absent optional keys are meaningful — see each description.",
+  "description": "One line of evidence.jsonl. The file is append-only, one JSON object per line, in the order things happened. This schema describes a single line, not the file. Every event carries `type` and `ts`; the rest depends on `type`. Absent optional keys are meaningful \u2014 see each description.",
   "type": "object",
-  "required": ["type", "ts"],
+  "required": [
+    "type",
+    "ts",
+    "prev_hash"
+  ],
   "properties": {
     "type": {
       "enum": [
@@ -19,92 +23,194 @@
       "description": "Local ISO-8601 with UTC offset, millisecond precision. Fine enough to order two fast gates, coarse enough to stay readable.",
       "type": "string",
       "format": "date-time"
+    },
+    "prev_hash": {
+      "description": "sha256 of the previous whole line in this ledger, or 64 zeros for the first. Every event links to the one before it, so altering or removing a line breaks every hash after it. Tamper-EVIDENCE, not tamper-proofing: anyone who can write the file can rewrite the chain, but silent edits become detectable. Written now; `wring attest` / `wring audit` are the slice that verifies it.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   },
   "oneOf": [
     {
       "title": "run.started",
-      "required": ["type", "ts", "run_id", "wringer_version", "repo", "sha"],
+      "required": [
+        "type",
+        "ts",
+        "run_id",
+        "wringer_version",
+        "repo",
+        "sha",
+        "prev_hash"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "run.started" },
-        "ts": { "type": "string" },
-        "run_id": { "type": "string" },
-        "wringer_version": { "type": "string" },
+        "type": {
+          "const": "run.started"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "wringer_version": {
+          "type": "string"
+        },
         "repo": {
           "description": "The repo directory's name, not a path or a URL.",
           "type": "string"
         },
         "sha": {
           "description": "Full HEAD SHA, or null when git could not be read.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
     {
       "title": "git.status",
       "description": "Written before the bundle directory exists, so a run never reports its own evidence as an untracked change.",
-      "required": ["type", "ts", "dirty", "changed_files"],
+      "required": [
+        "type",
+        "ts",
+        "dirty",
+        "changed_files",
+        "prev_hash"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "git.status" },
-        "ts": { "type": "string" },
-        "dirty": { "type": "boolean" },
+        "type": {
+          "const": "git.status"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
         "changed_files": {
           "description": "Repo-relative paths git already tracks. A patch can describe these; diff.patch does.",
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "untracked": {
           "description": "Repo-relative paths git has never seen. PRESENT ONLY when non-empty, so the common case keeps the spec's shape. Absent means none, not unknown.",
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
     {
       "title": "gate.started",
-      "required": ["type", "ts", "gate_id", "command"],
+      "required": [
+        "type",
+        "ts",
+        "gate_id",
+        "command",
+        "prev_hash"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "gate.started" },
-        "ts": { "type": "string" },
-        "gate_id": { "type": "string" },
-        "command": { "type": "string" }
+        "type": {
+          "const": "gate.started"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "gate_id": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "prev_hash": {
+          "type": "string"
+        }
       }
     },
     {
       "title": "gate.finished",
       "description": "A gate.started with no matching gate.finished means the run was interrupted while that gate was running. No verdict is invented for it.",
-      "required": ["type", "ts", "gate_id", "exit_code", "duration_ms"],
+      "required": [
+        "type",
+        "ts",
+        "gate_id",
+        "exit_code",
+        "duration_ms",
+        "prev_hash"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "gate.finished" },
-        "ts": { "type": "string" },
-        "gate_id": { "type": "string" },
-        "exit_code": { "type": "integer" },
-        "duration_ms": { "type": "integer", "minimum": 0 },
+        "type": {
+          "const": "gate.finished"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "gate_id": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
         "log": {
-          "description": "Bundle-relative path to the log a reader is being sent to. PRESENT ONLY for a failing gate — it is a pointer, not an inventory; every gate's logs are on disk and linked from summary.md.",
+          "description": "Bundle-relative path to the log a reader is being sent to. PRESENT ONLY for a failing gate \u2014 it is a pointer, not an inventory; every gate's logs are on disk and linked from summary.md.",
           "type": "string"
         },
         "truncated": {
           "description": "PRESENT ONLY when true. Absent means the logs are whole.",
           "const": true
+        },
+        "prev_hash": {
+          "type": "string"
         }
       }
     },
     {
       "title": "run.finished",
-      "required": ["type", "ts", "status"],
+      "required": [
+        "type",
+        "ts",
+        "status",
+        "prev_hash"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "run.finished" },
-        "ts": { "type": "string" },
-        "status": { "enum": ["passed", "failed", "interrupted"] },
+        "type": {
+          "const": "run.finished"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "interrupted"
+          ]
+        },
         "failed_gate": {
           "description": "PRESENT ONLY when a required gate failed.",
+          "type": "string"
+        },
+        "prev_hash": {
           "type": "string"
         }
       }

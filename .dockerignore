@@ -1,0 +1,47 @@
+# Nothing in this directory is copied into the image — the Dockerfile installs
+# Wringer from PyPI — so the build context exists only to be handed to the
+# builder. Keeping it small keeps builds fast, and keeping evidence bundles
+# and .env files out of it means they are never uploaded anywhere by accident.
+#
+# What is deliberately NOT excluded: pyproject.toml, src/, README.md and
+# LICENSE. If the Dockerfile is ever pointed at the local tree instead of
+# PyPI, a source build needs all four, and an ignore rule is a confusing way
+# to discover that.
+
+# git history and CI definitions
+.git
+.gitignore
+.github
+
+# local environments, caches, build output
+.venv
+venv
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+dist
+build
+
+# evidence bundles: local by design, and they carry captured gate output
+.wringer
+.wringer.example
+
+# secrets
+.env
+.env.*
+
+# tests and scratch — not needed to build or run the image
+tests
+scratch
+tmp
+*.tmp
+*.log
+
+# editor and OS noise
+.DS_Store
+.idea
+.vscode

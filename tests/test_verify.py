@@ -69,8 +69,13 @@ def of_type(recorded: list[dict], event_type: str) -> list[dict]:
 
 
 def bare(event: dict) -> dict:
-    """An event without its timestamp, for exact-shape assertions."""
-    return {key: value for key, value in event.items() if key != "ts"}
+    """Drop the fields that differ every run — the timestamp and the hash
+    chain link — so a test can assert the shape that carries meaning."""
+    return {
+        key: value
+        for key, value in event.items()
+        if key not in ("ts", "prev_hash")
+    }
 
 
 def manifest(bundle: Path) -> dict:

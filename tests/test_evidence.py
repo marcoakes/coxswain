@@ -161,6 +161,54 @@ def test_at_clears_what_the_previous_run_left(tmp_path: Path):
     assert mine.read_text(encoding="utf-8") == "the caller's own file"
 
 
+def test_the_ledger_is_a_chain_not_a_list(tmp_path: Path):
+    """Each line carries the hash of the whole line before it, so the order
+    is cryptographically fixed rather than merely written down."""
+    import hashlib
+
+    bundle = evidence.Bundle.create(tmp_path, now=NOW)
+    for n in range(4):
+        bundle.event("gate.finished", gate_id=f"g{n}", exit_code=0, duration_ms=n)
+
+    lines = (
+        (bundle.directory / evidence.EVIDENCE_FILENAME)
+        .read_bytes()
+        .splitlines()
+    )
+    events = [json.loads(line) for line in lines]
+
+    assert events[0]["prev_hash"] == evidence.GENESIS_HASH
+    for previous, event in zip(lines, events[1:], strict=False):
+        assert event["prev_hash"] == hashlib.sha256(previous).hexdigest()
+
+
+def test_an_edited_ledger_breaks_its_chain(tmp_path: Path):
+    """The whole point: a silent edit stops being silent. This is what
+    `wring audit` will one day check — the field is written now because
+    adding it later would cost a version bump on every bundle in the world.
+    """
+    import hashlib
+
+    bundle = evidence.Bundle.create(tmp_path, now=NOW)
+    bundle.event("gate.finished", gate_id="honest", exit_code=1, duration_ms=1)
+    bundle.event("run.finished", status="failed", failed_gate="honest")
+
+    ledger = bundle.directory / evidence.EVIDENCE_FILENAME
+    lines = ledger.read_bytes().splitlines()
+    # someone rewrites history: the failure becomes a pass
+    lines[0] = lines[0].replace(b'"exit_code": 1', b'"exit_code": 0')
+    ledger.write_bytes(b"\n".join(lines) + b"\n")
+
+    events = [json.loads(line) for line in ledger.read_bytes().splitlines()]
+    recomputed = hashlib.sha256(ledger.read_bytes().splitlines()[0]).hexdigest()
+
+    assert events[1]["prev_hash"] != recomputed, "the tamper went undetected"
+
+
+def test_the_chain_head_of_an_absent_ledger_is_genesis(tmp_path: Path):
+    assert evidence.chain_head(tmp_path / "nothing.jsonl") == evidence.GENESIS_HASH
+
+
 def test_gate_dir_is_named_for_the_declared_position(tmp_path: Path):
     bundle = evidence.Bundle.create(tmp_path, now=NOW)
 
@@ -184,6 +232,7 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
     )
     recorded = [json.loads(line) for line in lines]
     stamps = [event.pop("ts") for event in recorded]
+    chain = [event.pop("prev_hash") for event in recorded]
     assert recorded == [
         {"type": "run.started", "run_id": bundle.run_id, "sha": None},
         {
@@ -193,6 +242,10 @@ def test_events_append_one_json_object_per_line(tmp_path: Path):
             "duration_ms": 9231,
         },
     ]
+    # the chain links each line to the one before it: the first is genesis,
+    # and each later link is the sha256 of the previous whole line
+    assert chain[0] == evidence.GENESIS_HASH
+    assert len(set(chain)) == len(chain)
     # every event is placeable in time, and in order
     parsed = [datetime.fromisoformat(stamp) for stamp in stamps]
     assert all(stamp.tzinfo is not None for stamp in parsed)
