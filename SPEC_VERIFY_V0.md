@@ -244,8 +244,9 @@ wringer/
 
 **Do not tag `v0.1.0` until every line is true:**
 
-- [ ] `pipx install wringer` works — *awaiting the PyPI publish; installing
-      from git works today and is documented in the quickstart*
+- [x] `pipx install wringer` works — **published to PyPI 2026-07-31**;
+      verified by installing `wringer==0.1.0` from PyPI into a clean venv and
+      running `wring init` → `wring verify` to a green run and a real bundle
 - [x] `wring init` works in an empty-ish Python repo — detects ruff/pytest/
       mypy from `pyproject.toml`, npm scripts, and Makefile targets
 - [x] `wring verify` runs at least two gates
