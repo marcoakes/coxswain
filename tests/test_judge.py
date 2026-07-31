@@ -1,7 +1,8 @@
 """`wring judge` — the rubric judge, dry-run (SPEC_JUDGE_V0.md).
 
-No test here opens a socket, and none needs an API key: the transport is the
-one function this slice does not ship, and `--send` refuses until it does.
+No test here opens a socket, and none needs an API key: the transport is a
+single stdlib call behind one function, and faking it is the difference
+between a suite that runs anywhere and one that needs an endpoint and a key.
 """
 
 from __future__ import annotations
@@ -36,6 +37,10 @@ judge:
   model: cheap-model
   rubric: rubric.yaml
 """
+
+
+def reply(content: str) -> dict:
+    return {"choices": [{"message": {"content": content}}]}
 
 
 def setup_repo(repo: Path, gate: str = '"true"') -> None:
@@ -97,15 +102,115 @@ def test_a_bundle_whose_gates_failed_is_refused(repo, monkeypatch, capsys):
     assert not (repo / judge.VERDICTS_DIRNAME).exists()
 
 
-def test_send_refuses_until_the_transport_ships(repo, monkeypatch, capsys):
+def fake_transport(monkeypatch, reply=None, fail=None):
+    """Stand in for the one function that opens a socket.
+
+    No test in this suite touches a network: the transport is a single
+    stdlib call, and faking it is the difference between a suite that runs
+    anywhere and one that needs an endpoint and a key.
+    """
+    sent = {}
+
+    def fake_send(request, endpoint, timeout, api_key):
+        sent.update(
+            request=request, endpoint=endpoint, timeout=timeout, api_key=api_key
+        )
+        if fail is not None:
+            raise judge.TransportFailed(fail)
+        return reply
+
+    monkeypatch.setattr(judge, "send", fake_send)
+    return sent
+
+
+def test_send_produces_a_verdict_from_the_reply(repo, monkeypatch, capsys):
     setup_repo(repo)
     monkeypatch.chdir(repo)
     assert cli.main(["verify"]) == cli.EXIT_OK
     capsys.readouterr()
 
-    assert cli.main(["judge", "--send"]) == cli.EXIT_CONFIG
+    sent = fake_transport(
+        monkeypatch,
+        reply=reply(json.dumps({"criteria": [
+            {"id": "docstring-present", "met": True, "reason": "present"},
+            {"id": "no-scope-creep", "met": True, "reason": "tight"},
+        ]})),
+    )
 
-    assert "not enabled yet" in capsys.readouterr().err
+    assert cli.main(["judge", "--send"]) == cli.EXIT_OK
+
+    assert sent["endpoint"].endswith("/v1/chat/completions")
+    recorded = verdict_json(repo)
+    assert recorded["mode"] == "live"
+    assert recorded["verdict"] == judge.PASS
+    # the raw reply is kept beside the request, so both halves are auditable
+    assert (only_verdict(repo) / judge.RESPONSE_FILENAME).is_file()
+
+
+def test_a_failing_criterion_exits_one(repo, monkeypatch, capsys):
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    fake_transport(
+        monkeypatch,
+        reply=reply(json.dumps({"criteria": [
+            {"id": "docstring-present", "met": False, "reason": "none"},
+            {"id": "no-scope-creep", "met": True, "reason": "tight"},
+        ]})),
+    )
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_GATE_FAILED
+
+    assert verdict_json(repo)["verdict"] == judge.FAIL
+
+
+def test_an_unreachable_endpoint_is_needs_human_not_fail(repo, monkeypatch, capsys):
+    """A transport failure is not a verdict. Exit 5, and the bundle says why."""
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    fake_transport(monkeypatch, fail="connection refused")
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_NEEDS_HUMAN
+
+    recorded = verdict_json(repo)
+    assert recorded["verdict"] == judge.NEEDS_HUMAN
+    assert "connection refused" in recorded["note"]
+    # nothing came back, so nothing is claimed to have
+    assert not (only_verdict(repo) / judge.RESPONSE_FILENAME).exists()
+    # ...but the request that would have been sent is still on disk
+    assert (only_verdict(repo) / judge.REQUEST_FILENAME).is_file()
+
+
+def test_the_api_key_is_passed_to_the_transport_but_not_written_down(
+    repo, monkeypatch, capsys
+):
+    secret = "sk-hushhush12345"
+    (repo / "rubric.yaml").write_text(RUBRIC, encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        CONFIG.rstrip() + "\n  api_key_env: JUDGE_KEY\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("JUDGE_KEY", secret)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    sent = fake_transport(
+        monkeypatch,
+        reply=reply(json.dumps({"criteria": [
+            {"id": "docstring-present", "met": True, "reason": "ok"},
+            {"id": "no-scope-creep", "met": True, "reason": "ok"},
+        ]})),
+    )
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_OK
+
+    # the transport gets the real key...
+    assert sent["api_key"] == secret
+    # ...and no artifact does
+    for name in (judge.REQUEST_FILENAME, judge.VERDICT_FILENAME):
+        assert secret not in (only_verdict(repo) / name).read_text(encoding="utf-8")
 
 
 def test_a_repo_without_a_judge_section_cannot_reach_a_network(
@@ -203,10 +308,6 @@ def test_the_packet_has_no_field_that_could_carry_a_worker(repo):
 def loaded_rubric(tmp_path: Path) -> rubric.Rubric:
     (tmp_path / "rubric.yaml").write_text(RUBRIC, encoding="utf-8")
     return rubric.load(Path("rubric.yaml"), tmp_path)
-
-
-def reply(content: str) -> dict:
-    return {"choices": [{"message": {"content": content}}]}
 
 
 def test_a_clean_reply_passes(tmp_path):

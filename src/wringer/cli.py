@@ -680,11 +680,15 @@ def cmd_judge(args: argparse.Namespace) -> int:
                 cfg.judge.timeout,
                 os.environ.get(cfg.judge.api_key_env or ""),
             )
-        except judge.TransportUnavailable as exc:
-            print(f"wring judge: {exc}", file=sys.stderr)
-            return EXIT_CONFIG
-        bundle.write_response(body)
-        verdict = judge.parse_response(body, loaded)
+        except judge.TransportFailed as exc:
+            # Unreachable is not a verdict. Record it and say so.
+            verdict = judge.Verdict(
+                judge.NEEDS_HUMAN, note=f"the endpoint could not be used: {exc}"
+            )
+            body = None
+        else:
+            bundle.write_response(body)
+            verdict = judge.parse_response(body, loaded)
 
     duration_ms = int((time.monotonic() - started) * 1000)
     shown = _relative(run_dir, root)

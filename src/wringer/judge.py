@@ -12,10 +12,10 @@ it could travel. `Packet` below is the type-level expression of that: a
 frozen dataclass with a fixed field set, and no field that could carry a
 loop, a brief, or a worker log.
 
-**Dry run is the default.** Nothing here opens a socket; `request.json` is
-written before a transport is ever consulted, so what would leave the
-machine is auditable rather than asserted, and `--send` is the same code
-path continuing one step further.
+**Dry run is the default.** `request.json` is written before the transport
+is ever consulted, so what leaves the machine is auditable rather than
+asserted, and `--send` is the same code path continuing one step further.
+`send()` below is the only function in Wringer that opens a socket.
 """
 
 from __future__ import annotations
@@ -49,8 +49,12 @@ class JudgeError(Exception):
     """The judgment could not be made (CLI exit code 2)."""
 
 
-class TransportUnavailable(Exception):
-    """`--send` was asked for before the transport exists (J2)."""
+class TransportFailed(Exception):
+    """The endpoint could not be reached, or did not answer usefully.
+
+    Never a verdict: the caller turns this into `needs_human`, because
+    "nothing competent looked at the evidence" is not "the evidence says no".
+    """
 
 
 @dataclass(frozen=True)
@@ -243,16 +247,48 @@ def _strip_fences(text: str) -> str:
 
 
 def send(request: dict, endpoint: str, timeout: int, api_key: str | None) -> dict:
-    """Post the request. **Not enabled in this slice** (J2).
+    """Post the request and return the parsed reply.
 
-    Deliberately the only function in the program that would open a socket,
-    so that `grep -n 'urlopen' src/` has exactly one answer when it exists.
+    **The only function in Wringer that opens a socket** — deliberately, so
+    that `grep -rn urlopen src/` has exactly one answer. It is reached only
+    from `wring judge --send`, only when a repo declared an endpoint, and
+    only after `request.json` is already on disk.
+
+    Redirects are not followed: a redirect could move a diff to a host the
+    repo never declared, and the endpoint safety rules were checked against
+    the URL that was written down.
     """
-    raise TransportUnavailable(
-        "wring judge --send is not enabled yet: this build ships the judge "
-        "dry-run only. Everything except the transport is complete — run "
-        "without --send to build and inspect the exact request."
+    import urllib.error
+    import urllib.request
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    posted = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request).encode("utf-8"),
+        headers=headers,
+        method="POST",
     )
+
+    class _NoRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirects)
+    try:
+        with opener.open(posted, timeout=timeout) as reply:
+            body = reply.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        # A transport failure is not a verdict. The caller turns this into
+        # needs_human, never fail.
+        raise TransportFailed(str(exc)) from exc
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise TransportFailed(f"the endpoint did not return JSON: {exc}") from exc
 
 
 @dataclass(frozen=True)
