@@ -275,3 +275,21 @@ repository on the host, since the mount is live. `manifest.json`,
 `.wringer/` is gitignored by the template `wring init` writes. Keep it that
 way, and keep reading a bundle before you attach it to a public issue — a
 container changes neither of those.
+
+## Linux: run as your own user
+
+A bind-mounted directory keeps its **host** ownership inside the container,
+and Wringer writes its evidence bundle into that mount. The image runs as a
+non-root user (uid 1000), so on Linux — where uids are not remapped — a
+workspace owned by any other uid is read-only to Wringer, and `wring doctor`
+will tell you so rather than failing later and mysteriously:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$PWD:/workspace" ghcr.io/marcoakes/wringer:main verify
+```
+
+Docker Desktop on macOS and Apple's `container` map ownership for you, so
+this flag is harmless there and unnecessary. When in doubt, run
+`wring doctor` first — the workspace check exists precisely for this.
+

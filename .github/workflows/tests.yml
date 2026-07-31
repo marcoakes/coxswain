@@ -82,10 +82,20 @@ jobs:
           printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml
           git add -A && git commit -qm probe
 
+          # --user matters and is not CI ceremony: the image runs as uid
+          # 1000, a bind-mounted directory keeps its HOST ownership, and
+          # Wringer must WRITE its evidence into that mount. Without this the
+          # workspace is read-only to the container and `wring doctor`
+          # correctly reports a blocking problem. Docker Desktop on macOS
+          # papers over this with uid mapping; Linux does not, so this is the
+          # documented Linux recipe, exercised rather than asserted.
+          RUN_IN="docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp \
+            -v /tmp/probe:/workspace wringer:ci"
+
           # ENTRYPOINT is `wring`, so the subcommand is the whole argument.
-          docker run --rm -v /tmp/probe:/workspace wringer:ci --version
-          docker run --rm -v /tmp/probe:/workspace wringer:ci doctor
-          docker run --rm -v /tmp/probe:/workspace wringer:ci verify
+          $RUN_IN --version
+          $RUN_IN doctor
+          $RUN_IN verify
           test -d /tmp/probe/.wringer/runs || {
             echo "the container produced no evidence bundle"; exit 1; }
           echo "the image verified a repo and left a bundle on the host"
