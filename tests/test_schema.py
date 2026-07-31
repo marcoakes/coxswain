@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from wringer import cli, evidence, gates, loop
+from wringer import cli, evidence, gates, loop, spec
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schema"
 
@@ -329,3 +329,103 @@ run:
             errors.append(f"{event['type']}: {error.message}")
 
     assert not errors, "\n".join(errors)
+
+
+# --- the spec and the rubric (SPEC_INTENT_V0.md) ---
+#
+# These two are not evidence — they are source, committed and hand-edited —
+# but the same rule applies: a published schema that stops describing what the
+# code writes is worse than no schema, because someone targeted it.
+
+SPEC_CONFIG = """\
+version: 1
+gates:
+  - id: check
+    run: "true"
+judge:
+  endpoint: http://127.0.0.1:11434/v1/chat/completions
+  model: cheap-model
+  rubric: wringer.rubric.yaml
+"""
+
+
+def draft_and_plan(repo: Path, monkeypatch) -> None:
+    """Run the real commands: `wring spec --send` then `wring plan`."""
+    from test_spec import DRAFT, PRD, reply
+
+    from wringer import judge
+
+    (repo / "PRD.md").write_text(PRD, encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(SPEC_CONFIG, encoding="utf-8")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        judge, "send", lambda *args, **kwargs: reply(DRAFT)
+    )
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_OK
+    # approval is a file edit, here as everywhere
+    path = repo / spec.SPEC_FILENAME
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("approved: false", "approved: true"),
+        encoding="utf-8",
+    )
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "answer: ''", "answer: ISO-8601.", 1
+        ),
+        encoding="utf-8",
+    )
+    assert cli.main(["plan"]) == cli.EXIT_OK
+
+
+def test_a_drafted_spec_and_its_rubric_match_the_published_schemas(
+    repo, monkeypatch, capsys
+):
+    import yaml
+
+    draft_and_plan(repo, monkeypatch)
+    capsys.readouterr()
+
+    check(
+        yaml.safe_load((repo / spec.SPEC_FILENAME).read_text(encoding="utf-8")),
+        load("spec.schema.json"),
+        spec.SPEC_FILENAME,
+    )
+    check(
+        yaml.safe_load((repo / spec.RUBRIC_FILENAME).read_text(encoding="utf-8")),
+        load("rubric.schema.json"),
+        spec.RUBRIC_FILENAME,
+    )
+
+
+def test_a_real_spec_validates_against_the_real_engine(repo, monkeypatch, capsys):
+    import yaml
+
+    built = validators()
+    draft_and_plan(repo, monkeypatch)
+    capsys.readouterr()
+
+    errors: list[str] = []
+    for name, filename in (
+        ("spec.schema.json", spec.SPEC_FILENAME),
+        ("rubric.schema.json", spec.RUBRIC_FILENAME),
+    ):
+        document = yaml.safe_load((repo / filename).read_text(encoding="utf-8"))
+        for error in built[name].iter_errors(document):
+            errors.append(f"{filename}: {error.json_path} {error.message}")
+
+    assert not errors, "\n".join(errors)
+    # the drafted spec really exercised the optional blocks, or this test
+    # proves less than it looks like it does
+    document = yaml.safe_load((repo / spec.SPEC_FILENAME).read_text("utf-8"))
+    assert document["open_questions"] and document["gates"]
+    assert any(c["human"] for c in document["criteria"])
+
+
+def test_the_two_schemas_describe_one_criterion(monkeypatch):
+    """The spec's criteria block IS a rubric's. Inlined in both files so
+    neither needs a network fetch to resolve, so a test has to hold them
+    together."""
+    in_rubric = load("rubric.schema.json")["properties"]["criteria"]["items"]
+    in_spec = load("spec.schema.json")["properties"]["criteria"]["items"]
+
+    assert in_rubric == in_spec

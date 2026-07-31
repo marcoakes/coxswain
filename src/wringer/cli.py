@@ -27,6 +27,7 @@ from wringer import (
     loop,
     redact,
     rubric,
+    spec,
     summary,
     verify,
 )
@@ -172,6 +173,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_judge.set_defaults(func=cmd_judge)
+
+    parser_spec = subparsers.add_parser(
+        "spec",
+        help="draft a build spec from a PRD — a file you approve by hand",
+    )
+    parser_spec.add_argument(
+        "prd",
+        metavar="PRD",
+        help="a plain-language requirements document inside this repository",
+    )
+    parser_spec.add_argument(
+        "--send",
+        action="store_true",
+        help=(
+            "actually contact the endpoint. Without it, the request is built "
+            "and written but nothing is sent and nothing is drafted."
+        ),
+    )
+    parser_spec.add_argument(
+        "--print-request",
+        action="store_true",
+        help="write the exact would-be request body to stdout and exit",
+    )
+    parser_spec.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_spec.set_defaults(func=cmd_spec)
+
+    parser_plan = subparsers.add_parser(
+        "plan",
+        help=f"compile an approved {spec.SPEC_FILENAME} into fleet tasks",
+    )
+    parser_plan.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_plan.set_defaults(func=cmd_plan)
 
     parser_doctor = subparsers.add_parser(
         "doctor",
@@ -787,6 +828,337 @@ def _report_judge(
     if verdict.note:
         print(f"  {verdict.note}")
     print(f"\nJudgment written to:\n{_relative(bundle.directory, root)}/")
+
+
+def cmd_spec(args: argparse.Namespace) -> int:
+    """Draft a build spec from a PRD (SPEC_INTENT_V0.md).
+
+    Dry run by default, like the judge and for the judge's reason: the exact
+    bytes are on disk before any socket opens. Nothing here touches git and
+    nothing here runs a gate — this command reads one file and writes another.
+    """
+    root = git.find_root(Path.cwd())
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring spec: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.judge is None:
+        print(
+            f"wring spec: no 'judge:' section in {config.CONFIG_FILENAME} — "
+            "drafting reuses the judge's endpoint, model and key rules, so "
+            "that one network config is the only one. Add it:\n\n"
+            "  judge:\n"
+            "    endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+            "    model: qwen2.5-coder:7b\n"
+            f"    rubric: {spec.RUBRIC_FILENAME}",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    try:
+        prd = spec.read_prd(Path(args.prd), root)
+    except spec.SpecError as exc:
+        print(f"wring spec: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    target = root / spec.SPEC_FILENAME
+    if args.send and target.exists():
+        print(
+            f"wring spec: refusing to overwrite {spec.SPEC_FILENAME} — it may "
+            "already carry your approval and your answers. Move or delete it "
+            "if you want a fresh draft.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    request = spec.render_request(
+        prd, cfg.judge.model, cfg.judge.max_output_tokens
+    )
+    if args.print_request:
+        print(json.dumps(request, indent=2))
+        return EXIT_OK
+
+    # Checked only when a request will really be sent: a dry run needs no
+    # credential, and refusing one for a key it never uses would be theatre.
+    if (
+        args.send
+        and cfg.judge.api_key_env
+        and os.environ.get(cfg.judge.api_key_env) is None
+    ):
+        print(
+            f"wring spec: 'judge.api_key_env' names {cfg.judge.api_key_env}, "
+            "which is not set in this environment",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
+        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
+    ))
+    try:
+        bundle = spec.Bundle.create(root / spec.SPECS_DIRNAME, redactor=redactor)
+    except spec.SpecError as exc:
+        print(f"wring spec: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    bundle.write_request(request)
+
+    mode = "live" if args.send else "dry_run"
+    drafted: spec.Spec | None = None
+    if args.send:
+        try:
+            body = judge.send(
+                request,
+                cfg.judge.endpoint,
+                cfg.judge.timeout,
+                os.environ.get(cfg.judge.api_key_env or ""),
+            )
+        except judge.TransportFailed as exc:
+            bundle.write_summary(
+                mode, args.prd, cfg.judge.endpoint, cfg.judge.model, None
+            )
+            print(
+                f"wring spec: the endpoint could not be used: {exc}. The "
+                f"request is on disk at "
+                f"{_relative(bundle.directory, root)}/{spec.REQUEST_FILENAME}.",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+
+        bundle.write_response(body)
+        try:
+            drafted = spec.parse_response(body, prd)
+        except spec.SpecError as exc:
+            bundle.write_summary(
+                mode, args.prd, cfg.judge.endpoint, cfg.judge.model, None
+            )
+            print(
+                f"wring spec: {exc}. The reply is on disk at "
+                f"{_relative(bundle.directory, root)}/{spec.RESPONSE_FILENAME}.",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+
+        # Written only now, once the whole document has been through the same
+        # parsers the file itself will face: a half-written spec is worse than
+        # no spec, because a half-written one gets approved.
+        target.write_text(spec.render(drafted), encoding="utf-8")
+
+    bundle.write_summary(
+        mode, args.prd, cfg.judge.endpoint, cfg.judge.model, drafted
+    )
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "mode": mode,
+                    "spec": spec.SPEC_FILENAME if drafted else None,
+                    "approved": drafted.approved if drafted else None,
+                    "criteria": len(drafted.criteria) if drafted else 0,
+                    "gates": len(drafted.gates) if drafted else 0,
+                    "tasks": len(drafted.tasks) if drafted else 0,
+                    "open_questions": len(drafted.questions) if drafted else 0,
+                    "spec_dir": _relative(bundle.directory, root),
+                }
+            )
+        )
+    else:
+        _report_spec(drafted, bundle, root)
+    return EXIT_OK
+
+
+def _report_spec(
+    drafted: spec.Spec | None, bundle: spec.Bundle, root: Path
+) -> None:
+    if drafted is None:
+        print("dry run — the request was built and written; nothing was sent.")
+        print(f"\nRequest written to:\n{_relative(bundle.directory, root)}/")
+        print("\nWhen you are ready:\n  wring spec <PRD> --send")
+        return
+
+    unresolved = sum(1 for q in drafted.questions if q.required and not q.answered)
+    scored_by_hand = sum(1 for c in drafted.criteria if c.human)
+    print(f"Drafted {spec.SPEC_FILENAME} — {drafted.title}")
+    print(
+        f"  {len(drafted.criteria)} criteria"
+        + (f" ({scored_by_hand} need a human)" if scored_by_hand else "")
+        + f" · {len(drafted.gates)} proposed gates · {len(drafted.tasks)} tasks"
+    )
+    if unresolved:
+        print(
+            f"  {unresolved} required question"
+            f"{'' if unresolved == 1 else 's'} it could not answer for you"
+        )
+    print("\n  approved: false   ← nothing runs until you change this by hand")
+    print(f"\nNext:\n  read {spec.SPEC_FILENAME}, answer its open questions,")
+    print("  set 'approved: true', then run: wring plan")
+    print(f"\nDraft evidence: {_relative(bundle.directory, root)}/")
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    """Compile an approved spec into work (SPEC_INTENT_V0.md §4).
+
+    Runs nothing. Writes `tasks.jsonl`, the brief files and the rubric, prints
+    the gate change it would like `.wringer.yaml` to have, and stops.
+    """
+    root = git.find_root(Path.cwd())
+
+    try:
+        loaded = spec.load(root / spec.SPEC_FILENAME)
+    except spec.SpecError as exc:
+        print(f"wring plan: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if not loaded.approved:
+        print(
+            f"wring plan: {spec.SPEC_FILENAME} says 'approved: false', so "
+            "nothing was written.\n\nRead the file, then set 'approved: true' "
+            "in it by hand. There is deliberately no --yes: the whole point of "
+            "this step is that a person read what is about to be built.",
+            file=sys.stderr,
+        )
+        return EXIT_GATE_FAILED
+
+    if loaded.unanswered:
+        print(
+            f"wring plan: {len(loaded.unanswered)} required question"
+            f"{'' if len(loaded.unanswered) == 1 else 's'} in "
+            f"{spec.SPEC_FILENAME} "
+            f"{'is' if len(loaded.unanswered) == 1 else 'are'} unanswered:",
+            file=sys.stderr,
+        )
+        for question in loaded.unanswered:
+            print(f"  - {question.id}: {question.question}", file=sys.stderr)
+        print(
+            "\nWrite an 'answer:' under each, or delete the question if it no "
+            "longer matters. Building on an assumption is how the wrong thing "
+            "gets built confidently.",
+            file=sys.stderr,
+        )
+        return EXIT_GATE_FAILED
+
+    # Everything is checked before anything is written: a plan that half-ran
+    # leaves a tasks file describing briefs that do not exist.
+    try:
+        writes, brief_paths = _plan_writes(loaded, root)
+    except spec.SpecError as exc:
+        print(f"wring plan: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    for path, body in writes:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    existing = root / config.CONFIG_FILENAME
+    diff, fresh, already = spec.gate_diff(
+        existing.read_text(encoding="utf-8") if existing.is_file() else "", loaded
+    )
+
+    briefs = [_relative(path, root) for path in brief_paths]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "tasks_file": spec.TASKS_FILENAME,
+                    "tasks": [t.id for t in loaded.tasks],
+                    "briefs": briefs,
+                    "rubric": spec.RUBRIC_FILENAME,
+                    "gates_proposed": list(fresh),
+                    "gates_already_declared": list(already),
+                    "gate_diff": diff,
+                }
+            )
+        )
+    else:
+        _report_plan(loaded, briefs, diff, fresh, already)
+    return EXIT_OK
+
+
+def _plan_writes(
+    loaded: spec.Spec, root: Path
+) -> tuple[list[tuple[Path, str]], list[Path]]:
+    """Every file `wring plan` would write, or an error and no files at all.
+
+    Returns (all writes, the brief paths among them). Nothing reaches the disk
+    until every check has passed: a plan that half-ran leaves a task file
+    describing briefs that do not exist.
+    """
+    rubric_text = spec.render_rubric(loaded)
+    # Prove it is a rubric before writing it, with the judge's own parser.
+    # "No translation layer" is a claim, and this is the check behind it.
+    spec.validate_rubric_text(rubric_text)
+
+    tasks_path = root / spec.TASKS_FILENAME
+    if not spec.tasks_file_is_generated(tasks_path):
+        raise spec.SpecError(
+            f"{spec.TASKS_FILENAME} exists and is not a task file — refusing to "
+            "overwrite it"
+        )
+
+    writes: list[tuple[Path, str]] = [
+        (tasks_path, spec.render_tasks(loaded)),
+        (root / spec.RUBRIC_FILENAME, rubric_text),
+    ]
+    brief_paths: list[Path] = []
+    for task in loaded.tasks:
+        where = f"{spec.SPEC_FILENAME}: task '{task.id}'"
+        directory = spec.resolve_inside(root, task.dir, f"{where}: 'dir'")
+        if not directory.is_dir():
+            raise spec.SpecError(
+                f"{where} names dir '{task.dir}', which does not exist — the "
+                "fleet would park it"
+            )
+        brief_path = spec.resolve_inside(root, task.brief, f"{where}: 'brief'")
+        if not spec.brief_is_generated(brief_path):
+            raise spec.SpecError(
+                f"{where} would overwrite {task.brief}, which `wring plan` did "
+                "not write — rename the brief in the spec"
+            )
+        writes.append((brief_path, spec.render_brief(loaded, task)))
+        brief_paths.append(brief_path)
+    return writes, brief_paths
+
+
+def _report_plan(
+    loaded: spec.Spec,
+    briefs: list[str],
+    diff: str,
+    fresh: tuple[str, ...],
+    already: tuple[str, ...],
+) -> None:
+    count = len(loaded.tasks)
+    print(f"Wrote {spec.TASKS_FILENAME} — {count} task{'' if count == 1 else 's'}.")
+    print(f"Wrote {len(briefs)} brief{'' if len(briefs) == 1 else 's'}: "
+          f"{', '.join(briefs)}")
+    scored_by_hand = sum(1 for c in loaded.criteria if c.human)
+    print(
+        f"Wrote {spec.RUBRIC_FILENAME} — {len(loaded.criteria)} criteria"
+        + (f" ({scored_by_hand} need a human)" if scored_by_hand else "")
+        + "."
+    )
+
+    if diff:
+        print(
+            f"\nProposed gates ({', '.join(fresh)}). Wringer does not install "
+            "these — changing what 'verified' means is yours to do:\n"
+        )
+        print(diff.rstrip())
+    if already:
+        print(
+            f"\nAlready declared, so not proposed: {', '.join(already)}. Check "
+            f"they run what the spec meant."
+        )
+    if not diff and not already:
+        print(f"\nNo gates proposed; {config.CONFIG_FILENAME} is unchanged.")
+
+    print(
+        f"\nNext:\n  point 'judge.rubric:' at {spec.RUBRIC_FILENAME}\n"
+        f"  wring fleet {spec.TASKS_FILENAME}"
+    )
 
 
 def _refuse_unverifiable(root: Path, command: str) -> int | None:

@@ -13,6 +13,7 @@ rather than reverse-engineer it — the point of
 | [`loop-manifest.schema.json`](loop-manifest.schema.json) | `manifest.json` of a `wring run` loop bundle |
 | [`loop-event.schema.json`](loop-event.schema.json) | **one line** of a loop's `loop.jsonl` |
 | [`rubric.schema.json`](rubric.schema.json) | `wringer.rubric.v1` — the acceptance criteria `wring judge` weighs a bundle against |
+| [`spec.schema.json`](spec.schema.json) | `wringer.spec.v1` — `wringer.spec.yaml`, what `wring spec` drafts and a human approves |
 
 The loop schemas carry their own version, **`wringer.loop.v1`**, moving
 independently of the evidence bundle: a loop *references* the runs it drove
@@ -75,8 +76,15 @@ a schema that is itself malformed or a value that breaks a pattern. That
 engine is a **dev-only** dependency — the runtime install is still PyYAML and
 nothing else — and it does run in CI.
 
-The rubric is not evidence; it is source, committed and hand-edited. Its
-schema is published for the same reason as the others: so a tool can target
-the format instead of reverse-engineering it. `human: true` there is the one
-field with a safety meaning — a criterion carrying it is never sent to a
-judge, and comes back unscored rather than guessed at.
+The rubric and the spec are not evidence; they are source, committed and
+hand-edited. Their schemas are published for the same reason as the others: so
+a tool can target the format instead of reverse-engineering it. Two fields in
+them carry a safety meaning rather than a shape:
+
+- **`human: true`** on a criterion — it is never sent to a judge, and comes
+  back unscored rather than guessed at.
+- **`approved`** on a spec — the interlock. `wring plan` refuses while it is
+  false, it is required rather than defaulted so omission is not consent, and
+  nothing but a person editing the file may set it. A tool that writes a spec
+  and sets this true has not implemented the format; it has removed the only
+  thing the format is for.

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/spec.schema.json",
+  "title": "Wringer build spec",
+  "description": "`wringer.spec.yaml` — what `wring spec` drafts from a PRD and a human approves before anything runs. Source, not evidence: it is committed, and the human edits it. `wring plan` re-reads it from disk every time.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "approved",
+    "title",
+    "intent",
+    "criteria",
+    "tasks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.spec.v1"
+    },
+    "approved": {
+      "description": "THE INTERLOCK. `wring plan` refuses while this is false. Always drafted false; only a person editing the file may make it true — no flag, no environment variable, and no model reply can. Required rather than defaulted, so a spec that forgot to say is not approved by omission.",
+      "type": "boolean"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intent": {
+      "description": "The human's own words, quoted verbatim from the PRD by Wringer — never the model's paraphrase of them. The reader checks the criteria against this.",
+      "type": "string",
+      "minLength": 1
+    },
+    "open_questions": {
+      "description": "What the drafter had to assume, asked instead of guessed. `wring plan` refuses while a `required` one is unanswered. At most 20.",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "question"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "maxLength": 64
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required": {
+            "description": "Defaults to true.",
+            "type": "boolean"
+          },
+          "answer": {
+            "description": "Written by the human. A question is answered when this is non-empty; deleting the question works too. Both are file edits, which is the only kind of approval this slice accepts.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "criteria": {
+      "description": "The acceptance criteria, which are a `wringer.rubric.v1` criteria list by construction — `wring plan` writes them to wringer.rubric.yaml unmodified and the judge consumes them with no translation layer. Inlined rather than $ref'd so this file resolves without a network fetch; tests/test_schema.py fails if the two definitions ever differ.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "A slug: it is matched against the ids in a model's reply, so it must be unambiguous.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "guidance": {
+            "description": "How to decide it. Optional; absent and empty mean the same thing.",
+            "type": "string"
+          },
+          "required": {
+            "description": "Defaults to true. An unmet required criterion is a `fail` verdict.",
+            "type": "boolean"
+          },
+          "human": {
+            "description": "Defaults to false. When true the criterion is never sent to a judge and comes back unscored: only a person can decide it, and a model asked anyway would be guessing.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "gates": {
+      "description": "Gates the drafter proposes. `wring plan` prints these as a diff against .wringer.yaml and stops — Wringer never installs a gate, because installing one changes what 'verified' means. Same shape and same parser as a .wringer.yaml gate.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "run"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "maxLength": 64
+          },
+          "run": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "optional": {
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Accepted as the negation of `optional`; both together is an error.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "tasks": {
+      "description": "The build plan. `wring plan` turns each into a line of tasks.jsonl and writes its brief to the path named here. At most 50: a single drafting pass proposing more than that did not understand the PRD.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "brief",
+          "objective"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "A slug: it becomes a fleet task id, which names a directory.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "maxLength": 64
+          },
+          "brief": {
+            "description": "Where `wring plan` writes this task's brief. Relative to the repository root and refused if it could escape it — this path is written to, and a model proposed it.",
+            "type": "string",
+            "minLength": 1
+          },
+          "dir": {
+            "description": "Which directory the task runs in. Defaults to '.', relative to the repository root, and must exist.",
+            "type": "string",
+            "minLength": 1
+          },
+          "objective": {
+            "description": "One paragraph saying what done looks like. Becomes the body of the brief.",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
