@@ -27,7 +27,10 @@ classifiers = [
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+# jsonschema is DEV-ONLY and validates the published schemas against
+# real bundles in CI. The runtime dependency list stays PyYAML and
+# nothing else — that is a promise about what users install.
+dev = ["pytest>=8.0", "ruff>=0.6", "jsonschema>=4.0"]
 
 [project.scripts]
 wring = "wringer.cli:main"

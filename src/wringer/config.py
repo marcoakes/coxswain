@@ -53,6 +53,7 @@ _FLEET_KEYS = {
     "join",
     "child",
     "worker_fallbacks",
+    "worktree",
 }
 _CHILD_KEYS = {"max_iterations", "worker_timeout", "wall_clock"}
 
@@ -138,6 +139,11 @@ class Fleet:
     join: str = "all"
     child_max_iterations: int | None = None
     worker_fallbacks: tuple[str, ...] = ()
+    # Off by default. When on, the fleet gives each task its own git
+    # worktree so parallel children cannot fight over one working tree.
+    # This is the ONLY git write Wringer ever makes, and it is metadata:
+    # add and remove. No commit, no branch move, no push — that law holds.
+    worktree: bool = False
 
 
 @dataclass(frozen=True)
@@ -266,7 +272,12 @@ def _parse_fleet(raw: Any, source: str) -> Fleet | None:
             f"(got {retries!r})"
         )
 
+    worktree = raw.get("worktree", False)
+    if not isinstance(worktree, bool):
+        raise ConfigError(f"{source}: 'fleet.worktree' must be a boolean")
+
     return Fleet(
+        worktree=worktree,
         deadline=_positive_int(raw, "deadline", 1, source, section="fleet"),
         concurrency=_positive_int(raw, "concurrency", 4, source, section="fleet"),
         progress_window=_positive_int(

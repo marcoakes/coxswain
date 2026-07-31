@@ -329,3 +329,125 @@ def test_a_repo_without_a_fleet_section_is_refused(repo, write_config, monkeypat
     assert cli.main(["fleet", "tasks.jsonl"]) == cli.EXIT_CONFIG
 
     assert "no 'fleet:' section" in capsys.readouterr().err
+
+
+# --- worktree mode: the one git write Wringer makes, and it is metadata ---
+
+
+def worktree_fleet(repo: Path, tasks: list[dict]) -> None:
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: noop
+    run: "true"
+fleet:
+  concurrency: 2
+  deadline: 300
+  retries: 0
+  worktree: true
+""",
+        encoding="utf-8",
+    )
+    (repo / "tasks.jsonl").write_text(
+        "\n".join(json.dumps(t) for t in tasks) + "\n", encoding="utf-8"
+    )
+
+
+def test_worktree_mode_gives_each_task_its_own_checkout(repo, monkeypatch, capsys):
+    """Parallel children cannot share one working tree. With worktree: true
+    the fleet makes each task a detached checkout of HEAD."""
+    import subprocess
+
+    (repo / "work.txt").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED work.txt"
+run:
+  worker: "echo FIXED > work.txt"
+  max_iterations: 2
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@e.invalid", "-c", "user.name=t",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "base"],
+        cwd=repo, check=True,
+    )
+    tasks = [
+        {"id": f"t-{n}", "brief": "work.txt", "dir": "."} for n in range(3)
+    ]
+    worktree_fleet(repo, tasks)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["fleet", "tasks.jsonl"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    result = manifest(repo)["result"]
+    assert result["succeeded"] == 3
+    # each task got its own tree, recorded on the ledger
+    made = [e for e in _events(repo) if e["type"] == "task.worktree"]
+    assert len(made) == 3
+    # ...and the fleet tidied up after itself
+    listed = subprocess.run(
+        ["git", "worktree", "list"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert "wringer/worktrees" not in listed, listed
+
+
+def test_worktree_mode_never_writes_history(repo, monkeypatch, capsys):
+    """`worktree add` is metadata. The law that Wringer never commits,
+    branches or pushes is untouched — this test is the guard on it."""
+    import subprocess
+
+    (repo / "work.txt").write_text("FIXED\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED work.txt"
+run:
+  worker: "true"
+  max_iterations: 1
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@e.invalid", "-c", "user.name=t",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "base"],
+        cwd=repo, check=True,
+    )
+    before = subprocess.run(
+        ["git", "log", "--oneline", "--all"], cwd=repo,
+        capture_output=True, text=True,
+    ).stdout
+    worktree_fleet(repo, [{"id": "solo", "brief": "work.txt", "dir": "."}])
+    monkeypatch.chdir(repo)
+
+    cli.main(["fleet", "tasks.jsonl"])
+    capsys.readouterr()
+
+    after = subprocess.run(
+        ["git", "log", "--oneline", "--all"], cwd=repo,
+        capture_output=True, text=True,
+    ).stdout
+    assert before == after, "the fleet wrote git history"
+
+
+def test_worktree_must_be_a_boolean():
+    with pytest.raises(config.ConfigError, match="worktree"):
+        config.parse(
+            {
+                "version": 1,
+                "gates": [{"id": "t", "run": "true"}],
+                "fleet": {"deadline": 60, "worktree": "yes"},
+            }
+        )

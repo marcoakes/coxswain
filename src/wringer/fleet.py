@@ -33,6 +33,7 @@ from wringer import config, evidence, loop
 from wringer.redact import Redactor
 
 FLEETS_DIRNAME = Path(".wringer") / "fleets"
+WORKTREES_DIRNAME = Path(".wringer") / "worktrees"
 SCHEMA_VERSION = "wringer.fleet.v1"
 EVENTS_FILENAME = "fleet.jsonl"
 MANIFEST_FILENAME = "manifest.json"
@@ -67,6 +68,7 @@ class TaskState:
     reason: str = ""
     signatures: list[str] = field(default_factory=list)
     loop_dirs: list[str] = field(default_factory=list)
+    worktree: str | None = None
 
 
 @dataclass(frozen=True)
@@ -316,6 +318,15 @@ def run(
                 bundle.event("task.reaped", task=child.state.task.id)
                 _maybe_retry(bundle, child.state, settings, queue, "no_progress")
 
+    if settings.worktree:
+        # Tidy up every checkout this fleet made. Parked and failed tasks
+        # keep their EVIDENCE — that lives in the fleet bundle and the child
+        # loop dirs — but the working copies go, or a hundred-task fleet
+        # leaves a hundred trees behind.
+        for state in states:
+            if state.worktree:
+                remove_worktree(root, Path(state.worktree))
+
     satisfied = _join_satisfied(states, settings.join)
     counts = _counts(states)
     bundle.event(
@@ -337,10 +348,53 @@ def run(
     )
 
 
+def make_worktree(root: Path, task_id: str) -> Path | None:
+    """Give a task its own checkout, so parallel children cannot collide.
+
+    The only git WRITE Wringer performs, and it is metadata: `worktree add`
+    and `worktree remove`. No commit, no branch move, no push — the law that
+    the harness never writes history is untouched.
+
+    Detached at HEAD: a worktree on a branch would move that branch, which is
+    history. Returns None if git refuses, and the caller parks the task —
+    a fleet that silently ran two children in one tree would be worse.
+    """
+    path = root / WORKTREES_DIRNAME / task_id
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        remove_worktree(root, path)
+    proc = subprocess.run(
+        ["git", "worktree", "add", "--detach", str(path), "HEAD"],
+        cwd=root, capture_output=True, text=True, timeout=120,
+    )
+    return path if proc.returncode == 0 else None
+
+
+def remove_worktree(root: Path, path: Path) -> None:
+    """Tidy up. --force because a child may have left the tree dirty, and a
+    fleet that cannot clean up after itself accumulates until a human does."""
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", str(path)],
+        cwd=root, capture_output=True, text=True, timeout=120,
+    )
+
+
 def _spawn(
     root: Path, bundle: Bundle, state: TaskState, settings: config.Fleet
 ) -> _Child | None:
-    workdir = (root / state.task.dir).resolve()
+    if settings.worktree:
+        made = make_worktree(root, state.task.id)
+        if made is None:
+            state.status = PARKED
+            state.reason = "could not create a git worktree"
+            bundle.event("task.parked", task=state.task.id, why="worktree_failed")
+            return None
+        state.worktree = str(made)
+        bundle.event("task.worktree", task=state.task.id, path=str(
+            made.relative_to(root) if made.is_relative_to(root) else made))
+        workdir = made
+    else:
+        workdir = (root / state.task.dir).resolve()
     if not workdir.is_dir():
         state.status = PARKED
         state.reason = f"no such directory: {state.task.dir}"
@@ -409,7 +463,11 @@ def _is_silent(child: _Child, settings: config.Fleet) -> bool:
     The incident's fleet had twenty live processes for eight hours. "It is
     still running" is not evidence that anything is happening.
     """
-    ledger = _child_ledger(Path(child.state.task.dir).resolve())
+    ledger = _child_ledger(
+        Path(child.state.worktree)
+        if child.state.worktree
+        else Path(child.state.task.dir).resolve()
+    )
     size = -1
     if ledger is not None and ledger.is_file():
         try:
@@ -429,7 +487,9 @@ def _settle(
 ) -> None:
     """Record what a finished child achieved, and heal it if it can be."""
     state = child.state
-    workdir = Path(state.task.dir).resolve()
+    workdir = (
+        Path(state.worktree) if state.worktree else Path(state.task.dir).resolve()
+    )
     found = loop.latest_loop(workdir / loop.LOOPS_DIRNAME)
     signature, reason = None, "unknown"
     if found is not None:

@@ -232,3 +232,100 @@ def test_an_interrupted_run_matches_the_published_schemas(
     for line in (bundle / evidence.EVIDENCE_FILENAME).read_text("utf-8").splitlines():
         event = json.loads(line)
         check(event, branch(event["type"]), f"event {event['type']}")
+
+
+# --- the real engine, now that jsonschema is a dev dependency ---
+#
+# The dependency-free checks above catch DRIFT: a key the code writes that
+# the schema does not declare. They cannot catch a schema that is itself
+# malformed, or a value that violates a pattern or enum. This does — and it
+# runs in CI, which is the point of adding the dependency.
+
+
+def validators():
+    from jsonschema import Draft202012Validator
+
+    built = {}
+    for path in SCHEMA_DIR.glob("*.schema.json"):
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)  # the schema itself is legal
+        built[path.name] = Draft202012Validator(schema)
+    return built
+
+
+def test_every_published_schema_is_a_legal_json_schema():
+    built = validators()
+
+    assert len(built) >= 5, sorted(built)
+
+
+def test_a_real_bundle_validates_against_the_real_engine(
+    repo, write_config, monkeypatch, capsys
+):
+    """End to end with a genuine draft-2020-12 validator: every event, the
+    manifest, and every gate result from an actual failing run."""
+    built = validators()
+    write_config(repo, FAILING)
+    (repo / "loose.txt").write_text("untracked\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_GATE_FAILED
+    capsys.readouterr()
+    bundle = only_bundle(repo)
+
+    errors: list[str] = []
+
+    def collect(validator_name: str, instance: object, where: str) -> None:
+        for error in built[validator_name].iter_errors(instance):
+            errors.append(f"{where}: {error.json_path} {error.message}")
+
+    collect(
+        "manifest.schema.json",
+        json.loads((bundle / evidence.MANIFEST_FILENAME).read_text("utf-8")),
+        "manifest.json",
+    )
+    for line in (bundle / evidence.EVIDENCE_FILENAME).read_text("utf-8").splitlines():
+        event = json.loads(line)
+        collect("evidence-event.schema.json", event, f"event {event['type']}")
+    for result in sorted((bundle / evidence.GATES_DIRNAME).glob("*/result.json")):
+        collect(
+            "gate-result.schema.json",
+            json.loads(result.read_text("utf-8")),
+            result.parent.name,
+        )
+
+    assert not errors, "\n".join(errors)
+
+
+def test_a_real_loop_bundle_validates_against_the_real_engine(
+    repo, monkeypatch, capsys
+):
+    built = validators()
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED calc.py"
+run:
+  worker: "echo FIXED > calc.py"
+  max_iterations: 3
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["run"]) == cli.EXIT_OK
+    capsys.readouterr()
+    loop_dir = sorted((repo / loop.LOOPS_DIRNAME).iterdir())[0]
+
+    errors: list[str] = []
+    for error in built["loop-manifest.schema.json"].iter_errors(
+        json.loads((loop_dir / loop.MANIFEST_FILENAME).read_text("utf-8"))
+    ):
+        errors.append(f"loop manifest: {error.message}")
+    for line in (loop_dir / loop.EVENTS_FILENAME).read_text("utf-8").splitlines():
+        event = json.loads(line)
+        for error in built["loop-event.schema.json"].iter_errors(event):
+            errors.append(f"{event['type']}: {error.message}")
+
+    assert not errors, "\n".join(errors)
