@@ -18,6 +18,7 @@ from wringer import (
     __version__,
     config,
     detect,
+    doctor,
     evidence,
     fleet,
     gates,
@@ -171,6 +172,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_judge.set_defaults(func=cmd_judge)
+
+    parser_doctor = subparsers.add_parser(
+        "doctor",
+        help="check this machine's preconditions — one line per check",
+    )
+    parser_doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_doctor.set_defaults(func=cmd_doctor)
 
     parser_explain = subparsers.add_parser(
         "explain",
@@ -407,6 +419,15 @@ def _relative(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Diagnose, never repair. Exit 1 on any blocking problem, so a setup
+    script can branch on it without parsing prose."""
+    root = git.find_root(Path.cwd())
+    checks = doctor.run_checks(root)
+    print(doctor.as_json(checks) if args.json else doctor.report(checks))
+    return EXIT_OK if all(check.passed for check in checks) else EXIT_GATE_FAILED
 
 
 def cmd_fleet(args: argparse.Namespace) -> int:
