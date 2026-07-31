@@ -38,8 +38,10 @@ Where they disagree about v0.1, the spec wins.
 There **is** code now: `wring init` and `wring verify` work — `verify` runs a
 repo's whole declared gate set and writes a real bundle, `wring explain`
 diagnoses a finished run, `--json` feeds agents, and secrets never reach the
-disk — with 233 tests passing on Python 3.11–3.13 (plus macOS) in CI.
-On the `run-v0.2` branch, `wring run` closes the loop around all of it.
+disk — with 315 tests passing on Python 3.11–3.13 (plus macOS) in CI.
+On the `run-v0.2` branch: `wring run` closes the loop, `wring resume`
+continues a killed one, `wring fleet` supervises hundreds, and `wring judge`
+weighs a finished bundle against a rubric.
 
 **Wringer now verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares
 this repo's own gates, CI runs `wring verify` and uploads the bundle, and a
@@ -133,6 +135,9 @@ block first — the clean console is the product.
 | `redact.py` | turn env-var name patterns into the set of secret values, and erase them from text or bytes | look anywhere but the environment |
 | `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
 | `verify.py` | one verification as a **callable**: snapshot git, open a bundle, run the planned gates, stop on the first required failure, write manifest + summary, return an `Outcome`. Also `plan()` and the `--json` shape both commands share | print anything, or decide an exit code — that is `cli.py`'s |
+| `judge.py` | `wring judge`: the closed-list `Packet`, the request, the verdict, and `send()` — the **only** function in the program that opens a socket | see a worker's output; there is no field in `Packet` that could carry one |
+| `rubric.py` | `wringer.rubric.v1` — its own file because its bytes travel, so it gets its own size and shape limits | live under `.wringer/` (a rubric is source, not evidence) |
+| `fleet.py` | `wring fleet`: a bounded pool of child `wring run` subprocesses, the self-healing ladder, reaping by ledger growth, honest partial-success counts | do the work itself — it is only a supervisor |
 | `loop.py` | v0.2's `wring run`: verify → brief → worker → verify, the plateau fingerprint, and the `wringer.loop.v1` bundle under `.wringer/loops/` | call an LLM, touch git, or nest a verify bundle inside a loop bundle (runs are referenced by path) |
 
 Every module in the spec's layout now exists.
