@@ -438,12 +438,22 @@ class Bundle:
                     f"| {row['id']} | {'yes' if row['required'] else 'no'} "
                     f"| {met} | {row['reason']} |"
                 )
-        else:
+        elif mode == "dry_run":
             lines += [
                 "",
                 "No criteria were scored: this was a dry run, so the request "
                 f"was built and written to `{REQUEST_FILENAME}` and nothing "
                 "was sent.",
+            ]
+        else:
+            # A live judgment that scored nothing is NOT a dry run, and a
+            # summary that said so would be a false claim in an evidence
+            # artifact — the one thing this repo cannot do.
+            lines += [
+                "",
+                "No criteria were scored, and this was **not** a dry run: the "
+                f"endpoint was contacted. `{REQUEST_FILENAME}` holds what was "
+                "sent; the note above says why nothing came back usable.",
             ]
         path = self.directory / SUMMARY_FILENAME
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")

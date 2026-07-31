@@ -644,3 +644,38 @@ def test_human_must_be_a_boolean(tmp_path):
     )
     with pytest.raises(rubric.RubricError, match="'human' must be a boolean"):
         rubric.load(Path("rubric.yaml"), tmp_path)
+
+
+def test_a_live_judgment_that_scored_nothing_is_not_called_a_dry_run(
+    repo, monkeypatch, capsys
+):
+    """summary.md is an evidence artifact. An unreachable endpoint leaves a
+    verdict with no scored criteria, and the old wording called that a dry
+    run — on a run that really did open a socket."""
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    fake_transport(monkeypatch, fail="connection refused")
+
+    assert cli.main(["judge", "--send"]) == cli.EXIT_NEEDS_HUMAN
+    capsys.readouterr()
+
+    written = (only_verdict(repo) / judge.SUMMARY_FILENAME).read_text("utf-8")
+    assert "mode: **live**" in written
+    assert "this was a dry run" not in written
+    assert "not** a dry run" in written
+    assert "connection refused" in written
+
+
+def test_a_real_dry_run_still_says_so(repo, monkeypatch, capsys):
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["judge"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    written = (only_verdict(repo) / judge.SUMMARY_FILENAME).read_text("utf-8")
+    assert "this was a dry run" in written

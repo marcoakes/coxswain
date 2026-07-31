@@ -470,3 +470,34 @@ def test_a_spec_without_approved_is_not_approved_by_omission():
     )
     with pytest.raises(spec.SpecError, match="approved by omission"):
         spec.parse(document, "test")
+
+
+def test_a_failed_live_draft_never_calls_itself_a_dry_run(repo, monkeypatch,
+                                                          capsys):
+    """The summary is an evidence artifact. A live run that produced nothing
+    is not a dry run, and saying so would be the one unforgivable thing."""
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    fake_transport(monkeypatch, reply=reply("not json at all"))
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+    capsys.readouterr()
+
+    written = (only_draft(repo) / spec.SUMMARY_FILENAME).read_text("utf-8")
+    assert "mode: **live**" in written
+    assert "dry run" not in written
+    assert "no spec file was written" in written
+
+
+def test_an_unreachable_endpoint_summary_says_the_socket_was_opened(
+    repo, monkeypatch, capsys
+):
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    fake_transport(monkeypatch, fail="connection refused")
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+    capsys.readouterr()
+
+    written = (only_draft(repo) / spec.SUMMARY_FILENAME).read_text("utf-8")
+    assert "dry run" not in written

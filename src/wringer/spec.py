@@ -915,12 +915,23 @@ class Bundle:
             f"- endpoint: `{self.redactor.scrub(endpoint)}`",
             f"- model: {model}",
         ]
-        if drafted is None:
+        if drafted is None and mode == "dry_run":
             lines += [
                 "",
                 "Nothing was drafted: this was a dry run, so the request was "
                 f"built and written to `{REQUEST_FILENAME}` and no socket was "
                 "opened.",
+            ]
+        elif drafted is None:
+            # A live run that produced nothing is NOT a dry run, and a summary
+            # that said so would be a false claim in an evidence artifact.
+            lines += [
+                "",
+                "**Nothing was drafted, and no spec file was written.** The "
+                "request was sent and the exchange did not produce a usable "
+                f"`{SCHEMA_VERSION}` document — see `{REQUEST_FILENAME}` and, "
+                f"if a reply arrived at all, `{RESPONSE_FILENAME}`. The error "
+                "is on the console.",
             ]
         else:
             lines += [
