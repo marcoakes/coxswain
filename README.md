@@ -2,7 +2,8 @@
 
 # 🗜️ Wringer
 
-**The vendor-neutral AI-DLC harness — a control plane for AI-driven development.**
+**The vendor-neutral AI-DLC harness — a control plane for AI-driven development,
+for product managers, designers and engineers.**
 
 *Put every change through the wringer.*
 *The harness runs the gates, keeps the receipts, and never writes the code itself.*
@@ -17,6 +18,15 @@
 </div>
 
 ---
+
+> **Everyone else in this space is selling capability and asking for trust.
+> Wringer is built on the opposite premise: trust nothing — including itself.**
+> Not the worker's exit code, not the agent's summary, not even the tests the
+> agent wrote — and soon, provably, not even its own ledgers. That stance came
+> out of [a real eight-hour burn](SPEC_SUPERVISION_V0.md), it is welded into
+> [eight invariants](SPEC_SUPERVISION_V0.md) a fleet already obeys, and it
+> gets more valuable with every step frontier models take — because autonomy
+> without receipts is exactly what everyone is about to be terrified of.
 
 Wringer (CLI: `wring`) compiles **intent** — tickets, PRDs, Slack messages — into **verified outcomes**: reviewed merge requests with evidence. It treats *loops* and *graphs of loops* as first-class, portable primitives, and runs the **same workflow definition** on your laptop today and on durable runtimes (Temporal first) tomorrow.
 
