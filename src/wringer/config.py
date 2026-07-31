@@ -8,6 +8,7 @@ in a gate definition must not silently change what "verified" means.
 from __future__ import annotations
 
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,11 +39,29 @@ _PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-z_]+)\}")
 GATE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 MAX_GATE_ID_LENGTH = 64
 
-_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run"}
+_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run", "judge"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
 _RUN_KEYS = {"worker", "max_iterations", "worker_timeout"}
+_JUDGE_KEYS = {
+    "endpoint",
+    "model",
+    "rubric",
+    "api_key_env",
+    "timeout",
+    "max_output_tokens",
+}
+
+# `wring judge` defaults (SPEC_JUDGE_V0.md §3). endpoint, model and rubric
+# have no defaults and never will: Wringer contacts the endpoint you wrote
+# down, never one it guessed.
+DEFAULT_JUDGE_TIMEOUT_SECONDS = 120
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
+
+# Hosts a cleartext endpoint may name. Anywhere else must be https, because
+# a rubric and a diff are not things to put on the wire in the clear.
+_LOOPBACK = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 class ConfigError(Exception):
@@ -71,6 +90,23 @@ class Run:
 
 
 @dataclass(frozen=True)
+class Judge:
+    """The `judge:` section — what `wring judge` may contact (SPEC_JUDGE_V0).
+
+    `endpoint`, `model` and `rubric` have no defaults and never will. A repo
+    with no `judge:` section leaves no reachable code path in the program
+    that opens a socket, which is the whole network story in one rule.
+    """
+
+    endpoint: str
+    model: str
+    rubric: str
+    api_key_env: str | None = None
+    timeout: int = DEFAULT_JUDGE_TIMEOUT_SECONDS
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+
+
+@dataclass(frozen=True)
 class Config:
     version: int
     gates: tuple[Gate, ...]
@@ -80,6 +116,9 @@ class Config:
     # None when the repo has not opted into the loop. `wring verify` neither
     # needs nor reads this; `wring run` refuses without it.
     run: Run | None = None
+    # None when the repo has not opted into the judge. Its absence is what
+    # makes a network call unreachable rather than merely unlikely.
+    judge: Judge | None = None
 
 
 def load(path: Path) -> Config:
@@ -131,7 +170,89 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         gates=gates,
         evidence=evidence,
         run=_parse_run(raw.get("run"), source),
+        judge=_parse_judge(raw.get("judge"), source),
     )
+
+
+def _parse_judge(raw: Any, source: str) -> Judge | None:
+    """The `judge:` section, or None when the repo has not opted in."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'judge' must be a mapping")
+
+    unknown = sorted(set(raw) - _JUDGE_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'judge': {', '.join(unknown)}")
+
+    for key in ("endpoint", "model", "rubric"):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(
+                f"{source}: 'judge.{key}' must be a non-empty string — there is "
+                "no default, because Wringer contacts the endpoint you wrote "
+                "down and never one it guessed"
+            )
+
+    endpoint = raw["endpoint"].strip()
+    _validate_endpoint(endpoint, source)
+
+    api_key_env = raw.get("api_key_env")
+    if api_key_env is not None and (
+        not isinstance(api_key_env, str) or not api_key_env.strip()
+    ):
+        raise ConfigError(
+            f"{source}: 'judge.api_key_env' must be the NAME of an environment "
+            "variable, not a key — Wringer will not read a credential out of a "
+            "config file"
+        )
+
+    return Judge(
+        endpoint=endpoint,
+        model=raw["model"].strip(),
+        rubric=raw["rubric"].strip(),
+        api_key_env=api_key_env,
+        timeout=_positive_int(raw, "timeout", DEFAULT_JUDGE_TIMEOUT_SECONDS, source,
+                              section="judge"),
+        max_output_tokens=_positive_int(
+            raw, "max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS, source,
+            section="judge",
+        ),
+    )
+
+
+def _validate_endpoint(endpoint: str, source: str) -> None:
+    """Checked at parse time, so an unsafe endpoint can never reach a socket.
+
+    https anywhere; http only to loopback. No userinfo, because credentials
+    do not travel in URLs — and this URL is recorded in the bundle. No query
+    string, for the same reason.
+    """
+    parsed = urllib.parse.urlsplit(endpoint)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' must be http:// or https:// "
+            f"(got {parsed.scheme or 'no scheme'!r})"
+        )
+    if not parsed.hostname:
+        raise ConfigError(f"{source}: 'judge.endpoint' has no host")
+    if parsed.username or parsed.password:
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' must not carry credentials — the "
+            "endpoint is recorded in the verdict bundle. Use 'api_key_env'"
+        )
+    if parsed.query:
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' must not carry a query string — it is "
+            "recorded in the verdict bundle"
+        )
+    if parsed.scheme == "http" and parsed.hostname not in _LOOPBACK:
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' may only use plain http:// to "
+            f"loopback (got host {parsed.hostname!r}) — a rubric and a diff "
+            "are not things to send in the clear"
+        )
 
 
 def _parse_run(raw: Any, source: str) -> Run | None:
@@ -175,11 +296,13 @@ def _parse_run(raw: Any, source: str) -> Run | None:
     )
 
 
-def _positive_int(raw: dict, key: str, default: int, source: str) -> int:
+def _positive_int(
+    raw: dict, key: str, default: int, source: str, section: str = "run"
+) -> int:
     value = raw.get(key, default)
     if not _is_int(value) or value < 1:
         raise ConfigError(
-            f"{source}: 'run.{key}' must be an integer of at least 1 "
+            f"{source}: '{section}.{key}' must be an integer of at least 1 "
             f"(got {value!r})"
         )
     return value

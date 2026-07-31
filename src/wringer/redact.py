@@ -42,8 +42,17 @@ class Redactor:
         cls,
         evidence: Mapping[str, object] | None = None,
         environ: Mapping[str, str] | None = None,
+        extra_names: tuple[str, ...] = (),
     ) -> Redactor:
+        """Build the redactor for a run.
+
+        `extra_names` are exact variable names to protect regardless of the
+        patterns — `judge.api_key_env` names one, and folding its value in
+        here is what stops a credential reaching a request body or a bundle
+        even if something echoes it.
+        """
         patterns = [pattern.upper() for pattern in _configured_patterns(evidence)]
+        patterns += [name.upper() for name in extra_names]
         env = os.environ if environ is None else environ
 
         values = {

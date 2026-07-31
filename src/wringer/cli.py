@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,10 @@ from wringer import (
     evidence,
     gates,
     git,
+    judge,
     loop,
+    redact,
+    rubric,
     summary,
     verify,
 )
@@ -30,6 +34,9 @@ EXIT_GATE_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_REFUSED = 3
 EXIT_INTERRUPTED = 4
+# `wring judge` only. "The evidence says no" and "nothing competent looked at
+# the evidence" are different claims, so 5 must never collapse into 1.
+EXIT_NEEDS_HUMAN = 5
 
 # How much of a failing gate's logs to put on the console. The whole log is
 # in the bundle; this is just enough to see what broke without opening it.
@@ -94,6 +101,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_run.set_defaults(func=cmd_run)
+
+    parser_judge = subparsers.add_parser(
+        "judge",
+        help="judge a finished evidence bundle against a rubric",
+    )
+    parser_judge.add_argument(
+        "run",
+        nargs="?",
+        metavar="RUN_DIR",
+        help="a run directory; defaults to the most recent one",
+    )
+    parser_judge.add_argument(
+        "--send",
+        action="store_true",
+        help=(
+            "actually contact the endpoint — the only path in Wringer that "
+            "opens a network connection. Without it, the request is built and "
+            "written but nothing is sent."
+        ),
+    )
+    parser_judge.add_argument(
+        "--print-request",
+        action="store_true",
+        help="write the exact would-be request body to stdout and exit",
+    )
+    parser_judge.add_argument(
+        "--rubric",
+        metavar="PATH",
+        help="override the configured rubric for this judgment",
+    )
+    parser_judge.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_judge.set_defaults(func=cmd_judge)
 
     parser_explain = subparsers.add_parser(
         "explain",
@@ -330,6 +373,182 @@ def _relative(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
+
+
+def cmd_judge(args: argparse.Namespace) -> int:
+    """Judge a finished bundle against a rubric (SPEC_JUDGE_V0.md)."""
+    import time
+
+    root = git.find_root(Path.cwd())
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.judge is None:
+        print(
+            f"wring judge: no 'judge:' section in {config.CONFIG_FILENAME} — "
+            "there is no default endpoint and never will be, so a repo that "
+            "has not opted in cannot reach a network at all. Add one:\n\n"
+            "  judge:\n"
+            "    endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+            "    model: qwen2.5-coder:7b\n"
+            "    rubric: rubric.yaml",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    run_dir = _judge_target(args.run, root)
+    if run_dir is None:
+        return EXIT_CONFIG
+
+    try:
+        loaded = rubric.load(Path(args.rubric or cfg.judge.rubric), root)
+    except rubric.RubricError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
+        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
+    ))
+
+    try:
+        passed, failed_gate = judge.gates_passed(run_dir)
+    except judge.JudgeError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if not passed:
+        print(
+            f"wring judge: refusing to judge {_relative(run_dir, root)} — its "
+            f"gates did not pass"
+            + (f" (`{failed_gate}` failed)" if failed_gate else "")
+            + ". A judge has nothing to add when the deterministic gates "
+            "already said no.",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+
+    if cfg.judge.api_key_env and os.environ.get(cfg.judge.api_key_env) is None:
+        print(
+            f"wring judge: 'judge.api_key_env' names {cfg.judge.api_key_env}, "
+            "which is not set in this environment",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    try:
+        packet = judge.build_packet(run_dir, loaded)
+    except judge.JudgeError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    request = judge.render_request(
+        packet, cfg.judge.model, cfg.judge.max_output_tokens
+    )
+
+    if args.print_request:
+        print(json.dumps(request, indent=2))
+        return EXIT_OK
+
+    started = time.monotonic()
+    try:
+        bundle = judge.Bundle.create(root / judge.VERDICTS_DIRNAME, redactor=redactor)
+    except judge.JudgeError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    # Written before any transport is consulted: what would leave the machine
+    # is auditable rather than asserted, and --send is this same path
+    # continuing one step further.
+    bundle.write_request(request)
+
+    mode = "live" if args.send else "dry_run"
+    verdict = judge.Verdict(None)
+    if args.send:
+        try:
+            body = judge.send(
+                request,
+                cfg.judge.endpoint,
+                cfg.judge.timeout,
+                os.environ.get(cfg.judge.api_key_env or ""),
+            )
+        except judge.TransportUnavailable as exc:
+            print(f"wring judge: {exc}", file=sys.stderr)
+            return EXIT_CONFIG
+        bundle.write_response(body)
+        verdict = judge.parse_response(body, loaded)
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    shown = _relative(run_dir, root)
+    bundle.write_verdict(
+        mode, shown, loaded, cfg.judge.endpoint, cfg.judge.model, verdict, duration_ms
+    )
+    bundle.write_summary(mode, shown, loaded, verdict)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "mode": mode,
+                    "verdict": verdict.verdict,
+                    "note": verdict.note,
+                    "evidence_dir": shown,
+                    "verdict_dir": _relative(bundle.directory, root),
+                }
+            )
+        )
+    else:
+        _report_judge(mode, verdict, bundle, root, loaded)
+
+    return _judge_exit(mode, verdict)
+
+
+def _judge_target(named: str | None, root: Path) -> Path | None:
+    if named is not None:
+        run_dir = Path(named)
+        if not run_dir.is_dir():
+            print(f"wring judge: no run directory at {named}", file=sys.stderr)
+            return None
+        return run_dir
+    found = evidence.latest_run(root / evidence.RUNS_DIRNAME)
+    if found is None:
+        print(
+            f"wring judge: no runs under "
+            f"{(root / evidence.RUNS_DIRNAME).as_posix()} — run 'wring verify' "
+            "first; a judge reads a finished bundle",
+            file=sys.stderr,
+        )
+        return None
+    return found
+
+
+def _judge_exit(mode: str, verdict: judge.Verdict) -> int:
+    if mode == "dry_run":
+        return EXIT_OK
+    if verdict.verdict == judge.PASS:
+        return EXIT_OK
+    if verdict.verdict == judge.FAIL:
+        return EXIT_GATE_FAILED
+    return EXIT_NEEDS_HUMAN
+
+
+def _report_judge(
+    mode: str, verdict: judge.Verdict, bundle: judge.Bundle, root: Path, loaded
+) -> None:
+    if mode == "dry_run":
+        print("dry run — the request was built and written; nothing was sent.")
+    for row in verdict.criteria:
+        mark = {True: "✓", False: "✗", None: "?"}[row["met"]]
+        tag = "" if row["required"] else "  (optional)"
+        print(f"{mark} {row['id']}{tag}")
+    if verdict.verdict is not None:
+        print(f"\nVerdict: {verdict.verdict}")
+    if verdict.note:
+        print(f"  {verdict.note}")
+    print(f"\nJudgment written to:\n{_relative(bundle.directory, root)}/")
 
 
 def _refuse_unverifiable(root: Path, command: str) -> int | None:
