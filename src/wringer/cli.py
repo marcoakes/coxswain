@@ -10,16 +10,34 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-from wringer import __version__, config, detect, evidence, gates, git, redact, summary
+from wringer import (
+    __version__,
+    config,
+    detect,
+    evidence,
+    fleet,
+    gates,
+    git,
+    judge,
+    loop,
+    redact,
+    rubric,
+    summary,
+    verify,
+)
 
 EXIT_OK = 0
 EXIT_GATE_FAILED = 1
 EXIT_CONFIG = 2
 EXIT_REFUSED = 3
 EXIT_INTERRUPTED = 4
+# `wring judge` only. "The evidence says no" and "nothing competent looked at
+# the evidence" are different claims, so 5 must never collapse into 1.
+EXIT_NEEDS_HUMAN = 5
 
 # How much of a failing gate's logs to put on the console. The whole log is
 # in the bundle; this is just enough to see what broke without opening it.
@@ -67,6 +85,92 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_verify.set_defaults(func=cmd_verify)
+
+    parser_run = subparsers.add_parser(
+        "run",
+        help="loop: verify, hand the failure to your worker, verify again",
+    )
+    parser_run.add_argument(
+        "--max-iterations",
+        type=int,
+        metavar="N",
+        help="override the config's max_iterations for this run",
+    )
+    parser_run.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_run.set_defaults(func=cmd_run)
+
+    parser_fleet = subparsers.add_parser(
+        "fleet",
+        help="run many repair loops under supervision",
+    )
+    parser_fleet.add_argument(
+        "tasks",
+        metavar="TASKS_JSONL",
+        help="one JSON object per line: {\"id\", \"brief\", \"dir\"}",
+    )
+    parser_fleet.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_fleet.set_defaults(func=cmd_fleet)
+
+    parser_resume = subparsers.add_parser(
+        "resume",
+        help="continue a loop that was killed before it finished",
+    )
+    parser_resume.add_argument(
+        "loop",
+        nargs="?",
+        metavar="LOOP_DIR",
+        help="a loop directory; defaults to the most recent unfinished one",
+    )
+    parser_resume.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_resume.set_defaults(func=cmd_resume)
+
+    parser_judge = subparsers.add_parser(
+        "judge",
+        help="judge a finished evidence bundle against a rubric",
+    )
+    parser_judge.add_argument(
+        "run",
+        nargs="?",
+        metavar="RUN_DIR",
+        help="a run directory; defaults to the most recent one",
+    )
+    parser_judge.add_argument(
+        "--send",
+        action="store_true",
+        help=(
+            "actually contact the endpoint — the only path in Wringer that "
+            "opens a network connection. Without it, the request is built and "
+            "written but nothing is sent."
+        ),
+    )
+    parser_judge.add_argument(
+        "--print-request",
+        action="store_true",
+        help="write the exact would-be request body to stdout and exit",
+    )
+    parser_judge.add_argument(
+        "--rubric",
+        metavar="PATH",
+        help="override the configured rubric for this judgment",
+    )
+    parser_judge.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_judge.set_defaults(func=cmd_judge)
 
     parser_explain = subparsers.add_parser(
         "explain",
@@ -145,11 +249,526 @@ def _ignore_runs(root: Path) -> str | None:
 def cmd_verify(args: argparse.Namespace) -> int:
     root = git.find_root(Path.cwd())
 
-    # Preconditions first: a bundle that describes an unsafe or unknowable
-    # state is worse than no bundle, so neither one gets written.
+    refused = _refuse_unverifiable(root, "verify")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        planned = verify.plan(cfg, args.gate)
+    except config.ConfigError as exc:
+        print(f"wring verify: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    try:
+        outcome = verify.run(
+            root,
+            cfg,
+            planned,
+            output=args.output,
+            # Printed as each gate finishes, so a long run reports as it
+            # happens; --json wants one object and nothing else.
+            on_gate=None if args.json else _report_gate,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring verify: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        _report_json(outcome.bundle, root, outcome.failed_gate, outcome.status)
+    else:
+        _report_run(
+            outcome.bundle, root, outcome.results, outcome.failed_gate, outcome.status
+        )
+
+    if outcome.interrupted is not None:
+        return EXIT_INTERRUPTED
+    return EXIT_GATE_FAILED if outcome.failed_gate is not None else EXIT_OK
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Loop until the evidence says stop (SPEC_RUN_V0.md)."""
+    root = git.find_root(Path.cwd())
+
+    refused = _refuse_unverifiable(root, "run")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        verify.plan(cfg, None)  # fail on a broken gate list before any work
+    except config.ConfigError as exc:
+        print(f"wring run: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.run is None:
+        print(
+            f"wring run: no 'run:' section in {config.CONFIG_FILENAME} — "
+            "the loop needs to know what edits the code. Add one:\n\n"
+            "  run:\n"
+            '    worker: claude -p "$(cat {brief})"\n\n'
+            "There is no default worker: Wringer runs the command you wrote "
+            "down, never one it guessed.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    if args.max_iterations is not None and args.max_iterations < 1:
+        print(
+            f"wring run: --max-iterations must be at least 1 "
+            f"(got {args.max_iterations})",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    quiet = args.json
+    try:
+        outcome = loop.run(
+            root,
+            cfg,
+            max_iterations=args.max_iterations,
+            on_iteration=None if quiet else _report_iteration,
+            on_gate=None if quiet else _report_gate,
+            on_worker=None if quiet else _report_worker,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring run: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": outcome.status,
+                    "reason": outcome.reason,
+                    "iterations": outcome.iterations,
+                    "loop_dir": _relative(outcome.directory, root),
+                    "final": (
+                        verify.json_summary(outcome.final, root)
+                        if outcome.final is not None
+                        else None
+                    ),
+                }
+            )
+        )
+    else:
+        _report_loop(outcome, root)
+
+    if outcome.status == "interrupted":
+        return EXIT_INTERRUPTED
+    return EXIT_OK if outcome.converged else EXIT_GATE_FAILED
+
+
+def _report_iteration(iteration: int, budget: int) -> None:
+    print(f"\niteration {iteration}/{budget}", flush=True)
+
+
+def _report_worker(result: gates.GateResult) -> None:
+    """One line for the worker's turn, shaped like a gate's so the two read
+    as one transcript."""
+    note = "timed out" if result.timed_out else f"exit {result.exit_code}"
+    label = "→ worker"
+    padding = " " * max(1, 21 - len(label))
+    print(f"{label}{padding}{_duration(result.duration_ms)}  ({note})", flush=True)
+
+
+def _duration(duration_ms: int) -> str:
+    """Seconds for a gate, minutes once a worker has been thinking a while."""
+    seconds = duration_ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, seconds = divmod(int(seconds), 60)
+    return f"{minutes}m {seconds:02d}s"
+
+
+_LOOP_ENDINGS = {
+    "converged": "Converged in {n} iteration{s}.",
+    "max_iterations": "Stopped after {n} iteration{s} — the budget ran out and "
+    "the gates still fail.",
+    "no_progress": "Stopped after {n} iteration{s} — the worker changed nothing, "
+    "so the gates would say the same again.",
+    "interrupted": "Interrupted after {n} iteration{s}.",
+}
+
+
+def _report_loop(outcome: loop.Outcome, root: Path) -> None:
+    ending = _LOOP_ENDINGS.get(outcome.reason, "Stopped after {n} iteration{s}.")
+    print(
+        "\n"
+        + ending.format(n=outcome.iterations, s="" if outcome.iterations == 1 else "s")
+    )
+    print(f"Loop evidence: {_relative(outcome.directory, root)}/")
+    if not outcome.converged and outcome.final is not None:
+        print(f"Last verification: {verify.bundle_path(outcome.final.bundle, root)}/")
+
+
+def _relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def cmd_fleet(args: argparse.Namespace) -> int:
+    """Run many loops under supervision (SPEC_SUPERVISION_V0.md §S3)."""
+    root = git.find_root(Path.cwd())
+
+    refused = _refuse_unverifiable(root, "fleet")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring fleet: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.fleet is None:
+        print(
+            f"wring fleet: no 'fleet:' section in {config.CONFIG_FILENAME} — "
+            "it must at least declare a deadline:\n\n"
+            "  fleet:\n"
+            "    concurrency: 4\n"
+            "    deadline: 21600",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    try:
+        tasks = fleet.load_tasks(Path(args.tasks))
+    except fleet.FleetError as exc:
+        print(f"wring fleet: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if not args.json:
+        print(
+            f"{len(tasks)} task{'' if len(tasks) == 1 else 's'}, "
+            f"{cfg.fleet.concurrency} at a time."
+        )
+
+    try:
+        outcome = fleet.run(root, cfg, tasks)
+    except fleet.FleetError as exc:
+        print(f"wring fleet: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "succeeded": outcome.succeeded,
+                    "failed": outcome.failed,
+                    "parked": outcome.parked,
+                    "join_satisfied": outcome.join_satisfied,
+                    "fleet_dir": _relative(outcome.directory, root),
+                }
+            )
+        )
+    else:
+        print(
+            f"\n{outcome.succeeded} succeeded, {outcome.failed} failed, "
+            f"{outcome.parked} parked."
+        )
+        if outcome.parked:
+            print("Parked work kept its evidence and re-enters the queue on resume.")
+        print(f"Fleet evidence: {_relative(outcome.directory, root)}/")
+
+    return EXIT_OK if outcome.join_satisfied else EXIT_GATE_FAILED
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Continue a loop whose ledger stopped without `loop.finished`.
+
+    A loop that ended — converged, stopped, or interrupted by a human — is
+    over. Only one that was *killed* leaves a ledger that simply stops, and
+    its completed iterations are facts worth continuing from.
+    """
+    root = git.find_root(Path.cwd())
+
+    refused = _refuse_unverifiable(root, "resume")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        verify.plan(cfg, None)
+    except config.ConfigError as exc:
+        print(f"wring resume: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.run is None:
+        print(
+            f"wring resume: no 'run:' section in {config.CONFIG_FILENAME}",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    if args.loop is not None:
+        loop_dir = Path(args.loop)
+        if not loop_dir.is_dir():
+            print(f"wring resume: no loop directory at {args.loop}", file=sys.stderr)
+            return EXIT_CONFIG
+    else:
+        found = loop.latest_loop(root / loop.LOOPS_DIRNAME)
+        if found is None:
+            print(
+                f"wring resume: no loops under "
+                f"{(root / loop.LOOPS_DIRNAME).as_posix()}",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+        loop_dir = found
+
+    try:
+        resumable = loop.inspect_for_resume(loop_dir)
+    except evidence.EvidenceError as exc:
+        print(f"wring resume: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if resumable is None:
+        print(
+            f"wring resume: {_relative(loop_dir, root)} finished — there is "
+            "nothing to resume. A loop that converged, stopped or was "
+            "interrupted by hand is over; start a new one with 'wring run'.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    quiet = args.json
+    if not quiet:
+        print(
+            f"Resuming {_relative(loop_dir, root)} — "
+            f"{resumable.iterations_done} iteration"
+            f"{'' if resumable.iterations_done == 1 else 's'} already done."
+        )
+
+    try:
+        outcome = loop.run(
+            root,
+            cfg,
+            on_iteration=None if quiet else _report_iteration,
+            on_gate=None if quiet else _report_gate,
+            on_worker=None if quiet else _report_worker,
+            resuming=resumable,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring resume: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": outcome.status,
+                    "reason": outcome.reason,
+                    "iterations": outcome.iterations,
+                    "resumed_from": resumable.iterations_done,
+                    "loop_dir": _relative(outcome.directory, root),
+                    "final": (
+                        verify.json_summary(outcome.final, root)
+                        if outcome.final is not None
+                        else None
+                    ),
+                }
+            )
+        )
+    else:
+        _report_loop(outcome, root)
+
+    if outcome.status == "interrupted":
+        return EXIT_INTERRUPTED
+    return EXIT_OK if outcome.converged else EXIT_GATE_FAILED
+
+
+def cmd_judge(args: argparse.Namespace) -> int:
+    """Judge a finished bundle against a rubric (SPEC_JUDGE_V0.md)."""
+    import time
+
+    root = git.find_root(Path.cwd())
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.judge is None:
+        print(
+            f"wring judge: no 'judge:' section in {config.CONFIG_FILENAME} — "
+            "there is no default endpoint and never will be, so a repo that "
+            "has not opted in cannot reach a network at all. Add one:\n\n"
+            "  judge:\n"
+            "    endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+            "    model: qwen2.5-coder:7b\n"
+            "    rubric: rubric.yaml",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    run_dir = _judge_target(args.run, root)
+    if run_dir is None:
+        return EXIT_CONFIG
+
+    try:
+        loaded = rubric.load(Path(args.rubric or cfg.judge.rubric), root)
+    except rubric.RubricError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
+        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
+    ))
+
+    try:
+        passed, failed_gate = judge.gates_passed(run_dir)
+    except judge.JudgeError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if not passed:
+        print(
+            f"wring judge: refusing to judge {_relative(run_dir, root)} — its "
+            f"gates did not pass"
+            + (f" (`{failed_gate}` failed)" if failed_gate else "")
+            + ". A judge has nothing to add when the deterministic gates "
+            "already said no.",
+            file=sys.stderr,
+        )
+        return EXIT_REFUSED
+
+    if cfg.judge.api_key_env and os.environ.get(cfg.judge.api_key_env) is None:
+        print(
+            f"wring judge: 'judge.api_key_env' names {cfg.judge.api_key_env}, "
+            "which is not set in this environment",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    try:
+        packet = judge.build_packet(run_dir, loaded)
+    except judge.JudgeError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    request = judge.render_request(
+        packet, cfg.judge.model, cfg.judge.max_output_tokens
+    )
+
+    if args.print_request:
+        print(json.dumps(request, indent=2))
+        return EXIT_OK
+
+    started = time.monotonic()
+    try:
+        bundle = judge.Bundle.create(root / judge.VERDICTS_DIRNAME, redactor=redactor)
+    except judge.JudgeError as exc:
+        print(f"wring judge: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    # Written before any transport is consulted: what would leave the machine
+    # is auditable rather than asserted, and --send is this same path
+    # continuing one step further.
+    bundle.write_request(request)
+
+    mode = "live" if args.send else "dry_run"
+    verdict = judge.Verdict(None)
+    if args.send:
+        try:
+            body = judge.send(
+                request,
+                cfg.judge.endpoint,
+                cfg.judge.timeout,
+                os.environ.get(cfg.judge.api_key_env or ""),
+            )
+        except judge.TransportFailed as exc:
+            # Unreachable is not a verdict. Record it and say so.
+            verdict = judge.Verdict(
+                judge.NEEDS_HUMAN, note=f"the endpoint could not be used: {exc}"
+            )
+            body = None
+        else:
+            bundle.write_response(body)
+            verdict = judge.parse_response(body, loaded)
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    shown = _relative(run_dir, root)
+    bundle.write_verdict(
+        mode, shown, loaded, cfg.judge.endpoint, cfg.judge.model, verdict, duration_ms
+    )
+    bundle.write_summary(mode, shown, loaded, verdict)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "mode": mode,
+                    "verdict": verdict.verdict,
+                    "note": verdict.note,
+                    "evidence_dir": shown,
+                    "verdict_dir": _relative(bundle.directory, root),
+                }
+            )
+        )
+    else:
+        _report_judge(mode, verdict, bundle, root, loaded)
+
+    return _judge_exit(mode, verdict)
+
+
+def _judge_target(named: str | None, root: Path) -> Path | None:
+    if named is not None:
+        run_dir = Path(named)
+        if not run_dir.is_dir():
+            print(f"wring judge: no run directory at {named}", file=sys.stderr)
+            return None
+        return run_dir
+    found = evidence.latest_run(root / evidence.RUNS_DIRNAME)
+    if found is None:
+        print(
+            f"wring judge: no runs under "
+            f"{(root / evidence.RUNS_DIRNAME).as_posix()} — run 'wring verify' "
+            "first; a judge reads a finished bundle",
+            file=sys.stderr,
+        )
+        return None
+    return found
+
+
+def _judge_exit(mode: str, verdict: judge.Verdict) -> int:
+    if mode == "dry_run":
+        return EXIT_OK
+    if verdict.verdict == judge.PASS:
+        return EXIT_OK
+    if verdict.verdict == judge.FAIL:
+        return EXIT_GATE_FAILED
+    return EXIT_NEEDS_HUMAN
+
+
+def _report_judge(
+    mode: str, verdict: judge.Verdict, bundle: judge.Bundle, root: Path, loaded
+) -> None:
+    if mode == "dry_run":
+        print("dry run — the request was built and written; nothing was sent.")
+    for row in verdict.criteria:
+        mark = {True: "✓", False: "✗", None: "?"}[row["met"]]
+        tag = "" if row["required"] else "  (optional)"
+        print(f"{mark} {row['id']}{tag}")
+    if verdict.verdict is not None:
+        print(f"\nVerdict: {verdict.verdict}")
+    if verdict.note:
+        print(f"  {verdict.note}")
+    print(f"\nJudgment written to:\n{_relative(bundle.directory, root)}/")
+
+
+def _refuse_unverifiable(root: Path, command: str) -> int | None:
+    """The preconditions every verifying command shares, or None to proceed.
+
+    A bundle that describes an unsafe or unknowable state is worse than no
+    bundle, so neither one gets written.
+    """
     if not git.is_repo(root):
         print(
-            f"wring verify: {Path.cwd()} is not a git repository — verification "
+            f"wring {command}: {Path.cwd()} is not a git repository — verification "
             "records which commit and which changes were proven, so it needs "
             "one. Run 'git init', or verify from inside your repo.",
             file=sys.stderr,
@@ -159,120 +778,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
     unfinished = git.in_progress(root)
     if unfinished is not None:
         print(
-            f"wring verify: refusing to verify in the middle of {unfinished} — "
+            f"wring {command}: refusing to verify in the middle of {unfinished} — "
             "HEAD and the working tree describe a state nobody chose. Finish "
             "or abort it, then verify.",
             file=sys.stderr,
         )
         return EXIT_REFUSED
-
-    try:
-        cfg = config.load(root / config.CONFIG_FILENAME)
-        planned = _plan(cfg, args.gate)
-    except config.ConfigError as exc:
-        print(f"wring verify: {exc}", file=sys.stderr)
-        return EXIT_CONFIG
-
-    # Snapshot git before the bundle exists, so Wringer's own run directory
-    # is never what makes the tree look dirty — or shows up in its own
-    # evidence as an untracked file.
-    state = git.inspect(root)
-    patch = git.diff(root, state.head_sha)
-    status_text = git.status(root)
-    # Built from the environment this run inherits, so the gates' own
-    # secrets are the ones erased.
-    redactor = redact.Redactor.from_config(cfg.evidence)
-    try:
-        if args.output is not None:
-            bundle = evidence.Bundle.at(Path(args.output), redactor=redactor)
-        else:
-            bundle = evidence.Bundle.create(
-                root / evidence.RUNS_DIRNAME, redactor=redactor
-            )
-    except evidence.EvidenceError as exc:
-        print(f"wring verify: {exc}", file=sys.stderr)
-        return EXIT_CONFIG
-
-    bundle.event(
-        "run.started",
-        run_id=bundle.run_id,
-        wringer_version=__version__,
-        repo=root.name,
-        sha=state.head_sha,
-    )
-    bundle.event(
-        "git.status",
-        dirty=state.dirty,
-        changed_files=list(state.changed_files),
-        # Only when there are any, so the event stays the spec's shape for
-        # the common case.
-        **({"untracked": list(state.untracked)} if state.untracked else {}),
-    )
-    if patch is not None:
-        bundle.write_capture(evidence.DIFF_FILENAME, patch)
-    if status_text is not None:
-        bundle.write_capture(evidence.STATUS_FILENAME, status_text)
-
-    results: list[gates.GateResult] = []
-    skipped: list[config.Gate] = []
-    failed_gate: str | None = None
-
-    interrupted: summary.Interrupted | None = None
-
-    for offset, (index, gate) in enumerate(planned):
-        try:
-            result = _run_gate(bundle, gate, index, root)
-        except KeyboardInterrupt:
-            # Ctrl-C: finish the bundle rather than abandon it half-written.
-            # A run that stopped is evidence too, as long as it says so.
-            # The gate that was running is neither passed nor skipped, so it
-            # is carried separately — its directory already exists and holds
-            # whatever it printed before it was killed.
-            interrupted = summary.Interrupted(
-                gate=gate, directory=bundle.gate_dir(index, gate.id)
-            )
-            skipped = [pending for _, pending in planned[offset + 1 :]]
-            break
-        results.append(result)
-        if not args.json:
-            _report_gate(result)
-        if not result.passed and not gate.optional:
-            # Stop on the first required failure; everything after it is
-            # unrun, not passed, and the summary says so.
-            failed_gate = gate.id
-            skipped = [pending for _, pending in planned[offset + 1 :]]
-            break
-
-    if interrupted is not None:
-        status = "interrupted"
-    elif failed_gate is not None:
-        status = "failed"
-    else:
-        status = "passed"
-    bundle.event(
-        "run.finished",
-        status=status,
-        **({"failed_gate": failed_gate} if failed_gate is not None else {}),
-    )
-    bundle.write_manifest(state=state, status=status, failed_gate=failed_gate)
-    summary.write(
-        bundle,
-        state,
-        results=results,
-        skipped=skipped,
-        failed_gate=failed_gate,
-        status=status,
-        interrupted=interrupted,
-    )
-
-    if args.json:
-        _report_json(bundle, root, failed_gate, status)
-    else:
-        _report_run(bundle, root, results, failed_gate, status)
-
-    if interrupted is not None:
-        return EXIT_INTERRUPTED
-    return EXIT_GATE_FAILED if failed_gate is not None else EXIT_OK
+    return None
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
@@ -476,59 +988,6 @@ def _explain_changes(recorded: list[dict]) -> None:
         shown = ", ".join(untracked[:5])
         more = f", … {len(untracked) - 5} more" if len(untracked) > 5 else ""
         print(f"{lead}Untracked ({len(untracked)}): {shown}{more}")
-
-
-def _plan(
-    cfg: config.Config, requested: str | None
-) -> list[tuple[int, config.Gate]]:
-    """The gates this run will attempt, each with its declared position.
-
-    Every gate by default, in declared order (the config decides what runs
-    cheapest first). `--gate ID` narrows the run to one gate but keeps its
-    number, so its evidence lands where a full run would have put it.
-    """
-    numbered = list(enumerate(cfg.gates, start=1))
-    if requested is None:
-        return numbered
-
-    for index, gate in numbered:
-        if gate.id == requested:
-            return [(index, gate)]
-    known = ", ".join(gate.id for gate in cfg.gates)
-    raise config.ConfigError(
-        f"no gate '{requested}' in {config.CONFIG_FILENAME} (declared: {known})"
-    )
-
-
-def _run_gate(
-    bundle: evidence.Bundle, gate: config.Gate, index: int, root: Path
-) -> gates.GateResult:
-    """Run one gate and record everything it produced."""
-    bundle.event("gate.started", gate_id=gate.id, command=gate.run)
-    gate_dir = bundle.gate_dir(index, gate.id)
-    result = gates.run(
-        gate,
-        cwd=root,
-        stdout_path=gate_dir / "stdout.log",
-        stderr_path=gate_dir / "stderr.log",
-        redactor=bundle.redactor,
-    )
-    bundle.write_gate_result(gate_dir, result)
-
-    finished: dict[str, object] = {
-        "gate_id": gate.id,
-        "exit_code": result.exit_code,
-        "duration_ms": result.duration_ms,
-    }
-    if not result.passed:
-        # The spec carries `log` on the failing gate only — that is the one
-        # a reader is being sent to.
-        finished["log"] = bundle.relative(result.stdout_path)
-    if result.truncated:
-        # Only when true: an absent key means the log is whole.
-        finished["truncated"] = True
-    bundle.event("gate.finished", **finished)
-    return result
 
 
 def _gate_line(

@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/loop-event.schema.json",
+  "title": "Wringer loop event",
+  "description": "One line of loop.jsonl. Append-only, one JSON object per line, in the order things happened. This schema describes a single line, not the file. Every event carries `type` and `ts`.",
+  "type": "object",
+  "required": [
+    "type",
+    "ts"
+  ],
+  "properties": {
+    "type": {
+      "enum": [
+        "loop.started",
+        "iteration.started",
+        "verify.finished",
+        "worker.started",
+        "worker.finished",
+        "loop.finished",
+        "loop.resumed"
+      ]
+    },
+    "ts": {
+      "description": "Local ISO-8601 with UTC offset, millisecond precision.",
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "oneOf": [
+    {
+      "title": "loop.started",
+      "required": [
+        "type",
+        "ts",
+        "loop_id",
+        "wringer_version",
+        "repo",
+        "sha",
+        "max_iterations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "loop.started"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "loop_id": {
+          "type": "string"
+        },
+        "wringer_version": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "sha": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    {
+      "title": "iteration.started",
+      "required": [
+        "type",
+        "ts",
+        "iteration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "iteration.started"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    {
+      "title": "verify.finished",
+      "description": "One full `wring verify`. Its own bundle is at evidence_dir and conforms to wringer.evidence.v1; it is referenced, never copied.",
+      "required": [
+        "type",
+        "ts",
+        "iteration",
+        "status",
+        "evidence_dir"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "verify.finished"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "interrupted"
+          ]
+        },
+        "failed_gate": {
+          "description": "PRESENT ONLY when a required gate failed.",
+          "type": "string"
+        },
+        "evidence_dir": {
+          "type": "string"
+        },
+        "failure_signature": {
+          "description": "sha256 of the normalized failure shape. PRESENT ONLY when a gate failed. Seeing the same signature twice in one loop trips the breaker.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "title": "worker.started",
+      "description": "A worker.started with no matching worker.finished means the loop was interrupted while the worker was running \u2014 the same convention gate.started uses in an evidence bundle.",
+      "required": [
+        "type",
+        "ts",
+        "iteration",
+        "command"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "worker.started"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "command": {
+          "description": "The worker command AFTER placeholder substitution, redacted \u2014 what actually ran.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "title": "worker.finished",
+      "description": "exit_code is recorded and never acted on: the evidence decides whether the loop continues, not the worker's opinion of itself.",
+      "required": [
+        "type",
+        "ts",
+        "iteration",
+        "exit_code",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "worker.finished"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exit_code": {
+          "description": "Negative when a signal ended it, which is what a timeout looks like.",
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timed_out": {
+          "description": "PRESENT ONLY when true.",
+          "const": true
+        }
+      }
+    },
+    {
+      "title": "loop.finished",
+      "required": [
+        "type",
+        "ts",
+        "status",
+        "reason",
+        "iterations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "loop.finished"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "converged",
+            "stopped",
+            "interrupted"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "converged",
+            "max_iterations",
+            "no_progress",
+            "oscillating",
+            "budget_exhausted",
+            "interrupted"
+          ]
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    {
+      "title": "loop.resumed",
+      "description": "A killed loop being continued. Its presence is what distinguishes a loop that lived twice from one that ran straight through; the events before it belong to the earlier life.",
+      "required": [
+        "type",
+        "ts",
+        "iterations_done",
+        "reaped_pgids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "loop.resumed"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "iterations_done": {
+          "description": "Iterations completed by the earlier life, read from this ledger.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "reaped_pgids": {
+          "description": "Worker process groups this resume actually managed to kill \u2014 what it did, not what it attempted.",
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  ]
+}

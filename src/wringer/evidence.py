@@ -148,6 +148,25 @@ def _clear_previous(directory: Path) -> None:
         shutil.rmtree(previous_gates)
 
 
+def deep_scrub(redactor: Redactor, value: Any) -> Any:
+    """Erase secrets anywhere inside a value, not just at the top.
+
+    `changed_files` and `untracked` are lists, so a file whose *name* carries
+    a secret was reaching `evidence.jsonl` intact while `status.txt` beside it
+    in the same bundle said `[REDACTED]`. The guarantee SECURITY.md makes is
+    about the bundle, so it cannot hold for some files in it and not others —
+    which is also why the loop's own writer uses this same function.
+    """
+    if isinstance(value, str):
+        return redactor.scrub(value)
+    if isinstance(value, (list, tuple)):
+        # JSON has no tuples; a list is what either one is written as
+        return [deep_scrub(redactor, item) for item in value]
+    if isinstance(value, dict):
+        return {key: deep_scrub(redactor, item) for key, item in value.items()}
+    return value
+
+
 def timestamp() -> str:
     """Local ISO-8601 with offset, to the millisecond — fine enough to order
     two fast gates, coarse enough to stay readable."""
@@ -290,22 +309,7 @@ class Bundle:
             stream.write(line + "\n")
 
     def _scrub(self, value: Any) -> Any:
-        """Erase secrets anywhere inside an event's value, not just at the top.
-
-        `changed_files` and `untracked` are lists, so a file whose *name*
-        carries a secret was reaching `evidence.jsonl` intact while
-        `status.txt` beside it in the same bundle said `[REDACTED]`. The
-        guarantee SECURITY.md makes is about the bundle, so it cannot hold
-        for some files in it and not others.
-        """
-        if isinstance(value, str):
-            return self.redactor.scrub(value)
-        if isinstance(value, (list, tuple)):
-            # JSON has no tuples; a list is what either one is written as
-            return [self._scrub(item) for item in value]
-        if isinstance(value, dict):
-            return {key: self._scrub(item) for key, item in value.items()}
-        return value
+        return deep_scrub(self.redactor, value)
 
     def write_manifest(
         self, state: RepoState, status: str, failed_gate: str | None

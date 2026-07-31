@@ -8,6 +8,7 @@ in a gate definition must not silently change what "verified" means.
 from __future__ import annotations
 
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,16 +18,62 @@ import yaml
 CONFIG_FILENAME = ".wringer.yaml"
 DEFAULT_TIMEOUT_SECONDS = 120
 
+# `wring run` defaults (SPEC_RUN_V0.md §Config). Three laps is enough to show
+# whether a worker is converging without spending an afternoon proving it is
+# not; fifteen minutes is a generous single turn for a coding agent.
+DEFAULT_MAX_ITERATIONS = 3
+DEFAULT_WORKER_TIMEOUT_SECONDS = 900
+
+# What a worker command may ask Wringer to substitute. Anything else in
+# braces is a typo, and a typo that reached the shell would be a command
+# nobody wrote.
+WORKER_PLACEHOLDERS = ("brief", "evidence_dir", "iteration")
+
+# `{name}` not preceded by `$`, so `${SHELL_VAR}` is the shell's business and
+# passes through untouched.
+_PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-z_]+)\}")
+
 # A gate id becomes a directory name in the bundle (`gates/NNN_<id>/`), so it
 # is a slug rather than free text: no path separators, no spaces, no unicode
 # lookalikes. A config typo must never write outside the run directory.
 GATE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 MAX_GATE_ID_LENGTH = 64
 
-_TOP_LEVEL_KEYS = {"version", "gates", "evidence"}
+_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run", "judge", "fleet"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
+_RUN_KEYS = {"worker", "max_iterations", "worker_timeout", "wall_clock"}
+_FLEET_KEYS = {
+    "concurrency",
+    "deadline",
+    "progress_window",
+    "retries",
+    "on_exhausted",
+    "join",
+    "child",
+    "worker_fallbacks",
+}
+_CHILD_KEYS = {"max_iterations", "worker_timeout", "wall_clock"}
+
+_JUDGE_KEYS = {
+    "endpoint",
+    "model",
+    "rubric",
+    "api_key_env",
+    "timeout",
+    "max_output_tokens",
+}
+
+# `wring judge` defaults (SPEC_JUDGE_V0.md §3). endpoint, model and rubric
+# have no defaults and never will: Wringer contacts the endpoint you wrote
+# down, never one it guessed.
+DEFAULT_JUDGE_TIMEOUT_SECONDS = 120
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
+
+# Hosts a cleartext endpoint may name. Anywhere else must be https, because
+# a rubric and a diff are not things to put on the wire in the clear.
+_LOOPBACK = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 class ConfigError(Exception):
@@ -42,12 +89,72 @@ class Gate:
 
 
 @dataclass(frozen=True)
+class Run:
+    """The `run:` section — what `wring run` drives (SPEC_RUN_V0.md).
+
+    `worker` has no default and never will. Wringer runs the command a repo
+    wrote down; inventing one would be the same sin as inventing a gate.
+    """
+
+    worker: str
+    max_iterations: int = DEFAULT_MAX_ITERATIONS
+    worker_timeout: int = DEFAULT_WORKER_TIMEOUT_SECONDS
+    # Optional, no default: the loop is already structurally bounded by
+    # iterations x worker_timeout, so a wall clock is a second opinion the
+    # repo asks for rather than one Wringer imposes.
+    wall_clock: int | None = None
+
+
+@dataclass(frozen=True)
+class Judge:
+    """The `judge:` section — what `wring judge` may contact (SPEC_JUDGE_V0).
+
+    `endpoint`, `model` and `rubric` have no defaults and never will. A repo
+    with no `judge:` section leaves no reachable code path in the program
+    that opens a socket, which is the whole network story in one rule.
+    """
+
+    endpoint: str
+    model: str
+    rubric: str
+    api_key_env: str | None = None
+    timeout: int = DEFAULT_JUDGE_TIMEOUT_SECONDS
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+
+
+@dataclass(frozen=True)
+class Fleet:
+    """The `fleet:` section (SPEC_SUPERVISION_V0.md §S3).
+
+    `deadline` is required and has no default: an unbounded fleet is the
+    thing this whole slice exists to make impossible.
+    """
+
+    deadline: int
+    concurrency: int = 4
+    progress_window: int = 1200
+    retries: int = 1
+    on_exhausted: str = "park"
+    join: str = "all"
+    child_max_iterations: int | None = None
+    worker_fallbacks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Config:
     version: int
     gates: tuple[Gate, ...]
     # The `evidence:` section (include lists, redaction patterns) is
     # parsed for shape only until the Day-3/Day-4 bolts consume it.
     evidence: dict[str, Any] = field(default_factory=dict)
+    # None when the repo has not opted into the loop. `wring verify` neither
+    # needs nor reads this; `wring run` refuses without it.
+    run: Run | None = None
+    # None when the repo has not opted into the judge. Its absence is what
+    # makes a network call unreachable rather than merely unlikely.
+    judge: Judge | None = None
+    # None when the repo has not opted into fleets.
+    fleet: Fleet | None = None
 
 
 def load(path: Path) -> Config:
@@ -94,7 +201,254 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         raise ConfigError(f"{source}: 'evidence' must be a mapping")
     _validate_evidence(evidence, source)
 
-    return Config(version=version, gates=gates, evidence=evidence)
+    return Config(
+        version=version,
+        gates=gates,
+        evidence=evidence,
+        run=_parse_run(raw.get("run"), source),
+        judge=_parse_judge(raw.get("judge"), source),
+        fleet=_parse_fleet(raw.get("fleet"), source),
+    )
+
+
+def _parse_fleet(raw: Any, source: str) -> Fleet | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'fleet' must be a mapping")
+
+    unknown = sorted(set(raw) - _FLEET_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'fleet': {', '.join(unknown)}")
+
+    if raw.get("deadline") is None:
+        raise ConfigError(
+            f"{source}: 'fleet.deadline' is required — a fleet without a "
+            "wall clock is exactly the thing that runs all night"
+        )
+
+    on_exhausted = raw.get("on_exhausted", "park")
+    if on_exhausted not in ("park", "fail"):
+        raise ConfigError(
+            f"{source}: 'fleet.on_exhausted' must be 'park' or 'fail' "
+            f"(got {on_exhausted!r})"
+        )
+
+    join = raw.get("join", "all")
+    if not isinstance(join, str) or not _valid_join(join):
+        raise ConfigError(
+            f"{source}: 'fleet.join' must be 'all', 'first_pass', or "
+            f"'quorum:<0-1>' (got {join!r})"
+        )
+
+    fallbacks = raw.get("worker_fallbacks", [])
+    if not isinstance(fallbacks, list) or not all(
+        isinstance(f, str) and f.strip() for f in fallbacks
+    ):
+        raise ConfigError(
+            f"{source}: 'fleet.worker_fallbacks' must be a list of non-empty "
+            "strings — a declared ladder, never one improvised at runtime"
+        )
+
+    child = raw.get("child", {})
+    if not isinstance(child, dict):
+        raise ConfigError(f"{source}: 'fleet.child' must be a mapping")
+    unknown = sorted(set(child) - _CHILD_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{source}: unknown keys under 'fleet.child': {', '.join(unknown)}"
+        )
+
+    retries = raw.get("retries", 1)
+    if not _is_int(retries) or retries < 0:
+        raise ConfigError(
+            f"{source}: 'fleet.retries' must be an integer of at least 0 "
+            f"(got {retries!r})"
+        )
+
+    return Fleet(
+        deadline=_positive_int(raw, "deadline", 1, source, section="fleet"),
+        concurrency=_positive_int(raw, "concurrency", 4, source, section="fleet"),
+        progress_window=_positive_int(
+            raw, "progress_window", 1200, source, section="fleet"
+        ),
+        retries=retries,
+        on_exhausted=on_exhausted,
+        join=join,
+        child_max_iterations=(
+            None
+            if child.get("max_iterations") is None
+            else _positive_int(
+                child, "max_iterations", 1, source, section="fleet.child"
+            )
+        ),
+        worker_fallbacks=tuple(fallbacks),
+    )
+
+
+def _valid_join(join: str) -> bool:
+    if join in ("all", "first_pass"):
+        return True
+    if join.startswith("quorum:"):
+        try:
+            fraction = float(join.split(":", 1)[1])
+        except ValueError:
+            return False
+        return 0 < fraction <= 1
+    return False
+
+
+def _parse_judge(raw: Any, source: str) -> Judge | None:
+    """The `judge:` section, or None when the repo has not opted in."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'judge' must be a mapping")
+
+    unknown = sorted(set(raw) - _JUDGE_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'judge': {', '.join(unknown)}")
+
+    for key in ("endpoint", "model", "rubric"):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(
+                f"{source}: 'judge.{key}' must be a non-empty string — there is "
+                "no default, because Wringer contacts the endpoint you wrote "
+                "down and never one it guessed"
+            )
+
+    endpoint = raw["endpoint"].strip()
+    _validate_endpoint(endpoint, source)
+
+    api_key_env = raw.get("api_key_env")
+    if api_key_env is not None and (
+        not isinstance(api_key_env, str) or not api_key_env.strip()
+    ):
+        raise ConfigError(
+            f"{source}: 'judge.api_key_env' must be the NAME of an environment "
+            "variable, not a key — Wringer will not read a credential out of a "
+            "config file"
+        )
+
+    return Judge(
+        endpoint=endpoint,
+        model=raw["model"].strip(),
+        rubric=raw["rubric"].strip(),
+        api_key_env=api_key_env,
+        timeout=_positive_int(raw, "timeout", DEFAULT_JUDGE_TIMEOUT_SECONDS, source,
+                              section="judge"),
+        max_output_tokens=_positive_int(
+            raw, "max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS, source,
+            section="judge",
+        ),
+    )
+
+
+def _validate_endpoint(endpoint: str, source: str) -> None:
+    """Checked at parse time, so an unsafe endpoint can never reach a socket.
+
+    https anywhere; http only to loopback. No userinfo, because credentials
+    do not travel in URLs — and this URL is recorded in the bundle. No query
+    string, for the same reason.
+    """
+    parsed = urllib.parse.urlsplit(endpoint)
+
+    if parsed.scheme not in ("http", "https"):
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' must be http:// or https:// "
+            f"(got {parsed.scheme or 'no scheme'!r})"
+        )
+    if not parsed.hostname:
+        raise ConfigError(f"{source}: 'judge.endpoint' has no host")
+    if parsed.username or parsed.password:
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' must not carry credentials — the "
+            "endpoint is recorded in the verdict bundle. Use 'api_key_env'"
+        )
+    if parsed.query:
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' must not carry a query string — it is "
+            "recorded in the verdict bundle"
+        )
+    if parsed.scheme == "http" and parsed.hostname not in _LOOPBACK:
+        raise ConfigError(
+            f"{source}: 'judge.endpoint' may only use plain http:// to "
+            f"loopback (got host {parsed.hostname!r}) — a rubric and a diff "
+            "are not things to send in the clear"
+        )
+
+
+def _parse_run(raw: Any, source: str) -> Run | None:
+    """The `run:` section, or None when the repo has not opted into the loop."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'run' must be a mapping")
+
+    unknown = sorted(set(raw) - _RUN_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'run': {', '.join(unknown)}")
+
+    worker = raw.get("worker")
+    if not isinstance(worker, str) or not worker.strip():
+        raise ConfigError(
+            f"{source}: 'run.worker' must be a non-empty string — the command "
+            "that edits the code, e.g. 'claude -p \"$(cat {brief})\"'. There is "
+            "no default: Wringer runs the worker you wrote down, never one it "
+            "guessed"
+        )
+
+    unknown_placeholders = sorted(
+        set(_PLACEHOLDER_PATTERN.findall(worker)) - set(WORKER_PLACEHOLDERS)
+    )
+    if unknown_placeholders:
+        raise ConfigError(
+            f"{source}: 'run.worker' uses unknown placeholder(s) "
+            f"{', '.join('{' + name + '}' for name in unknown_placeholders)} — "
+            f"available: {', '.join('{' + p + '}' for p in WORKER_PLACEHOLDERS)}"
+        )
+
+    return Run(
+        worker=worker,
+        max_iterations=_positive_int(
+            raw, "max_iterations", DEFAULT_MAX_ITERATIONS, source
+        ),
+        worker_timeout=_positive_int(
+            raw, "worker_timeout", DEFAULT_WORKER_TIMEOUT_SECONDS, source
+        ),
+        wall_clock=(
+            None
+            if raw.get("wall_clock") is None
+            else _positive_int(raw, "wall_clock", 1, source)
+        ),
+    )
+
+
+def _positive_int(
+    raw: dict, key: str, default: int, source: str, section: str = "run"
+) -> int:
+    value = raw.get(key, default)
+    if not _is_int(value) or value < 1:
+        raise ConfigError(
+            f"{source}: '{section}.{key}' must be an integer of at least 1 "
+            f"(got {value!r})"
+        )
+    return value
+
+
+def substitute(command: str, **values: Any) -> str:
+    """Fill a worker command's placeholders.
+
+    Only the declared names, and only `{name}` — `${VAR}` is the shell's, and
+    an unknown placeholder was already rejected at parse time.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        return str(values[name]) if name in values else match.group(0)
+
+    return _PLACEHOLDER_PATTERN.sub(replace, command)
 
 
 def _validate_evidence(evidence: dict[str, Any], source: str) -> None:

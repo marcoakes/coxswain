@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +71,7 @@ def run(
     stdout_path: Path,
     stderr_path: Path,
     redactor: Redactor | None = None,
+    on_spawn: Callable[[int], None] | None = None,
 ) -> GateResult:
     """Run `gate.run` through the shell in `cwd`, capturing its streams.
 
@@ -98,6 +100,11 @@ def run(
         stderr=subprocess.PIPE,
         start_new_session=_POSIX,
     )
+    # start_new_session makes the child a group leader, so its pgid IS its
+    # pid. Reported the moment it exists, because a caller that wants to reap
+    # an orphan after a SIGKILL needs this on disk *before* the work runs.
+    if on_spawn is not None:
+        on_spawn(proc.pid)
     timed_out = False
     try:
         out, err = proc.communicate(timeout=gate.timeout)

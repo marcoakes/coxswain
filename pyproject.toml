@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wringer"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "One command that proves whether this change is mergeable — wring verify, a standalone evidence compiler"
 readme = "README.md"
 requires-python = ">=3.11"

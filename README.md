@@ -54,7 +54,7 @@ Next:
 
 Exit code `1`, and a bundle on disk that a human or an agent can read: `summary.md` for the person reviewing, timestamped `evidence.jsonl` for the machine, `diff.patch` and `status.txt` for what was being verified, per-gate logs for what happened. `wring explain` replays the diagnosis without an LLM; `wring verify --json` emits one object for an agent to act on. The full transcript — and what is still unbuilt — is in the [quickstart](QUICKSTART.md).
 
-It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM, no cloud, no uploads. After an AI coding session, `wring verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)** — including the release bar: *Wringer verifies Wringer, in CI, with the demo bundle committed, before v0.1.0 tags.*
+It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM and no network — by default, and in every command that proves anything. `wring judge --send` is the single exception: it exists only when your repo declares an endpoint, it writes the exact bytes to disk before it opens a socket, and it never runs unless you type `--send`. After an AI coding session, `wring verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)** — including the release bar: *Wringer verifies Wringer, in CI, with the demo bundle committed, before v0.1.0 tags.*
 
 > ⚠️ **`.wringer.yaml` is code.** `wring verify` runs the commands a repository declares, through a shell, with your privileges — the same trust you extend to its `Makefile`. Read a stranger's `.wringer.yaml` before running `wring verify` in their repo. Gates are not sandboxed in v0.1; see [SECURITY.md](SECURITY.md), which also explains why an evidence bundle should be read before you share it.
 
@@ -82,6 +82,33 @@ That is the run committed at
 same id, so the transcript and the bundle are the same event rather than two
 similar ones. That bundle is the answer to "how do I know?" — read it rather
 than trust the badge.
+
+## The loop is real now — `wring run`
+
+`wring verify` proves a change; `wring run` closes the loop around it. While
+the gates fail it writes the failure into a brief, hands it to **your** coding
+agent as a subprocess, and verifies again. Wringer still never calls an LLM
+itself. Captured from a scratch repo with a planted bug and a scripted worker:
+
+```
+$ wring run
+
+iteration 1/3
+✗ test failed        0.2s
+→ worker             0.0s  (exit 0)
+
+iteration 2/3
+✓ test passed        0.1s
+
+Converged in 2 iterations.
+Loop evidence: .wringer/loops/20260730-234410-7c70/
+```
+
+A worker's exit code never ends the loop — the evidence decides — and a worker
+that changes nothing stops it without re-running the gates to prove the
+obvious. `wring run` never touches git. Contract:
+**[SPEC_RUN_V0.md](SPEC_RUN_V0.md)**; walkthrough in the
+[quickstart](QUICKSTART.md#the-loop--wring-run).
 
 ## The format is targetable, not just readable
 

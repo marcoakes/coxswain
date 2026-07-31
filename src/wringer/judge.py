@@ -1,0 +1,403 @@
+"""The rubric judge — `wringer.judge.v1` (SPEC_JUDGE_V0.md).
+
+Reads a *finished* evidence bundle plus a rubric and produces a structured
+verdict. It is a standalone command over a completed artifact, the way
+`wring verify` shipped before `wring run`.
+
+That shape is what makes worker/judge isolation **physical**: this module
+reads `.wringer/runs/<id>/`, while everything a worker ever said lives in
+`.wringer/loops/<id>/iterations/`. The two trees do not overlap, so a
+worker's reasoning cannot reach a judge — there is no code path along which
+it could travel. `Packet` below is the type-level expression of that: a
+frozen dataclass with a fixed field set, and no field that could carry a
+loop, a brief, or a worker log.
+
+**Dry run is the default.** `request.json` is written before the transport
+is ever consulted, so what leaves the machine is auditable rather than
+asserted, and `--send` is the same code path continuing one step further.
+`send()` below is the only function in Wringer that opens a socket.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from wringer import evidence
+from wringer.redact import Redactor
+from wringer.rubric import Rubric
+
+SCHEMA_VERSION = "wringer.judge.v1"
+VERDICTS_DIRNAME = Path(".wringer") / "verdicts"
+VERDICT_FILENAME = "verdict.json"
+REQUEST_FILENAME = "request.json"
+RESPONSE_FILENAME = "response.json"
+SUMMARY_FILENAME = "summary.md"
+
+# The diff is the bulk of what travels. Beyond this it is truncated with a
+# declared marker — a judge that needs more than 64 KB of patch is being
+# asked the wrong question.
+MAX_DIFF_BYTES = 64 * 1024
+
+PASS, FAIL, NEEDS_HUMAN = "pass", "fail", "needs_human"
+
+
+class JudgeError(Exception):
+    """The judgment could not be made (CLI exit code 2)."""
+
+
+class TransportFailed(Exception):
+    """The endpoint could not be reached, or did not answer usefully.
+
+    Never a verdict: the caller turns this into `needs_human`, because
+    "nothing competent looked at the evidence" is not "the evidence says no".
+    """
+
+
+@dataclass(frozen=True)
+class Packet:
+    """**The closed list**: everything the judge is allowed to see.
+
+    A frozen dataclass with a fixed field set, built by one function from one
+    bundle directory and one rubric. There is no field here that could carry
+    a worker's output, so passing one is a type error rather than a review
+    comment — which is the difference between isolation that is structural
+    and isolation that is merely intended.
+    """
+
+    rubric_title: str
+    criteria: tuple[dict[str, Any], ...]
+    diff: str
+    diff_truncated: bool
+    gates: tuple[dict[str, Any], ...]
+    head_sha: str | None
+    branch: str | None
+    dirty: bool
+
+
+@dataclass(frozen=True)
+class Verdict:
+    verdict: str | None  # None in a dry run: nothing judged anything
+    criteria: tuple[dict[str, Any], ...] = ()
+    note: str = ""
+
+
+def gates_passed(evidence_dir: Path) -> tuple[bool, str | None]:
+    """Whether the bundle's required gates passed, and what failed if not.
+
+    A judge has nothing to add when the deterministic gates already said no,
+    so this is a precondition rather than an input.
+    """
+    try:
+        manifest = evidence.read_manifest(evidence_dir)
+    except evidence.EvidenceError as exc:
+        raise JudgeError(str(exc)) from exc
+    result = manifest.get("result", {})
+    return result.get("status") == "passed", result.get("failed_gate")
+
+
+def build_packet(evidence_dir: Path, rubric: Rubric) -> Packet:
+    """Assemble the closed list from a bundle and a rubric — nothing else."""
+    try:
+        manifest = evidence.read_manifest(evidence_dir)
+        rows = evidence.read_gate_results(evidence_dir)
+    except evidence.EvidenceError as exc:
+        raise JudgeError(str(exc)) from exc
+
+    diff_path = evidence_dir / evidence.DIFF_FILENAME
+    diff, truncated = "", False
+    if diff_path.is_file():
+        raw = diff_path.read_bytes()
+        if len(raw) > MAX_DIFF_BYTES:
+            raw = raw[:MAX_DIFF_BYTES]
+            truncated = True
+        diff = raw.decode("utf-8", errors="replace")
+        if truncated:
+            diff += "\n[wringer: diff truncated at 64 KB for the judge]\n"
+
+    repo = manifest.get("repo", {})
+    return Packet(
+        rubric_title=rubric.title,
+        criteria=tuple(
+            {"id": c.id, "title": c.title, "guidance": c.guidance,
+             "required": c.required}
+            for c in rubric.criteria
+        ),
+        diff=diff,
+        diff_truncated=truncated,
+        gates=tuple(
+            {
+                "id": row.get("gate_id"),
+                "command": row.get("command"),
+                "exit_code": row.get("exit_code"),
+                "duration_ms": row.get("duration_ms"),
+                "status": row.get("status"),
+            }
+            for _, row in rows
+        ),
+        head_sha=repo.get("head_sha"),
+        branch=repo.get("branch"),
+        dirty=bool(repo.get("dirty")),
+    )
+
+
+def render_request(packet: Packet, model: str, max_output_tokens: int) -> dict:
+    """The exact chat-completions body. Built from a Packet and nothing else."""
+    criteria_lines = "\n".join(
+        f"- {c['id']} ({'required' if c['required'] else 'optional'}): "
+        f"{c['title']}" + (f" — {c['guidance']}" if c["guidance"] else "")
+        for c in packet.criteria
+    )
+    gate_lines = "\n".join(
+        f"- {g['id']}: {g['status']} (exit {g['exit_code']}, `{g['command']}`)"
+        for g in packet.gates
+    ) or "- (none recorded)"
+
+    ids = [c["id"] for c in packet.criteria]
+    user = (
+        f"# Rubric: {packet.rubric_title}\n\n"
+        f"Judge the change below against each criterion.\n\n"
+        f"## Criteria\n{criteria_lines}\n\n"
+        f"## Gates (all passed — the change works; you are judging whether it "
+        f"is the right change)\n{gate_lines}\n\n"
+        f"## Repo\n- HEAD: {packet.head_sha}\n- branch: {packet.branch}\n"
+        f"- dirty: {packet.dirty}\n\n"
+        f"## Diff\n```diff\n{packet.diff}\n```\n\n"
+        f"## Reply format\nReturn ONLY a JSON object:\n"
+        f'{{"criteria": [{{"id": "<one of: {", ".join(ids)}>", "met": true, '
+        f'"reason": "<one sentence>"}}]}}\n'
+        f"Include every criterion exactly once."
+    )
+    return {
+        "model": model,
+        "max_tokens": max_output_tokens,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a code-review judge. You see a diff, the gates it "
+                    "already passed, and a rubric. You never see the author's "
+                    "reasoning. Answer only with the requested JSON."
+                ),
+            },
+            {"role": "user", "content": user},
+        ],
+    }
+
+
+def parse_response(body: Any, rubric: Rubric) -> Verdict:
+    """Turn a model reply into a verdict, or `needs_human` if it cannot be.
+
+    Every failure to understand the reply is `needs_human`, never `fail`:
+    "the evidence says no" and "nothing competent looked at the evidence"
+    are different claims.
+    """
+    try:
+        content = body["choices"][0]["message"]["content"]
+        parsed = json.loads(_strip_fences(content))
+        answers = {a["id"]: a for a in parsed["criteria"]}
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        return Verdict(NEEDS_HUMAN, note="the reply could not be parsed")
+
+    rows: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for criterion in rubric.criteria:
+        answer = answers.get(criterion.id)
+        if answer is None or not isinstance(answer.get("met"), bool):
+            missing.append(criterion.id)
+            rows.append(
+                {"id": criterion.id, "met": None, "required": criterion.required,
+                 "reason": "not scored by the judge"}
+            )
+            continue
+        rows.append(
+            {
+                "id": criterion.id,
+                "met": answer["met"],
+                "required": criterion.required,
+                "reason": str(answer.get("reason", ""))[:500],
+            }
+        )
+
+    if missing:
+        return Verdict(
+            NEEDS_HUMAN,
+            tuple(rows),
+            f"criteria not scored: {', '.join(missing)}",
+        )
+    failed = [r["id"] for r in rows if r["required"] and not r["met"]]
+    if failed:
+        return Verdict(FAIL, tuple(rows), f"required criteria unmet: "
+                                          f"{', '.join(failed)}")
+    return Verdict(PASS, tuple(rows))
+
+
+def _strip_fences(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        lines = lines[1:-1] if len(lines) > 2 and lines[-1].startswith("```") \
+            else lines[1:]
+        return "\n".join(lines)
+    return stripped
+
+
+def send(request: dict, endpoint: str, timeout: int, api_key: str | None) -> dict:
+    """Post the request and return the parsed reply.
+
+    **The only function in Wringer that opens a socket** — deliberately, so
+    that `grep -rn urlopen src/` has exactly one answer. It is reached only
+    from `wring judge --send`, only when a repo declared an endpoint, and
+    only after `request.json` is already on disk.
+
+    Redirects are not followed: a redirect could move a diff to a host the
+    repo never declared, and the endpoint safety rules were checked against
+    the URL that was written down.
+    """
+    import urllib.error
+    import urllib.request
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    posted = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    class _NoRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirects)
+    try:
+        with opener.open(posted, timeout=timeout) as reply:
+            body = reply.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        # A transport failure is not a verdict. The caller turns this into
+        # needs_human, never fail.
+        raise TransportFailed(str(exc)) from exc
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise TransportFailed(f"the endpoint did not return JSON: {exc}") from exc
+
+
+@dataclass(frozen=True)
+class Bundle:
+    """`.wringer/verdicts/<id>/`. Owns the redactor, so every write scrubs."""
+
+    directory: Path
+    verdict_id: str
+    started_at: datetime
+    redactor: Redactor = Redactor()
+
+    @classmethod
+    def create(
+        cls,
+        verdicts_root: Path,
+        now: datetime | None = None,
+        redactor: Redactor | None = None,
+    ) -> Bundle:
+        started_at = now if now is not None else datetime.now().astimezone()
+        try:
+            verdicts_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise JudgeError(f"cannot create {verdicts_root}: {exc}") from exc
+        for _ in range(64):
+            verdict_id = evidence.new_run_id(started_at)
+            directory = verdicts_root / verdict_id
+            try:
+                directory.mkdir(exist_ok=False)
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise JudgeError(f"cannot create {directory}: {exc}") from exc
+            return cls(directory, verdict_id, started_at, redactor or Redactor())
+        raise JudgeError(f"could not allocate a directory under {verdicts_root}")
+
+    def write_request(self, request: dict) -> Path:
+        """Written BEFORE any socket is opened, so what would leave the
+        machine is auditable rather than asserted."""
+        path = self.directory / REQUEST_FILENAME
+        scrubbed = evidence.deep_scrub(self.redactor, request)
+        path.write_text(json.dumps(scrubbed, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def write_response(self, body: Any) -> Path:
+        path = self.directory / RESPONSE_FILENAME
+        scrubbed = evidence.deep_scrub(self.redactor, body)
+        path.write_text(json.dumps(scrubbed, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def write_verdict(
+        self,
+        mode: str,
+        evidence_dir: str,
+        rubric: Rubric,
+        endpoint: str,
+        model: str,
+        verdict: Verdict,
+        duration_ms: int,
+    ) -> Path:
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "verdict_id": self.verdict_id,
+            "started_at": self.started_at.replace(microsecond=0).isoformat(),
+            "mode": mode,
+            "evidence_dir": evidence_dir,
+            "rubric": {"path": rubric.path, "sha256": rubric.sha256},
+            "endpoint": self.redactor.scrub(endpoint),
+            "model": model,
+            "verdict": verdict.verdict,
+            "criteria": list(verdict.criteria),
+            "note": verdict.note,
+            "duration_ms": duration_ms,
+        }
+        path = self.directory / VERDICT_FILENAME
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def write_summary(
+        self, mode: str, evidence_dir: str, rubric: Rubric, verdict: Verdict
+    ) -> Path:
+        lines = [
+            f"# wring judge — {self.verdict_id}",
+            "",
+            f"- mode: **{mode}**",
+            f"- evidence: `{evidence_dir}`",
+            f"- rubric: `{rubric.path}` (`{rubric.sha256[:12]}`)",
+            f"- verdict: **{verdict.verdict or 'none — nothing was sent'}**",
+        ]
+        if verdict.note:
+            lines.append(f"- note: {verdict.note}")
+        if verdict.criteria:
+            lines += [
+                "",
+                "| criterion | required | met | reason |",
+                "|---|---|---|---|",
+            ]
+            for row in verdict.criteria:
+                met = {True: "yes", False: "no", None: "—"}[row["met"]]
+                lines.append(
+                    f"| {row['id']} | {'yes' if row['required'] else 'no'} "
+                    f"| {met} | {row['reason']} |"
+                )
+        else:
+            lines += [
+                "",
+                "No criteria were scored: this was a dry run, so the request "
+                f"was built and written to `{REQUEST_FILENAME}` and nothing "
+                "was sent.",
+            ]
+        path = self.directory / SUMMARY_FILENAME
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path

@@ -77,9 +77,18 @@ turn them into text.
 
 ## What Wringer never does
 
-- **No network.** `wring verify` makes no outbound connections. Nothing is
-  uploaded, phoned home, or telemetered — ever, by design, in every
-  release.
+- **No network, with one command as the declared exception.**
+  `wring verify`, `wring run`, `wring resume`, `wring fleet` and
+  `wring explain` make no outbound connections — nothing is uploaded, phoned
+  home, or telemetered, ever, by design, in every release.
+  **`wring judge --send` is the exception, and it is opt-in three times
+  over:** it exists only when your repo declares a `judge.endpoint`, it runs
+  only when you type `--send` (the default builds the request and sends
+  nothing), and it writes `request.json` — the exact bytes — to disk *before*
+  it opens the socket, so what left the machine is auditable rather than
+  asserted. Plain `http://` is refused to anything but loopback, redirects
+  are not followed, and `judge.api_key_env` names a variable whose value is
+  folded into the redactor so it cannot reach any artifact.
 - **No writes outside the repo.** Evidence goes to `.wringer/runs/` under the
   detected git root. Gate ids are validated as slugs precisely so a config
   cannot direct a write outside the bundle.

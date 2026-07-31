@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from wringer import cli, evidence, gates
+from wringer import cli, evidence, gates, loop
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schema"
 
@@ -51,12 +51,12 @@ def check(obj: dict, schema: dict, where: str) -> None:
     assert not missing, f"{where}: missing required {sorted(missing)}"
 
 
-def branch(event_type: str) -> dict:
-    """The evidence-event branch describing one `type`."""
-    for option in load("evidence-event.schema.json")["oneOf"]:
+def branch(event_type: str, schema: str = "evidence-event.schema.json") -> dict:
+    """The event-schema branch describing one `type`."""
+    for option in load(schema)["oneOf"]:
         if option["properties"]["type"]["const"] == event_type:
             return option
-    raise AssertionError(f"no schema branch for {event_type!r}")
+    raise AssertionError(f"no schema branch for {event_type!r} in {schema}")
 
 
 def only_bundle(root: Path) -> Path:
@@ -131,6 +131,75 @@ def test_a_failing_run_matches_the_published_schemas(
     assert any("log" in e for e in finished)
     assert any("untracked" in e for e in events if e["type"] == "git.status")
     assert any("failed_gate" in e for e in events if e["type"] == "run.finished")
+
+
+def test_a_loop_matches_the_published_loop_schemas(repo, monkeypatch, capsys):
+    """Two loops, so every event type and both optional keys are exercised:
+    one that converges, one whose worker overruns its timeout."""
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED calc.py"
+run:
+  worker: "echo FIXED > calc.py"
+  max_iterations: 3
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["run"]) == cli.EXIT_OK
+
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED calc.py"
+run:
+  worker: "sleep 30"
+  max_iterations: 2
+  worker_timeout: 1
+""",
+        encoding="utf-8",
+    )
+    assert cli.main(["run"]) == cli.EXIT_GATE_FAILED
+    capsys.readouterr()
+
+    seen: set[str] = set()
+    optional: set[str] = set()
+    loops = sorted((repo / loop.LOOPS_DIRNAME).iterdir())
+    assert len(loops) == 2
+
+    for loop_dir in loops:
+        check(
+            json.loads((loop_dir / loop.MANIFEST_FILENAME).read_text("utf-8")),
+            load("loop-manifest.schema.json"),
+            f"{loop_dir.name}/manifest.json",
+        )
+        for line in (loop_dir / loop.EVENTS_FILENAME).read_text("utf-8").splitlines():
+            event = json.loads(line)
+            check(
+                event,
+                branch(event["type"], "loop-event.schema.json"),
+                f"{loop_dir.name} event {event['type']}",
+            )
+            seen.add(event["type"])
+            optional |= {k for k in ("failed_gate", "timed_out") if k in event}
+
+    assert seen == {
+        "loop.started",
+        "iteration.started",
+        "verify.finished",
+        "worker.started",
+        "worker.finished",
+        "loop.finished",
+    }
+    # the keys that appear only in the case they describe really appeared
+    assert optional == {"failed_gate", "timed_out"}
 
 
 def test_an_interrupted_run_matches_the_published_schemas(
