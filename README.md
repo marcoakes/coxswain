@@ -120,6 +120,35 @@ obvious. `wring run` never touches git. Contract:
 **[SPEC_RUN_V0.md](SPEC_RUN_V0.md)**; walkthrough in the
 [quickstart](QUICKSTART.md#the-loop--wring-run).
 
+## Describe what you want built — `wring spec`
+
+The front door for someone who does not write the config. A product manager
+writes a PRD in plain language; `wring spec` drafts acceptance criteria, gates
+and a build plan **as a file**; a human reads and approves that file; `wring
+plan` compiles it into work the fleet already knows how to run.
+
+```
+$ wring spec PRD.md --send
+Drafted wringer.spec.yaml — CSV export on the reports page
+  4 criteria (1 need a human) · 2 proposed gates · 2 tasks
+  1 required question it could not answer for you
+
+  approved: false   ← nothing runs until you change this by hand
+```
+
+The dangerous failure here is not a bad build; it is a **confident build of
+the wrong thing**. So: `approved: false` is an interlock no flag, environment
+variable or model reply may flip — there is deliberately **no `--yes`** —
+anything the drafter had to assume comes back as a question that blocks
+planning until a person answers it in the file, and gates are proposed as a
+diff rather than installed, because a harness that quietly widens its own
+definition of "verified" is worth nothing. Criteria no test can decide are
+carried as `human: true` and are then **never sent to a judge at all**.
+
+The whole loop, captured end to end — PRD in, verified change out, receipts
+attached — is [`docs/pm-loop.md`](docs/pm-loop.md). Contract:
+**[SPEC_INTENT_V0.md](SPEC_INTENT_V0.md)**.
+
 ## The format is targetable, not just readable
 
 The bundle is the interface, so it is [published as JSON

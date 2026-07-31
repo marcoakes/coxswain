@@ -25,6 +25,7 @@ no network, no uploads — ever.
 |---|---|
 | [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) | **binding** for v0.1 implementation — CLI surface, exit codes, bundle format, build order, release bar |
 | [SPEC_RUN_V0.md](SPEC_RUN_V0.md) | **binding** for v0.2 slice 1 — `wring run`, the `run:` config section, the loop's rulings and `wringer.loop.v1` |
+| [SPEC_INTENT_V0.md](SPEC_INTENT_V0.md) | **binding** for `wring spec` / `wring plan` — `wringer.spec.v1`, the approval interlock, and why there is no `--yes`. The captured loop is [docs/pm-loop.md](docs/pm-loop.md) |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
@@ -33,21 +34,24 @@ no network, no uploads — ever.
 
 Where they disagree about v0.1, the spec wins.
 
-## Current state — every bolt shipped; one line from the tag
+## Current state — v0.1.0 shipped; 0.2 in progress on `main`
 
-There **is** code now: `wring init` and `wring verify` work — `verify` runs a
-repo's whole declared gate set and writes a real bundle, `wring explain`
-diagnoses a finished run, `--json` feeds agents, and secrets never reach the
-disk — with 315 tests passing on Python 3.11–3.13 (plus macOS) in CI.
-On the `run-v0.2` branch: `wring run` closes the loop, `wring resume`
-continues a killed one, `wring fleet` supervises hundreds, and `wring judge`
-weighs a finished bundle against a rubric.
+**`v0.1.0` is tagged and on PyPI** (`pip install wringer`). `wring init`,
+`wring verify` and `wring explain` are that release: `verify` runs a repo's
+whole declared gate set and writes a real bundle, `--json` feeds agents, and
+secrets never reach the disk.
 
-**Wringer now verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares
-this repo's own gates, CI runs `wring verify` and uploads the bundle, and a
-real one is committed at [`.wringer.example/`](.wringer.example/). The only
-unticked line on the spec's release bar is the PyPI publish, which is the
-maintainer's to do.
+On `main` since, unreleased as 0.2: `wring run` closes the loop, `wring
+resume` continues a killed one, `wring fleet` supervises hundreds, `wring
+judge` weighs a finished bundle against a rubric, `wring doctor` checks this
+machine's preconditions, the `acp:` worker form talks to any agent that speaks
+the protocol, and `wring spec` / `wring plan` are the front door — a PRD in,
+a spec a human approves, work a fleet can run. 417 tests on Python 3.11–3.13
+plus macOS in CI.
+
+**Wringer verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares this
+repo's own gates, CI runs `wring verify` and uploads the bundle, and a real
+one is committed at [`.wringer.example/`](.wringer.example/).
 
 | Bolt | Spec day | State |
 |---|---|---|
@@ -59,6 +63,7 @@ maintainer's to do.
 | 5 — dogfood | Day 5 | ✅ `wring init` detects real commands (pyproject / package.json / Makefile) and gitignores `.wringer/`, `wring verify --output`, Wringer's own `.wringer.yaml`, CI runs `wring verify` + uploads the bundle, committed bundle in `.wringer.example/` |
 | v0.2 slice 1 — the loop | — | ✅ `wring run`: `run:` config, verify→brief→worker→verify, plateau fingerprint, `wringer.loop.v1` bundle, loop schemas ([SPEC_RUN_V0.md](SPEC_RUN_V0.md)) |
 | 5.5 — pre-publish hardening | — | ✅ interrupted runs named in `summary.md` and diagnosed by `explain`, `latest_run` ordered by time not name, reused `--output` cleared before writing, post-kill drain bounded, event lists scrubbed, `evidence.include` shape-checked |
+| P2 — the front door | — | ✅ `wring spec` / `wring plan`: `wringer.spec.v1`, the approval interlock, questions instead of guesses, gates proposed as a diff, `human: true` criteria a judge is never asked ([SPEC_INTENT_V0.md](SPEC_INTENT_V0.md), [docs/pm-loop.md](docs/pm-loop.md)) |
 
 The `v0.1.0` tag is gated on the spec's
 [Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
@@ -93,6 +98,8 @@ Then:
 .venv/bin/wring verify --gate ID  # one gate, numbered as if the full run happened
 .venv/bin/wring verify --json     # one object on stdout, no human report
 .venv/bin/wring explain           # diagnose the latest run (no LLM)
+.venv/bin/wring spec PRD.md       # draft wringer.spec.yaml (dry run: sends nothing)
+.venv/bin/wring plan              # an approved spec -> tasks.jsonl, briefs, rubric
 ```
 
 **`wring verify` on this repo is the law** — it runs the two gates
@@ -139,19 +146,53 @@ block first — the clean console is the product.
 | `rubric.py` | `wringer.rubric.v1` — its own file because its bytes travel, so it gets its own size and shape limits | live under `.wringer/` (a rubric is source, not evidence) |
 | `fleet.py` | `wring fleet`: a bounded pool of child `wring run` subprocesses, the self-healing ladder, reaping by ledger growth, honest partial-success counts | do the work itself — it is only a supervisor |
 | `loop.py` | v0.2's `wring run`: verify → brief → worker → verify, the plateau fingerprint, and the `wringer.loop.v1` bundle under `.wringer/loops/` | call an LLM, touch git, or nest a verify bundle inside a loop bundle (runs are referenced by path) |
+| `spec.py` | `wring spec` / `wring plan`: `wringer.spec.v1`, the drafting request, the strict reply parser, the file renderer, and what `wring plan` compiles out of an approved spec — `tasks.jsonl`, the briefs, `wringer.rubric.yaml`, and the proposed gate diff | open a socket (it calls `judge.send`), install a gate, touch git, run anything, or read `approved` from a reply |
 
 Every module in the spec's layout now exists.
+
+### `wring spec` — the three rules that are not negotiable
+
+1. **`approved: false` is written as a constant**, not derived from anything.
+   No flag, environment variable or model reply may set it; a reply carrying
+   an `approved` key is refused outright rather than quietly ignored, and
+   `wring plan` re-reads the file from disk every time. There is deliberately
+   **no `--yes`**: it is the slice.
+2. **`intent` is quoted from the PRD by Wringer**, never taken from the reply.
+   A model paraphrasing the human's own words inside the artifact the human is
+   about to approve is the failure this slice exists to prevent.
+3. **Everything proposed goes through the real parser** — criteria through
+   `rubric.parse_document`, gates through `config.parse_gate` — so Wringer
+   cannot propose a rubric the judge would reject or a gate `.wringer.yaml`
+   would refuse. That is also what makes "the criteria block is a
+   `wringer.rubric.v1` document by construction" true rather than hoped for.
+
+And two safety rules that come from writing files a model named: every
+spec-declared path is refused if it could leave the repo (as a string *and*
+after resolving, which is what catches a symlink), and `wring plan` refuses to
+overwrite anything it did not itself generate — briefs carry a marker,
+`tasks.jsonl` is checked with `fleet.load_tasks`.
 
 ### Do not add these early
 
 v0.1's [Non-goals](SPEC_VERIFY_V0.md#non-goals-for-v010-binding) still bind
 everything under `wring verify`. `wring run` now exists, but only the slice
-[SPEC_RUN_V0.md](SPEC_RUN_V0.md) defines: still **no LLM judge, no issue
-ingestion, no PR creation, no commits or pushes, no Temporal, no
-OpenTelemetry, no multi-agent anything**, and no anti-thrash beyond the
-plateau fingerprint. Wringer itself makes **no LLM call and no network call**
-— the worker is the user's own program, and every worker in the test suite is
-a shell one-liner.
+[SPEC_RUN_V0.md](SPEC_RUN_V0.md) defines: still **no issue ingestion, no PR
+creation, no commits or pushes, no Temporal, no OpenTelemetry, no multi-agent
+anything**, and no anti-thrash beyond the plateau fingerprint.
+
+**Two commands may now reach a network, and only two**: `wring judge --send`
+and `wring spec --send`. Both require a `judge:` section the repo wrote down,
+both write the exact request to disk before any socket opens, both are dry-run
+by default, and both go through `judge.send` — so `grep -rn urlopen src/` has
+exactly one answer and must keep having one. Everything that *proves*
+anything still makes no LLM call and no network call: the worker is the user's
+own program, and every worker in the test suite is a shell one-liner.
+
+`wring spec` and `wring plan` add their own non-goals, binding
+([SPEC_INTENT_V0.md](SPEC_INTENT_V0.md) §5): no multi-turn refinement (edit
+the file), no auto-applying gate changes, **no auto-approval in any form**, no
+effort or cost estimation, no design output, no issue-tracker ingestion, and
+neither command runs a gate or touches git.
 
 Also: a flag that half-works is worse than a missing flag, because agents
 consume this CLI. `--changed-only` stays **unregistered**.

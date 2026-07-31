@@ -815,6 +815,11 @@ def _append_gates(existing: str, addition: list[str]) -> str:
             not lines[end].strip() or lines[end].startswith((" ", "\t", "#"))
         ):
             end += 1
+        # Back off over the blank lines that separate this block from the next
+        # key, so the addition lands inside the gate list rather than pressed
+        # up against whatever came after it.
+        while end > index + 1 and not lines[end - 1].strip():
+            end -= 1
         return "\n".join(lines[:end] + addition + lines[end:]) + "\n"
     tail = "" if existing.endswith("\n") or not existing else "\n"
     return f"{existing}{tail}gates:\n{block}\n"

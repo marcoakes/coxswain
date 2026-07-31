@@ -369,3 +369,36 @@ def test_the_rendered_rubric_is_valid_yaml_the_parser_agrees_with(repo):
     spec.validate_rubric_text(text)
 
     assert yaml.safe_load(text)["schema_version"] == "wringer.rubric.v1"
+
+
+def test_the_proposed_gates_land_inside_the_gate_list(repo, monkeypatch, capsys):
+    """A config with a blank line between sections still reads as one after
+    the diff is applied — the addition goes in the list, not on top of the
+    next key."""
+    setup_repo(
+        repo,
+        config_text='version: 1\ngates:\n  - id: check\n    run: "true"\n\n'
+        "judge:\n  endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+        "  model: cheap-model\n  rubric: wringer.rubric.yaml\n",
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["plan", "--json"]) == cli.EXIT_OK
+    diff = json.loads(capsys.readouterr().out)["gate_diff"]
+
+    # the separator survives: the line after the addition is still blank
+    lines = diff.splitlines()
+    added = max(i for i, line in enumerate(lines) if line.startswith("+"))
+    assert not lines[added + 1].strip()
+
+    import subprocess
+
+    (repo / "gates.patch").write_text(diff, encoding="utf-8")
+    applied = subprocess.run(
+        ["git", "apply", str(repo / "gates.patch")],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert applied.returncode == 0, applied.stderr
+    parsed = config.load(repo / config.CONFIG_FILENAME)
+    assert [g.id for g in parsed.gates] == ["check", "test"]
+    # and the judge section it was written above is still readable
+    assert parsed.judge is not None and parsed.judge.model == "cheap-model"
