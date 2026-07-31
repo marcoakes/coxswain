@@ -19,6 +19,7 @@ from wringer import (
     config,
     detect,
     evidence,
+    fleet,
     gates,
     git,
     judge,
@@ -101,6 +102,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_run.set_defaults(func=cmd_run)
+
+    parser_fleet = subparsers.add_parser(
+        "fleet",
+        help="run many repair loops under supervision",
+    )
+    parser_fleet.add_argument(
+        "tasks",
+        metavar="TASKS_JSONL",
+        help="one JSON object per line: {\"id\", \"brief\", \"dir\"}",
+    )
+    parser_fleet.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_fleet.set_defaults(func=cmd_fleet)
 
     parser_resume = subparsers.add_parser(
         "resume",
@@ -390,6 +407,73 @@ def _relative(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return str(path)
+
+
+def cmd_fleet(args: argparse.Namespace) -> int:
+    """Run many loops under supervision (SPEC_SUPERVISION_V0.md §S3)."""
+    root = git.find_root(Path.cwd())
+
+    refused = _refuse_unverifiable(root, "fleet")
+    if refused is not None:
+        return refused
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring fleet: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.fleet is None:
+        print(
+            f"wring fleet: no 'fleet:' section in {config.CONFIG_FILENAME} — "
+            "it must at least declare a deadline:\n\n"
+            "  fleet:\n"
+            "    concurrency: 4\n"
+            "    deadline: 21600",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    try:
+        tasks = fleet.load_tasks(Path(args.tasks))
+    except fleet.FleetError as exc:
+        print(f"wring fleet: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if not args.json:
+        print(
+            f"{len(tasks)} task{'' if len(tasks) == 1 else 's'}, "
+            f"{cfg.fleet.concurrency} at a time."
+        )
+
+    try:
+        outcome = fleet.run(root, cfg, tasks)
+    except fleet.FleetError as exc:
+        print(f"wring fleet: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "succeeded": outcome.succeeded,
+                    "failed": outcome.failed,
+                    "parked": outcome.parked,
+                    "join_satisfied": outcome.join_satisfied,
+                    "fleet_dir": _relative(outcome.directory, root),
+                }
+            )
+        )
+    else:
+        print(
+            f"\n{outcome.succeeded} succeeded, {outcome.failed} failed, "
+            f"{outcome.parked} parked."
+        )
+        if outcome.parked:
+            print("Parked work kept its evidence and re-enters the queue on resume.")
+        print(f"Fleet evidence: {_relative(outcome.directory, root)}/")
+
+    return EXIT_OK if outcome.join_satisfied else EXIT_GATE_FAILED
 
 
 def cmd_resume(args: argparse.Namespace) -> int:

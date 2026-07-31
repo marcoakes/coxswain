@@ -39,11 +39,23 @@ _PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-z_]+)\}")
 GATE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 MAX_GATE_ID_LENGTH = 64
 
-_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run", "judge"}
+_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run", "judge", "fleet"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
 _RUN_KEYS = {"worker", "max_iterations", "worker_timeout", "wall_clock"}
+_FLEET_KEYS = {
+    "concurrency",
+    "deadline",
+    "progress_window",
+    "retries",
+    "on_exhausted",
+    "join",
+    "child",
+    "worker_fallbacks",
+}
+_CHILD_KEYS = {"max_iterations", "worker_timeout", "wall_clock"}
+
 _JUDGE_KEYS = {
     "endpoint",
     "model",
@@ -111,6 +123,24 @@ class Judge:
 
 
 @dataclass(frozen=True)
+class Fleet:
+    """The `fleet:` section (SPEC_SUPERVISION_V0.md §S3).
+
+    `deadline` is required and has no default: an unbounded fleet is the
+    thing this whole slice exists to make impossible.
+    """
+
+    deadline: int
+    concurrency: int = 4
+    progress_window: int = 1200
+    retries: int = 1
+    on_exhausted: str = "park"
+    join: str = "all"
+    child_max_iterations: int | None = None
+    worker_fallbacks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Config:
     version: int
     gates: tuple[Gate, ...]
@@ -123,6 +153,8 @@ class Config:
     # None when the repo has not opted into the judge. Its absence is what
     # makes a network call unreachable rather than merely unlikely.
     judge: Judge | None = None
+    # None when the repo has not opted into fleets.
+    fleet: Fleet | None = None
 
 
 def load(path: Path) -> Config:
@@ -175,7 +207,95 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         evidence=evidence,
         run=_parse_run(raw.get("run"), source),
         judge=_parse_judge(raw.get("judge"), source),
+        fleet=_parse_fleet(raw.get("fleet"), source),
     )
+
+
+def _parse_fleet(raw: Any, source: str) -> Fleet | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'fleet' must be a mapping")
+
+    unknown = sorted(set(raw) - _FLEET_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'fleet': {', '.join(unknown)}")
+
+    if raw.get("deadline") is None:
+        raise ConfigError(
+            f"{source}: 'fleet.deadline' is required — a fleet without a "
+            "wall clock is exactly the thing that runs all night"
+        )
+
+    on_exhausted = raw.get("on_exhausted", "park")
+    if on_exhausted not in ("park", "fail"):
+        raise ConfigError(
+            f"{source}: 'fleet.on_exhausted' must be 'park' or 'fail' "
+            f"(got {on_exhausted!r})"
+        )
+
+    join = raw.get("join", "all")
+    if not isinstance(join, str) or not _valid_join(join):
+        raise ConfigError(
+            f"{source}: 'fleet.join' must be 'all', 'first_pass', or "
+            f"'quorum:<0-1>' (got {join!r})"
+        )
+
+    fallbacks = raw.get("worker_fallbacks", [])
+    if not isinstance(fallbacks, list) or not all(
+        isinstance(f, str) and f.strip() for f in fallbacks
+    ):
+        raise ConfigError(
+            f"{source}: 'fleet.worker_fallbacks' must be a list of non-empty "
+            "strings — a declared ladder, never one improvised at runtime"
+        )
+
+    child = raw.get("child", {})
+    if not isinstance(child, dict):
+        raise ConfigError(f"{source}: 'fleet.child' must be a mapping")
+    unknown = sorted(set(child) - _CHILD_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{source}: unknown keys under 'fleet.child': {', '.join(unknown)}"
+        )
+
+    retries = raw.get("retries", 1)
+    if not _is_int(retries) or retries < 0:
+        raise ConfigError(
+            f"{source}: 'fleet.retries' must be an integer of at least 0 "
+            f"(got {retries!r})"
+        )
+
+    return Fleet(
+        deadline=_positive_int(raw, "deadline", 1, source, section="fleet"),
+        concurrency=_positive_int(raw, "concurrency", 4, source, section="fleet"),
+        progress_window=_positive_int(
+            raw, "progress_window", 1200, source, section="fleet"
+        ),
+        retries=retries,
+        on_exhausted=on_exhausted,
+        join=join,
+        child_max_iterations=(
+            None
+            if child.get("max_iterations") is None
+            else _positive_int(
+                child, "max_iterations", 1, source, section="fleet.child"
+            )
+        ),
+        worker_fallbacks=tuple(fallbacks),
+    )
+
+
+def _valid_join(join: str) -> bool:
+    if join in ("all", "first_pass"):
+        return True
+    if join.startswith("quorum:"):
+        try:
+            fraction = float(join.split(":", 1)[1])
+        except ValueError:
+            return False
+        return 0 < fraction <= 1
+    return False
 
 
 def _parse_judge(raw: Any, source: str) -> Judge | None:
