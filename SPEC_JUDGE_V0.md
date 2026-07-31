@@ -2,9 +2,9 @@
 
 *Drafted 2026-07-31 by synthesis of four independent designs (minimalism,
 contract-first, safety, testability lenses), each adversarially reviewed.
-**Not yet adopted** — §9 carries one decision the maintainer must make first.
-[SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) and [SPEC_RUN_V0.md](SPEC_RUN_V0.md)
-remain binding and unchanged.*
+**ADOPTED 2026-07-31** — the maintainer approved §9's wording, which was the
+last open question. [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) and
+[SPEC_RUN_V0.md](SPEC_RUN_V0.md) remain binding and unchanged.*
 
 ## Positioning
 
@@ -213,7 +213,7 @@ slice, once the verdict contract has proved itself) · cost ledger ·
 per-criterion numeric scoring beyond met/not-met · issue ingestion · PR or MR
 creation · any git write · OpenTelemetry.
 
-## 9. The decision this needs before adoption
+## 9. The network promise — DECIDED 2026-07-31
 
 Wringer currently advertises, in [README.md](README.md) line 57 and without
 qualification: **"No LLM, no cloud, no uploads."**
@@ -225,18 +225,21 @@ sentence describes the *product*, and it would become false the first time
 anyone types `--send`.
 
 In a repo whose entire pitch is evidence, a stale absolute claim is worse than
-a feature nobody shipped. Proposed replacement, for the maintainer to accept,
-edit or reject:
+a feature nobody shipped. **The maintainer approved this replacement on
+2026-07-31; it is now the binding wording:**
 
 > No LLM and no network — by default, and in every command that proves
 > anything. `wring judge --send` is the single exception: it exists only when
 > your repo declares an endpoint, it writes the exact bytes to disk before it
 > opens a socket, and it never runs unless you type `--send`.
 
-**Nothing in this slice gets built until that wording is settled.** The
-implementation is otherwise unblocked: every part except the live transport
-needs no network at all, so the slice can be built and shipped dry-run-only,
-with `--send` landing last behind the agreed wording.
+**When it lands: with J2, not before.** The sentence describes `--send`, so
+publishing it while `--send` is still stubbed would make the README describe
+behaviour the program does not have — the same sin in the other direction.
+J1 ships dry-run-only against the *existing* wording, which stays true
+because nothing has opened a socket yet; J2 flips the transport on and edits
+[README.md](README.md) line 57 and [SECURITY.md](SECURITY.md)'s "What Wringer
+never does" in the same commit.
 
 ## 10. Definition of DONE
 
