@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -49,6 +51,23 @@ BRIEF_TAIL_LINES = 40
 # to the fingerprint. Hashing a 2 GB artifact to notice it changed would cost
 # more than the whole loop.
 FINGERPRINT_MAX_BYTES = 10 * 1024 * 1024
+
+# How much of a failing gate's log shapes its failure signature. Enough to
+# tell two different failures apart, little enough that a long tail of
+# incidental output does not drown the part that identifies it.
+SIGNATURE_TAIL_LINES = 30
+
+# Noise stripped before a failure is hashed, so the *shape* of a failure is
+# what gets compared rather than the timestamps and paths around it. Missing
+# a match is safe — the iteration ceiling still catches it; matching two
+# genuinely different failures would not be, so these stay conservative.
+_NOISE = (
+    re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?"),  # timestamps
+    re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}"),                            # run ids
+    re.compile(r"0x[0-9a-fA-F]+"),                                     # addresses
+    re.compile(r"\b\d+(?:\.\d+)?\s*m?s\b"),                            # durations
+    re.compile(r"/(?:tmp|private/var|var/folders)/\S+"),               # scratch paths
+)
 
 Reporter = Callable[..., None]
 
@@ -167,6 +186,50 @@ class Bundle:
         )
 
 
+def failure_signature(outcome: verify.Outcome) -> str | None:
+    """A hash of the *shape* of a failure, or None if nothing failed.
+
+    Two failures with the same signature are the same failure. Retrying one
+    is not repair, it is repetition — which is the whole lesson of the
+    incident SPEC_SUPERVISION_V0 was written from: twenty agents were retried
+    on identical input and produced nothing twenty times.
+
+    Normalization is deliberately conservative. A false negative merely
+    spends budget the iteration ceiling still bounds; a false positive would
+    stop a loop that was genuinely making progress.
+    """
+    if outcome.failed_gate is None:
+        return None
+    failing = next(
+        (r for r in outcome.results if r.gate.id == outcome.failed_gate), None
+    )
+    if failing is None:  # pragma: no cover - a failed_gate always has a result
+        return None
+
+    parts = [outcome.failed_gate, str(failing.exit_code)]
+    for path in (failing.stdout_path, failing.stderr_path):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        parts.append(_normalize(text))
+
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
+def _normalize(text: str) -> str:
+    """Strip the parts of a log that differ between identical failures."""
+    tail = text.splitlines()[-SIGNATURE_TAIL_LINES:]
+    lines = []
+    for line in tail:
+        for pattern in _NOISE:
+            line = pattern.sub("", line)
+        collapsed = " ".join(line.split())
+        if collapsed:
+            lines.append(collapsed)
+    return "\n".join(lines)
+
+
 def fingerprint(root: Path) -> str:
     """A hash of everything a worker could have changed.
 
@@ -270,6 +333,15 @@ def run(
     # The tree as it was when the previous worker was handed control. Equal
     # again now means that worker changed nothing.
     before_worker: str | None = None
+    # Every failure shape this loop has already seen. Seeing one twice means
+    # the worker is going in circles (A→B→A) or standing still (A→A), and
+    # either way the gates will keep saying the same thing.
+    seen_signatures: set[str] = set()
+    deadline = (
+        time.monotonic() + settings.wall_clock
+        if settings.wall_clock is not None
+        else None
+    )
 
     for iteration in range(1, budget + 1):
         iterations = iteration
@@ -278,6 +350,7 @@ def run(
         bundle.event("iteration.started", iteration=iteration)
 
         final = verify.run(root, cfg, planned, on_gate=on_gate)
+        signature = failure_signature(final)
         bundle.event(
             "verify.finished",
             iteration=iteration,
@@ -287,6 +360,7 @@ def run(
                 if final.failed_gate is not None
                 else {}
             ),
+            **({"failure_signature": signature} if signature is not None else {}),
             evidence_dir=verify.bundle_path(final.bundle, root),
         )
 
@@ -300,11 +374,30 @@ def run(
         current = fingerprint(root)
         if before_worker is not None and current == before_worker:
             # An identical tree gives an identical result; verifying it again
-            # would be theatre.
+            # would be theatre. Checked BEFORE the breaker because it is the
+            # more precise diagnosis of the same symptom: "your worker did
+            # nothing" is actionable in a way "the failure came back" is not.
             status, reason = "stopped", "no_progress"
             break
+
+        # The breaker. The worker changed *something* and the same failure
+        # shape came back anyway — it is going round in a circle (A→B→A) or
+        # editing things that do not touch the failure (A→A). Spending the
+        # rest of the budget on it would be the incident of 2026-07-30 in
+        # miniature: twenty retries of a failure that was never transient.
+        if signature is not None and signature in seen_signatures:
+            status, reason = "stopped", "oscillating"
+            break
+        if signature is not None:
+            seen_signatures.add(signature)
         if iteration == budget:
             status, reason = "stopped", "max_iterations"
+            break
+        # Checked between steps, never mid-gate: Wringer does not abandon a
+        # verify half-done to save seconds, so a deadline stops the *next*
+        # step rather than killing the one in flight.
+        if deadline is not None and time.monotonic() >= deadline:
+            status, reason = "stopped", "budget_exhausted"
             break
 
         brief = bundle.write_brief(iteration, _brief(final, root))
@@ -446,6 +539,8 @@ _REASONS = {
     "converged": "every required gate passed",
     "max_iterations": "the iteration budget ran out",
     "no_progress": "the worker changed nothing, so the gates would say the same",
+    "oscillating": "the same failure came back, so the worker is not converging",
+    "budget_exhausted": "the wall-clock budget ran out",
     "interrupted": "stopped before it finished",
 }
 

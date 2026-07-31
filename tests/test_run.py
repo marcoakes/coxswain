@@ -122,8 +122,21 @@ def test_a_worker_that_never_fixes_it_runs_out_of_iterations(
     repo, monkeypatch, capsys
 ):
     broken(repo)
-    # changes the tree every time, so it is never "no progress" — just wrong
-    write_loop_config(repo, "date +%s%N >> calc.py", max_iterations=3)
+    # The gate echoes the file, so each lap fails *differently* and the
+    # breaker (which stops repeated failure shapes) stays out of the way —
+    # this test is about the iteration budget, not about oscillation.
+    (repo / ".wringer.yaml").write_text(
+        """\
+version: 1
+gates:
+  - id: test
+    run: "cat calc.py; grep -q FIXED calc.py"
+run:
+  worker: "date +%s%N >> calc.py"
+  max_iterations: 3
+""",
+        encoding="utf-8",
+    )
     monkeypatch.chdir(repo)
 
     assert cli.main(["run"]) == cli.EXIT_GATE_FAILED

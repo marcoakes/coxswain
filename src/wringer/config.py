@@ -43,7 +43,7 @@ _TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run", "judge"}
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
-_RUN_KEYS = {"worker", "max_iterations", "worker_timeout"}
+_RUN_KEYS = {"worker", "max_iterations", "worker_timeout", "wall_clock"}
 _JUDGE_KEYS = {
     "endpoint",
     "model",
@@ -87,6 +87,10 @@ class Run:
     worker: str
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     worker_timeout: int = DEFAULT_WORKER_TIMEOUT_SECONDS
+    # Optional, no default: the loop is already structurally bounded by
+    # iterations x worker_timeout, so a wall clock is a second opinion the
+    # repo asks for rather than one Wringer imposes.
+    wall_clock: int | None = None
 
 
 @dataclass(frozen=True)
@@ -292,6 +296,11 @@ def _parse_run(raw: Any, source: str) -> Run | None:
         ),
         worker_timeout=_positive_int(
             raw, "worker_timeout", DEFAULT_WORKER_TIMEOUT_SECONDS, source
+        ),
+        wall_clock=(
+            None
+            if raw.get("wall_clock") is None
+            else _positive_int(raw, "wall_clock", 1, source)
         ),
     )
 
