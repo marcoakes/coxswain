@@ -11,12 +11,12 @@
 # wheel (wringer is py3-none-any; PyYAML publishes x86_64 and aarch64 wheels),
 # so there is no per-architecture branch and no compiler in the image:
 #
-#   docker buildx build --platform linux/amd64,linux/arm64 -t wringer:0.1.0 .
+#   docker buildx build --platform linux/amd64,linux/arm64 -t wringer:dev .
 #
 # Run (Docker syntax; apple/container on macOS 26 and Kubernetes consume the
 # same image — this is a standard OCI image with no runtime-specific parts):
 #
-#   docker run --rm -v "$PWD:/workspace" wringer:0.1.0 verify
+#   docker run --rm -v "$PWD:/workspace" wringer:dev verify
 #
 # The mount must be read-write: Wringer writes its evidence bundle to
 # .wringer/ inside the repo, so a `:ro` mount fails late and confusingly.
@@ -35,13 +35,20 @@ FROM python:3.12-slim
 # has to be updated by hand on every base rebuild; if reproducible builds
 # become a requirement, that is the line to change.
 
-# The published version to install. The image installs from PyPI rather than
-# from this source tree on purpose: what runs in the container is then the
-# same artifact `pip install wringer` gives anyone else, so the image proves
-# the release instead of a working copy. Override with
-# `--build-arg WRINGER_VERSION=x.y.z` — the pinned version is exactly the
-# command surface available inside the container.
-ARG WRINGER_VERSION=0.1.0
+# WHERE WRINGER COMES FROM.
+#
+# Today: this source tree. Installing the published 0.1.0 instead would be
+# tidier — the image would prove the release rather than a working copy —
+# but 0.1.0 predates `doctor`, `run`, `resume`, `fleet` and `judge`, so an
+# image pinned to it would lack the very command SETUP.md tells a user to
+# run first. An image that contradicts its own runbook is worse than an
+# image built from source.
+#
+# When 0.2.0 is published, flip this by setting WRINGER_VERSION and swapping
+# the install line below for:
+#   RUN pip install --no-cache-dir "wringer==${WRINGER_VERSION}"
+# That is the only change required; the rest of this file is version-blind.
+ARG WRINGER_VERSION=0.2.0.dev0
 
 LABEL org.opencontainers.image.title="wringer" \
       org.opencontainers.image.description="Runs a repository's declared gates and leaves an evidence bundle" \
@@ -67,7 +74,10 @@ RUN apt-get update \
 # boundary, and a venv inside it would only add a PATH to get wrong.
 # `wring --version` runs at build time so a broken entry point fails here
 # rather than on somebody's first command.
-RUN pip install --no-cache-dir "wringer==${WRINGER_VERSION}" \
+COPY pyproject.toml README.md LICENSE /src/
+COPY src /src/src
+RUN pip install --no-cache-dir /src \
+ && rm -rf /src \
  && wring --version
 
 # Non-root by default. uid/gid 1000 is the first ordinary user on Debian and

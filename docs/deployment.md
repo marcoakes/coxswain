@@ -60,7 +60,7 @@ What it does **not** give you, stated plainly:
 ## The image
 
 ```bash
-IMAGE=ghcr.io/marcoakes/wringer:0.2.0
+IMAGE=ghcr.io/marcoakes/wringer:main
 ```
 
 Pin a version tag; `:latest` follows `main`, and proving a change against a
@@ -75,7 +75,7 @@ Three things to know about what is inside:
   never the worker, and it does not distribute somebody else's.
 - **It is Wringer, not a build environment for your repo.** A gate that runs
   `pytest -q` needs pytest present. Either extend the image
-  (`FROM ghcr.io/marcoakes/wringer:0.2.0`, add your toolchain) or make the
+  (`FROM ghcr.io/marcoakes/wringer:main`, add your toolchain) or make the
   first gate the one that installs it. `git` must be present in whatever
   image you end up with — `wring verify` shells out to it.
 - Both entry points are installed: `wring` and `wringer`. The rest of this

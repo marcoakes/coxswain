@@ -199,7 +199,7 @@ binary, in any image, ever. It contains Wringer, a Python runtime, and the
 tools your gates need.
 
 ```bash
-export WRINGER_IMAGE="ghcr.io/marcoakes/wringer:latest"
+export WRINGER_IMAGE="ghcr.io/marcoakes/wringer:main"
 ```
 
 Pin `:latest` to a released tag (`:0.2.0`, say) as soon as you know which
@@ -259,13 +259,13 @@ Run it there even if you are confident.
 Docker:
 
 ```bash
-docker run --rm -v "$HOME/wringer-workspace:/workspace" -w /workspace "$WRINGER_IMAGE" wring --version
+docker run --rm -v "$HOME/wringer-workspace:/workspace" -w /workspace "$WRINGER_IMAGE" --version
 ```
 
 Apple container:
 
 ```bash
-container run --rm --volume "$HOME/wringer-workspace:/workspace" --workdir /workspace "$WRINGER_IMAGE" wring --version
+container run --rm --volume "$HOME/wringer-workspace:/workspace" --workdir /workspace "$WRINGER_IMAGE" --version
 ```
 
 Correct output: the same `wring 0.2…` line step 3 printed, this time from
@@ -301,7 +301,7 @@ all pass):
 ```
 ✓ platform            macOS 26.0 (arm64)
 ✓ container runtime   docker 27.5.1
-✓ image               ghcr.io/marcoakes/wringer:latest present
+✓ image               ghcr.io/marcoakes/wringer:main present
 ✓ workspace           ~/wringer-workspace writable
 ✗ api key             ANTHROPIC_API_KEY not set
 ```
@@ -356,7 +356,7 @@ disk.
 cd ~/wringer-workspace
 git clone https://github.com/marcoakes/wringer.git      # or any repo of yours
 docker run --rm -v "$HOME/wringer-workspace:/workspace" \
-  -w /workspace/wringer "$WRINGER_IMAGE" wring verify
+  -w /workspace/wringer "$WRINGER_IMAGE" verify
 ```
 
 Apple container: same arguments, `container run --rm --volume … --workdir …`.

@@ -29,11 +29,29 @@ The consequence is the same as `Makefile`, `package.json` scripts, or a
 > repository's chosen commands on your machine. **Read its `.wringer.yaml`
 > first.**
 
-Wringer does not sandbox gates, and v0.1 will not. "Sandboxing beyond
-recording current repo state" is an explicit
-[non-goal](SPEC_VERIFY_V0.md#non-goals-for-v010-binding) for this
-release. If you need isolation now, run `wring verify` inside your own
-container.
+Wringer does not sandbox gates *itself*, and it never will — a tool that ran
+your commands somewhere other than where you pointed it would be lying about
+what it verified. **The container is the answer**, and since 0.2 it is a
+supported, documented one rather than a suggestion.
+
+Run the harness in the published image and a repository's gates execute
+inside that container's isolation instead of against your home directory:
+
+```bash
+docker run --rm -v "$PWD:/workspace" ghcr.io/marcoakes/wringer:main verify
+```
+
+The same image runs under Apple's `container` on macOS 26 and as a
+Kubernetes Job — see [docs/deployment.md](docs/deployment.md).
+
+**What that is and is not.** It is meaningful isolation: a gate that deletes
+`$HOME`, installs packages, or scribbles outside the repo hits the
+container's filesystem, not yours. It is **not** a security boundary against
+a repository you have chosen to run and actively distrust. The container has
+your workspace mounted read-write by design — that is where evidence goes —
+so a hostile gate can still corrupt the tree you gave it, and container
+escapes exist. Treat it as the difference between a mistake and a disaster,
+not as permission to run untrusted code.
 
 Two things it does refuse. It will not verify outside a git repository
 (exit `2`), because a verification claim with no commit behind it is

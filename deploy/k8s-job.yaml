@@ -74,7 +74,7 @@ spec:
           # runs `pytest -q` needs pytest present, so either build your own
           # image FROM this one with your toolchain added, or make the first
           # gate the one that installs it.
-          image: ghcr.io/marcoakes/wringer:0.2.0
+          image: ghcr.io/marcoakes/wringer:main
           imagePullPolicy: IfNotPresent
 
           command: ["wring"]
