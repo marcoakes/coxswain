@@ -51,11 +51,23 @@ nodes, all cloud adapters, Cedar/OPA, AGENTS.md autogen, skills registry.
 
 ### Days 31–60 — durable execution & anti-thrash
 
-- Event-sourced engine: SQLite-backed run log, checkpoint/resume — crash
-  on iteration 4 of 6, `wring resume` continues exactly there.
-- Anti-thrash: failure-signature hashing + oscillation detection (same
-  signature 3× → exit to `escalate.human`), plateau detection.
-- Cost ledger per loop/run (`cost.jsonl` beside the evidence bundle).
+⚠️ **Governed by [SPEC_SUPERVISION_V0.md](SPEC_SUPERVISION_V0.md)**
+(adopted 2026-07-31 after a live incident during Wringer's own development
+proved the failure modes) — binding invariants for every execution
+primitive: bounded retries with escalation, failure-signature breakers,
+deadlines everywhere, progress measured in evidence, resume from the
+ledger, honest partial success. Slices: S1 breaker + wall-clock in the
+loop, S2 `wring resume`, S3 `wring fleet` (hundreds of queued tasks,
+bounded concurrency, self-healing ladder, parked-work queue).
+
+- Event-sourced engine: the append-only ledgers Wringer already writes,
+  replayed — crash on iteration 4 of 6, `wring resume` continues exactly
+  there. (SQLite deferred until the JSONL ledgers prove insufficient.)
+- Anti-thrash: failure-signature hashing + oscillation detection (a
+  signature seen before in the loop trips the breaker), plateau detection
+  (shipped in v0.2 slice 1 as the fingerprint).
+- Cost ledger per loop/run (`cost.jsonl` beside the evidence bundle) —
+  recording what is known, declaring what is not.
 - OpenTelemetry GenAI spans for worker and judge — "audit trail as
   byproduct" made real.
 
