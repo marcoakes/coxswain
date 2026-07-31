@@ -56,6 +56,7 @@ _FLEET_KEYS = {
     "worktree",
 }
 _CHILD_KEYS = {"max_iterations", "worker_timeout", "wall_clock"}
+_ACP_KEYS = {"command", "args", "env_passthrough"}
 
 _JUDGE_KEYS = {
     "endpoint",
@@ -97,13 +98,34 @@ class Run:
     wrote down; inventing one would be the same sin as inventing a gate.
     """
 
-    worker: str
+    # Either a shell command (the original form, supported forever) or an
+    # AcpWorker. Both run under the same supervision invariants; the loop
+    # does not know or care which it got, and that is deliberate.
+    worker: str | AcpWorker
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     worker_timeout: int = DEFAULT_WORKER_TIMEOUT_SECONDS
     # Optional, no default: the loop is already structurally bounded by
     # iterations x worker_timeout, so a wall clock is a second opinion the
     # repo asks for rather than one Wringer imposes.
     wall_clock: int | None = None
+
+
+@dataclass(frozen=True)
+class AcpWorker:
+    """`run.worker.acp` — an agent spoken to over the Agent Client Protocol.
+
+    The second worker form. A shell string says "run this and see what
+    changed"; this says "hold a session with an agent that speaks a
+    standard". Wringer is the ACP *client* and never the agent — that
+    distinction is the whole neutrality position (SPEC_ACP_V0.md).
+    """
+
+    command: str
+    args: tuple[str, ...] = ()
+    # NAMES of variables to pass through, never values. Everything not named
+    # is withheld: an agent gets a minimal environment, not the operator's
+    # whole shell. Each named variable's value is folded into the redactor.
+    env_passthrough: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -401,24 +423,7 @@ def _parse_run(raw: Any, source: str) -> Run | None:
     if unknown:
         raise ConfigError(f"{source}: unknown keys under 'run': {', '.join(unknown)}")
 
-    worker = raw.get("worker")
-    if not isinstance(worker, str) or not worker.strip():
-        raise ConfigError(
-            f"{source}: 'run.worker' must be a non-empty string — the command "
-            "that edits the code, e.g. 'claude -p \"$(cat {brief})\"'. There is "
-            "no default: Wringer runs the worker you wrote down, never one it "
-            "guessed"
-        )
-
-    unknown_placeholders = sorted(
-        set(_PLACEHOLDER_PATTERN.findall(worker)) - set(WORKER_PLACEHOLDERS)
-    )
-    if unknown_placeholders:
-        raise ConfigError(
-            f"{source}: 'run.worker' uses unknown placeholder(s) "
-            f"{', '.join('{' + name + '}' for name in unknown_placeholders)} — "
-            f"available: {', '.join('{' + p + '}' for p in WORKER_PLACEHOLDERS)}"
-        )
+    worker = _parse_worker(raw.get("worker"), source)
 
     return Run(
         worker=worker,
@@ -433,6 +438,77 @@ def _parse_run(raw: Any, source: str) -> Run | None:
             if raw.get("wall_clock") is None
             else _positive_int(raw, "wall_clock", 1, source)
         ),
+    )
+
+
+def _parse_worker(raw: Any, source: str) -> str | AcpWorker:
+    """A shell string, or an `acp:` mapping. Never both, never neither."""
+    if isinstance(raw, str):
+        if not raw.strip():
+            raise ConfigError(f"{source}: 'run.worker' must be a non-empty string")
+        unknown = sorted(
+            set(_PLACEHOLDER_PATTERN.findall(raw)) - set(WORKER_PLACEHOLDERS)
+        )
+        if unknown:
+            raise ConfigError(
+                f"{source}: 'run.worker' uses unknown placeholder(s) "
+                f"{', '.join('{' + name + '}' for name in unknown)} — "
+                f"available: {', '.join('{' + p + '}' for p in WORKER_PLACEHOLDERS)}"
+            )
+        return raw
+
+    if isinstance(raw, dict):
+        extra = sorted(set(raw) - {"acp"})
+        if extra or "acp" not in raw:
+            raise ConfigError(
+                f"{source}: 'run.worker' as a mapping takes exactly one key, "
+                f"'acp' (got {sorted(raw) or 'nothing'})"
+            )
+        return _parse_acp(raw["acp"], source)
+
+    raise ConfigError(
+        f"{source}: 'run.worker' must be a shell command string, or a mapping "
+        "with an 'acp' key. There is no default: Wringer runs the worker you "
+        "wrote down, never one it guessed"
+    )
+
+
+def _parse_acp(raw: Any, source: str) -> AcpWorker:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'run.worker.acp' must be a mapping")
+
+    unknown = sorted(set(raw) - _ACP_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{source}: unknown keys under 'run.worker.acp': {', '.join(unknown)}"
+        )
+
+    command = raw.get("command")
+    if not isinstance(command, str) or not command.strip():
+        raise ConfigError(
+            f"{source}: 'run.worker.acp.command' must be a non-empty string — "
+            "the agent binary that speaks ACP. Wringer never bundles or "
+            "installs one"
+        )
+
+    args = raw.get("args", [])
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise ConfigError(f"{source}: 'run.worker.acp.args' must be a list of strings")
+
+    names = raw.get("env_passthrough", [])
+    if not isinstance(names, list) or not all(
+        isinstance(n, str) and n.strip() for n in names
+    ):
+        raise ConfigError(
+            f"{source}: 'run.worker.acp.env_passthrough' must be a list of "
+            "environment variable NAMES — never values; Wringer will not read "
+            "a credential out of a config file"
+        )
+
+    return AcpWorker(
+        command=command.strip(),
+        args=tuple(args),
+        env_passthrough=tuple(names),
     )
 
 

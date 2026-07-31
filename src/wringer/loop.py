@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from wringer import __version__, config, evidence, gates, git, verify
+from wringer import __version__, acp, config, evidence, gates, git, verify
 from wringer.redact import Redactor
 
 LOOPS_DIRNAME = Path(".wringer") / "loops"
@@ -186,7 +186,7 @@ class Bundle:
             },
             "config": {
                 "max_iterations": run.max_iterations,
-                "worker": self.redactor.scrub(run.worker),
+                "worker": self.redactor.scrub(_worker_text(run.worker)),
             },
             "result": {
                 "status": status,
@@ -310,6 +310,13 @@ def reap_orphans(pgids: tuple[int, ...]) -> list[int]:
         except (ProcessLookupError, PermissionError, OSError):
             pass  # already gone, or never ours to signal
     return killed
+
+
+def _worker_text(worker: Any) -> str:
+    """How a worker is written down in the manifest, whichever form it is."""
+    if isinstance(worker, config.AcpWorker):
+        return " ".join(["acp:", worker.command, *worker.args])
+    return str(worker)
 
 
 def failure_signature(outcome: verify.Outcome) -> str | None:
@@ -563,17 +570,37 @@ def run(
         brief = bundle.write_brief(iteration, _brief(final, root))
         before_worker = current
 
-        command = config.substitute(
-            settings.worker,
-            brief=brief,
-            evidence_dir=verify.bundle_path(final.bundle, root),
-            iteration=iteration,
+        acp_worker = (
+            settings.worker
+            if isinstance(settings.worker, config.AcpWorker)
+            else None
         )
-        bundle.event("worker.started", iteration=iteration, command=command)
-        try:
-            result = _run_worker(
-                bundle, command, settings.worker_timeout, iteration, root
+        if acp_worker is not None:
+            command = " ".join([acp_worker.command, *acp_worker.args])
+            bundle.event(
+                "worker.started",
+                iteration=iteration,
+                command=command,
+                worker_kind="acp",
             )
+        else:
+            command = config.substitute(
+                settings.worker,
+                brief=brief,
+                evidence_dir=verify.bundle_path(final.bundle, root),
+                iteration=iteration,
+            )
+            bundle.event("worker.started", iteration=iteration, command=command)
+        try:
+            if acp_worker is not None:
+                result = _run_acp_worker(
+                    bundle, acp_worker, brief, settings.worker_timeout,
+                    iteration, root,
+                )
+            else:
+                result = _run_worker(
+                    bundle, command, settings.worker_timeout, iteration, root
+                )
         except KeyboardInterrupt:
             # A worker.started with no worker.finished, mirroring how verify
             # records a gate that was killed mid-flight.
@@ -585,6 +612,7 @@ def run(
             exit_code=result.exit_code,
             duration_ms=result.duration_ms,
             **({"timed_out": True} if result.timed_out else {}),
+            **getattr(result, "acp_extras", {}),
         )
         if on_worker is not None:
             on_worker(result)
@@ -637,6 +665,84 @@ def _run_worker(
     # It finished, so there is nothing to reap and a stale pgid could name a
     # process the OS has since given to somebody else.
     pgid_file.unlink(missing_ok=True)
+    return result
+
+
+def _run_acp_worker(
+    bundle: Bundle,
+    worker: config.AcpWorker,
+    brief: Path,
+    timeout: int,
+    iteration: int,
+    root: Path,
+) -> gates.GateResult:
+    """One ACP session, shaped into the same GateResult a shell worker gives.
+
+    The loop must not care which form ran — that is what keeps the breaker,
+    the wall clock, the plateau check and the ledger identical for both.
+    """
+    directory = bundle.iteration_dir(iteration)
+    stdout_path = directory / "worker.stdout.log"
+    stderr_path = directory / "worker.stderr.log"
+    started = time.monotonic()
+    extras: dict[str, Any] = {"worker_kind": "acp"}
+
+    try:
+        turn, exit_code = acp.run_turn(
+            command=worker.command,
+            args=worker.args,
+            env_passthrough=worker.env_passthrough,
+            brief=brief.read_text(encoding="utf-8"),
+            root=root,
+            timeout=timeout,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+    except acp.AcpError as exc:
+        # Not a verdict about the code — a failed worker turn, which the
+        # evidence will judge on the next lap like any other.
+        timed_out = "deadline" in str(exc)
+        stdout_path.write_text(f"[wringer: ACP turn failed] {exc}\n", encoding="utf-8")
+        if not stderr_path.exists():
+            stderr_path.write_text("", encoding="utf-8")
+        result = gates.GateResult(
+            gate=config.Gate(id=WORKER_ID, run=worker.command, timeout=timeout),
+            exit_code=1,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            timed_out=timed_out,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+        object.__setattr__(result, "acp_extras", {**extras, "acp_error": str(exc)})
+        return result
+
+    for permission in turn.permissions:
+        bundle.event(
+            "worker.permission",
+            iteration=iteration,
+            tool=permission["tool"],
+            outcome=permission["outcome"],
+        )
+
+    extras["stop_reason"] = turn.stop_reason
+    if turn.agent_name:
+        extras["agent_name"] = turn.agent_name
+    if turn.agent_version:
+        extras["agent_version"] = turn.agent_version
+    if turn.protocol_version:
+        extras["protocol_version"] = turn.protocol_version
+    if turn.refusals:
+        extras["refused_paths"] = len(turn.refusals)
+
+    result = gates.GateResult(
+        gate=config.Gate(id=WORKER_ID, run=worker.command, timeout=timeout),
+        exit_code=exit_code,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        timed_out=False,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+    object.__setattr__(result, "acp_extras", extras)
     return result
 
 

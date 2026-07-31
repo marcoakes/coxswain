@@ -18,7 +18,8 @@
         "worker.started",
         "worker.finished",
         "loop.finished",
-        "loop.resumed"
+        "loop.resumed",
+        "worker.permission"
       ]
     },
     "ts": {
@@ -176,6 +177,10 @@
         },
         "prev_hash": {
           "type": "string"
+        },
+        "worker_kind": {
+          "description": "PRESENT ONLY for an ACP worker. Absent means the shell form, which stays the default reading.",
+          "const": "acp"
         }
       }
     },
@@ -215,6 +220,32 @@
           "const": true
         },
         "prev_hash": {
+          "type": "string"
+        },
+        "worker_kind": {
+          "const": "acp",
+          "description": "PRESENT ONLY for an ACP worker."
+        },
+        "stop_reason": {
+          "description": "The agent's own stopReason. RECORDED AND NEVER ACTED ON, exactly as a shell worker's exit code is \u2014 the evidence decides.",
+          "type": "string"
+        },
+        "agent_name": {
+          "type": "string"
+        },
+        "agent_version": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "refused_paths": {
+          "description": "How many writes were refused for escaping the repository. PRESENT ONLY when non-zero.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "acp_error": {
+          "description": "PRESENT ONLY when the session itself failed \u2014 never a verdict about the code.",
           "type": "string"
         }
       }
@@ -295,6 +326,43 @@
         },
         "prev_hash": {
           "type": "string"
+        }
+      }
+    },
+    {
+      "title": "worker.permission",
+      "description": "An ACP agent asked permission and Wringer auto-approved it. v0 auto-approves because a consent prompt nobody is sitting at is not a safety control \u2014 the container and the supervision invariants are. This event is what makes that auditable rather than invisible.",
+      "required": [
+        "type",
+        "ts",
+        "prev_hash",
+        "iteration",
+        "tool",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "worker.permission"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "prev_hash": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tool": {
+          "description": "What the agent asked to do, truncated.",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "auto_approved"
+          ]
         }
       }
     }
