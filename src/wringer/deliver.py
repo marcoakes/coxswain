@@ -44,6 +44,11 @@ COMMANDS_FILENAME = "commands.txt"
 
 GIT_TIMEOUT_SECONDS = 120
 
+# Wringer's own directory, which a delivery must never carry. Evidence stays
+# with the machine that produced it — that is a promise the README makes and
+# the one this module is in the best position to break.
+EVIDENCE_DIRNAME = ".wringer"
+
 # Branch names git will not take, and names that would be a disaster if it
 # did. Checked before the name reaches a subprocess.
 _BAD_BRANCH = ("..", "~", "^", ":", "?", "*", "[", "\\", " ", "@{")
@@ -155,7 +160,16 @@ def plan(
         )
 
     state = git.inspect(root)
-    if not state.changed_files and not state.untracked:
+    # The delivered set, honestly: `.wringer/` is excluded at `git add` time,
+    # so counting it here would make the plan describe a commit that will not
+    # happen. A repo that gitignored it never sees these paths at all.
+    carried = tuple(
+        path
+        for path in tuple(state.changed_files) + tuple(state.untracked)
+        if not path.startswith(f"{EVIDENCE_DIRNAME}/")
+        and path != EVIDENCE_DIRNAME
+    )
+    if not carried:
         raise Refused("there is nothing to deliver — the working tree is clean", 1)
 
     base = resolve_base(root, settings)
@@ -188,13 +202,14 @@ def plan(
         remote=settings.remote,
         title=title,
         commit_message=f"{title}\n\nVerified by wringer: {run_dir.name}\n",
-        mr_body=_mr_body(run_dir, root, state),
+        mr_body=_mr_body(run_dir, root, state, len(carried)),
         patch=patch,
-        changed_files=tuple(state.changed_files) + tuple(state.untracked),
+        changed_files=carried,
         run_dir=str(run_dir),
         commands=(
             f"git switch --create {branch}",
-            "git add --all",
+            # the planned paths on stdin — never a bare add --all; see send()
+            "git add --all --pathspec-from-file=- --pathspec-file-nul",
             "git commit --file .wringer/deliveries/<id>/commit.txt",
             f"git push --set-upstream {settings.remote} {branch}",
             f"POST a merge request: {branch} -> {base}",
@@ -222,7 +237,9 @@ def _title(run_dir: Path, root: Path, task: str | None) -> str:
     return task or f"wringer: verified change {run_dir.name}"
 
 
-def _mr_body(run_dir: Path, root: Path, state: git.RepoState) -> str:
+def _mr_body(
+    run_dir: Path, root: Path, state: git.RepoState, carried: int
+) -> str:
     """The receipts, which is what the OKR actually promises.
 
     The gate table and where the bundle is — **never raw gate logs**. A bundle
@@ -254,7 +271,7 @@ def _mr_body(run_dir: Path, root: Path, state: git.RepoState) -> str:
         "",
         f"- run: `{shown}`",
         f"- commit verified at: `{state.head_sha or 'unknown'}`",
-        f"- files changed: {len(state.changed_files) + len(state.untracked)}",
+        f"- files changed: {carried}",
         "",
         "The full bundle — `evidence.jsonl`, `manifest.json`, `summary.md`, "
         "`diff.patch` and per-gate logs — stays with the machine that ran it. "
@@ -403,7 +420,27 @@ def send(
     bundle.event("branch.created", branch=planned.branch)
 
     bundle.event("commit.planned", files=list(planned.changed_files))
-    _run(root, ["add", "--all"])
+    # NEVER stage `.wringer/`. A repo that ran `wring init` has it gitignored,
+    # but `wring verify` alone does not write a .gitignore — so a plain
+    # `add --all` would sweep the evidence bundle into a commit and push it to
+    # a public branch. SECURITY.md is explicit that a bundle may hold whatever
+    # a gate printed, and README promises nothing uploads, ever. The MR body
+    # omitting gate logs would be pointless beside a commit that carried them.
+    # Stage exactly what the plan said it would carry — never `add --all`.
+    # A repo that ran `wring init` has `.wringer/` gitignored, but `wring
+    # verify` alone writes no .gitignore, so `add --all` swept the whole
+    # evidence bundle into the commit and pushed it to a public branch.
+    # SECURITY.md says a bundle may hold whatever a gate printed, and the
+    # README promises nothing uploads, ever.
+    #
+    # Paths arrive NUL-separated on stdin rather than as argv: they come from
+    # the repository, so there is no length and no character this has to hope
+    # about. `--all` still applies to them, so a deletion stages as one.
+    _run(
+        root,
+        ["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        stdin="\0".join(planned.changed_files),
+    )
     message = bundle.read_commit_message(planned)
     _run(root, ["commit", "--file", "-"], stdin=message)
     done["commit"] = _read(root, ["rev-parse", "HEAD"])

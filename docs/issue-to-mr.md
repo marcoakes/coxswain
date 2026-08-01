@@ -144,11 +144,18 @@ literal commands:
 
 ```
 git switch --create wringer/csv-export
-git add --all
+git add --all --pathspec-from-file=- --pathspec-file-nul
 git commit --file .wringer/deliveries/<id>/commit.txt
 git push --set-upstream origin wringer/csv-export
 POST a merge request: wringer/csv-export -> main
 ```
+
+That second line is not a flourish. Delivery stages **exactly the paths the
+plan listed**, fed in NUL-separated, rather than running `git add --all`. A
+repo that ran `wring init` has `.wringer/` gitignored — but `wring verify`
+alone writes no `.gitignore`, so a bare `add --all` swept the entire evidence
+bundle into the commit and pushed it to a public branch. An MR body that
+carefully omits gate logs is worth nothing beside a commit that carries them.
 
 and the MR body, which is where the OKR's actual promise lives:
 

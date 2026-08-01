@@ -552,3 +552,87 @@ def test_a_failed_mr_leaves_the_branch_and_says_so(delivery_repo, monkeypatch,
     )
     assert manifest["result"]["pushed"] is True
     assert manifest["result"]["merge_request"] is None
+
+
+def test_a_delivery_never_carries_the_evidence_bundle(repo, monkeypatch, capsys):
+    """A repo that ran `wring init` has `.wringer/` gitignored — but `wring
+    verify` alone never writes a .gitignore, so a plain `git add --all` swept
+    the whole bundle into a commit and pushed it to a public branch.
+
+    SECURITY.md is explicit that a bundle may hold whatever a gate printed,
+    and the README promises nothing uploads, ever. An MR body that carefully
+    omits gate logs is pointless beside a commit that carries them.
+    """
+    secret = "hunter2-printed-by-a-gate"
+    upstream = repo.parent / f"{repo.name}-leak.git"
+    git(repo, "init", "--bare", str(upstream))
+    git(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(
+        CONFIG.replace('run: "true"', f'run: "echo {secret}"'), encoding="utf-8"
+    )
+    # deliberately NO .gitignore: this repo ran verify, never init
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "config")
+    git(repo, "push", "-u", "origin", "main")
+    (repo / "feature.py").write_text("y = 2\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("FORGE_TOKEN", "t1234567")
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    fake_forge(monkeypatch, reply=MR_REPLY)
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    committed = git(repo, "show", "--name-only", "--format=", "HEAD").splitlines()
+    assert committed == ["feature.py"], committed
+    assert not [p for p in committed if p.startswith(".wringer/")]
+    # the bundle really did exist and really did hold the gate's output, or
+    # this test would pass against a repo that had nothing to leak
+    bundle = sorted((repo / ".wringer" / "runs").iterdir())[0]
+    assert secret in (bundle / "gates" / "001_check" / "stdout.log").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_the_plan_counts_only_what_it_will_carry(repo, monkeypatch, capsys):
+    """The count in the report and the MR body must describe the commit that
+    will happen, not the working tree that happens to be dirty."""
+    upstream = repo.parent / f"{repo.name}-count.git"
+    git(repo, "init", "--bare", str(upstream))
+    git(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "config")
+    git(repo, "push", "-u", "origin", "main")
+    (repo / "feature.py").write_text("y = 2\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["deliver", "--json"]) == cli.EXIT_OK
+
+    payload = json.loads(capsys.readouterr().out)
+    # one file, not one-plus-a-bundle
+    assert payload["files"] == 1
+
+
+def test_a_tree_dirty_only_with_evidence_has_nothing_to_deliver(
+    repo, monkeypatch, capsys
+):
+    """The mirror of the above: if the ONLY thing that changed is Wringer's
+    own bundle, there is genuinely nothing to deliver — and delivering an
+    empty commit describing someone's evidence would be worse than refusing."""
+    upstream = repo.parent / f"{repo.name}-onlyev.git"
+    git(repo, "init", "--bare", str(upstream))
+    git(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "config")
+    git(repo, "push", "-u", "origin", "main")
+
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["deliver"]) == cli.EXIT_GATE_FAILED
+    assert "nothing to deliver" in capsys.readouterr().err
