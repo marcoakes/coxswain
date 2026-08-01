@@ -636,3 +636,30 @@ def test_a_tree_dirty_only_with_evidence_has_nothing_to_deliver(
 
     assert cli.main(["deliver"]) == cli.EXIT_GATE_FAILED
     assert "nothing to deliver" in capsys.readouterr().err
+
+
+def test_no_git_identity_is_refused_before_the_branch_exists(
+    delivery_repo, monkeypatch, capsys
+):
+    """A commit with no author fails AFTER the branch is created, leaving a
+    half-delivered branch for a reason that had nothing to do with the change.
+    Refuse first.
+
+    macOS hides this by inventing `user@host`; Linux with an unqualified
+    hostname does not. That divergence turned this suite red on CI and green
+    locally, which is the worst way to find out.
+    """
+    git(delivery_repo, "config", "--unset", "user.email")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    monkeypatch.setenv("HOME", str(delivery_repo / "nohome"))
+    verified(delivery_repo, monkeypatch, capsys)
+
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_CONFIG
+
+    err = capsys.readouterr().err
+    assert "user.email" in err
+    assert "does not invent one" in err
+    # and no branch was created, which is the whole point of checking early
+    assert git(delivery_repo, "branch", "--list") == "* main"

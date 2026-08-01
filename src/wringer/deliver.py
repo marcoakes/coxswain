@@ -107,6 +107,29 @@ def check_tree(root: Path) -> None:
         )
 
 
+def check_identity(root: Path) -> None:
+    """Refuse before the branch exists if git has nobody to attribute to.
+
+    Checked in `plan()` rather than discovered at `git commit` — on a machine
+    with no identity (a CI runner, a fresh container) the commit fails *after*
+    the branch has been created, which leaves a half-delivered branch for a
+    reason that had nothing to do with the change.
+
+    macOS hides this: git invents `user@host`. Linux with an unqualified
+    hostname does not, and says so.
+    """
+    for key in ("user.name", "user.email"):
+        code, _ = _git(root, ["config", "--get", key], check=False)
+        if code != 0:
+            raise Refused(
+                f"git has no {key} here, so a commit would have no author. "
+                "Wringer commits as you, using your git identity — it does not "
+                "invent one. Set it:\n"
+                f"  git config --global {key} \"...\"",
+                2,
+            )
+
+
 def gates_passed(run_dir: Path) -> tuple[bool, str | None]:
     try:
         manifest = evidence.read_manifest(run_dir)
@@ -149,6 +172,7 @@ def plan(
     settings = cfg.deliver
 
     check_tree(root)
+    check_identity(root)
 
     passed, failed_gate = gates_passed(run_dir)
     if not passed:

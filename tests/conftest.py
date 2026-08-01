@@ -42,8 +42,19 @@ def git_run():
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A git repo on `main` with one empty commit — a clean starting point."""
+    """A git repo on `main` with one empty commit — a clean starting point.
+
+    The identity is written into the repo's own config, not just passed with
+    `-c` on the fixture's calls: `wring deliver` runs `git commit` the way a
+    user's git is configured, and a real user has an identity. Without this the
+    suite passes on macOS — where git invents `user@host` — and fails on
+    GitHub's Linux runners, where the hostname is not fully qualified and git
+    refuses to guess. That divergence cost a red build; keep it.
+    """
     _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.name", "wringer test")
+    _git(tmp_path, "config", "user.email", "wringer@example.invalid")
+    _git(tmp_path, "config", "commit.gpgsign", "false")
     _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "initial commit")
     return tmp_path
 
