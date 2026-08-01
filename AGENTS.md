@@ -26,6 +26,7 @@ no network, no uploads — ever.
 | [SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md) | **binding** for v0.1 implementation — CLI surface, exit codes, bundle format, build order, release bar |
 | [SPEC_RUN_V0.md](SPEC_RUN_V0.md) | **binding** for v0.2 slice 1 — `wring run`, the `run:` config section, the loop's rulings and `wringer.loop.v1` |
 | [SPEC_INTENT_V0.md](SPEC_INTENT_V0.md) | **binding** for `wring spec` / `wring plan` — `wringer.spec.v1`, the approval interlock, and why there is no `--yes`. The captured loop is [docs/pm-loop.md](docs/pm-loop.md) |
+| [SPEC_GET_V0.md](SPEC_GET_V0.md) | **binding** for `wring get` / `wring issue` / `wring deliver` — and for the amended law 6: the five conditions that buy the power to write git history |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
@@ -46,7 +47,7 @@ resume` continues a killed one, `wring fleet` supervises hundreds, `wring
 judge` weighs a finished bundle against a rubric, `wring doctor` checks this
 machine's preconditions, the `acp:` worker form talks to any agent that speaks
 the protocol, and `wring spec` / `wring plan` are the front door — a PRD in,
-a spec a human approves, work a fleet can run. 457 tests on Python 3.11–3.13
+a spec a human approves, work a fleet can run; and P3 brings work in as a URL and sends it back out as a reviewed branch. 486 tests on Python 3.11–3.13
 plus macOS in CI.
 
 **Wringer verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares this
@@ -63,6 +64,7 @@ one is committed at [`.wringer.example/`](.wringer.example/).
 | 5 — dogfood | Day 5 | ✅ `wring init` detects real commands (pyproject / package.json / Makefile) and gitignores `.wringer/`, `wring verify --output`, Wringer's own `.wringer.yaml`, CI runs `wring verify` + uploads the bundle, committed bundle in `.wringer.example/` |
 | v0.2 slice 1 — the loop | — | ✅ `wring run`: `run:` config, verify→brief→worker→verify, plateau fingerprint, `wringer.loop.v1` bundle, loop schemas ([SPEC_RUN_V0.md](SPEC_RUN_V0.md)) |
 | 5.5 — pre-publish hardening | — | ✅ interrupted runs named in `summary.md` and diagnosed by `explain`, `latest_run` ordered by time not name, reused `--output` cleared before writing, post-kill drain bounded, event lists scrubbed, `evidence.include` shape-checked |
+| P3 — repos in, changes out | — | ✅ `wring get` · `wring issue` · `wring deliver`: the amended law 6 and its five refusals, `wringer.delivery.v1` and `wringer.acquired.v1` ([SPEC_GET_V0.md](SPEC_GET_V0.md)) |
 | P2 — the front door | — | ✅ `wring spec` / `wring plan`: `wringer.spec.v1`, the approval interlock, questions instead of guesses, gates proposed as a diff, `human: true` criteria a judge is never asked ([SPEC_INTENT_V0.md](SPEC_INTENT_V0.md), [docs/pm-loop.md](docs/pm-loop.md)) |
 
 The `v0.1.0` tag is gated on the spec's
@@ -100,6 +102,9 @@ Then:
 .venv/bin/wring explain           # diagnose the latest run (no LLM)
 .venv/bin/wring spec PRD.md       # draft wringer.spec.yaml (dry run: sends nothing)
 .venv/bin/wring plan              # an approved spec -> tasks.jsonl, briefs, rubric
+.venv/bin/wring get URL           # clone into the declared workspace
+.venv/bin/wring issue 42          # write a forge issue to a markdown file
+.venv/bin/wring deliver           # dry run: patch, message, branch, MR body
 ```
 
 **`wring verify` on this repo is the law** — it runs the two gates
@@ -142,7 +147,10 @@ block first — the clean console is the product.
 | `redact.py` | turn env-var name patterns into the set of secret values, and erase them from text or bytes | look anywhere but the environment |
 | `summary.py` | render `summary.md`: repo line, gate table with statuses and log links, the exact rerun command | anything an agent parses — machines read `evidence.jsonl` / `manifest.json` |
 | `verify.py` | one verification as a **callable**: snapshot git, open a bundle, run the planned gates, stop on the first required failure, write manifest + summary, return an `Outcome`. Also `plan()` and the `--json` shape both commands share | print anything, or decide an exit code — that is `cli.py`'s |
-| `judge.py` | `wring judge`: the closed-list `Packet`, the request, the verdict, and `send()` — the **only** function in the program that opens a socket | see a worker's output; there is no field in `Packet` that could carry one |
+| `judge.py` | `wring judge`: the closed-list `Packet`, the request, the verdict, and `send()` — **one of the two** functions in the program that opens a socket (`forge.request` is the other; it was "the only" until P3, and SPEC_GET_V0.md §7 restates it rather than quietly keeping the claim) | see a worker's output; there is no field in `Packet` that could carry one |
+| `forge.py` | the issue tracker and MR host: **every vendor string in Wringer**, behind one mapping table, plus `request()` — the second and last socket | appear in `cli.py`; the CLI says "the forge" and never "GitHub" |
+| `acquire.py` | `wring get` and the record of where a working copy came from (`wringer.acquired.v1`); the URL and scheme refusals | run anything it cloned — a fresh clone is untrusted input, and `.wringer.yaml` is code |
+| `deliver.py` | `wring deliver`: **the only module that writes git history**, and the five refusals that buy that power (SPEC_GET_V0.md §1) | force-push, delete a branch, rewrite history, touch the default branch, or roll back a half-delivered one |
 | `rubric.py` | `wringer.rubric.v1` — its own file because its bytes travel, so it gets its own size and shape limits | live under `.wringer/` (a rubric is source, not evidence) |
 | `fleet.py` | `wring fleet`: a bounded pool of child `wring run` subprocesses, the self-healing ladder, reaping by ledger growth, honest partial-success counts | do the work itself — it is only a supervisor |
 | `loop.py` | v0.2's `wring run`: verify → brief → worker → verify, the plateau fingerprint, and the `wringer.loop.v1` bundle under `.wringer/loops/` | call an LLM, touch git, or nest a verify bundle inside a loop bundle (runs are referenced by path) |
@@ -180,13 +188,24 @@ everything under `wring verify`. `wring run` now exists, but only the slice
 creation, no commits or pushes, no Temporal, no OpenTelemetry, no multi-agent
 anything**, and no anti-thrash beyond the plateau fingerprint.
 
-**Two commands may now reach a network, and only two**: `wring judge --send`
-and `wring spec --send`. Both require a `judge:` section the repo wrote down,
-both write the exact request to disk before any socket opens, both are dry-run
-by default, and both go through `judge.send` — so `grep -rn urlopen src/` has
-exactly one answer and must keep having one. Everything that *proves*
-anything still makes no LLM call and no network call: the worker is the user's
-own program, and every worker in the test suite is a shell one-liner.
+**Three commands may reach a network, and only three**: `wring judge --send`,
+`wring spec --send` and `wring deliver --send` (plus `wring issue`, which is
+the forge read the last of those writes back to). Each requires a section the
+repo wrote down — `judge:` or `forge:` — each writes the exact bytes to disk
+before any socket opens, and each is dry-run or explicit by default. **Every
+socket lives in `judge.send` or `forge.request`**, so `grep -rn build_opener
+src/` has exactly two answers and must keep having exactly two. Everything
+that *proves* anything still makes no LLM call and no network call: the worker
+is the user's own program, and every worker in the test suite is a shell
+one-liner.
+
+**Wringer writes git history in exactly one place.** `deliver.py`, only on
+`--send`, only onto a branch it created, never the default branch, never a
+force push, with a ledger event appended before each write. That is handover
+law 6 as Marc amended it on 2026-08-01; SPEC_GET_V0.md §1 is the contract and
+every one of its five conditions has a test that fails without it. `wring
+run`, `wring verify`, `wring spec` and `wring plan` still touch git not at
+all, and the fleet's `worktree add/remove` is still metadata.
 
 `wring spec` and `wring plan` add their own non-goals, binding
 ([SPEC_INTENT_V0.md](SPEC_INTENT_V0.md) §5): no multi-turn refinement (edit

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/acquired-manifest.schema.json",
+  "title": "Wringer acquisition manifest",
+  "description": "manifest.json of a `wring get` record — where a working copy came from. Schema version wringer.acquired.v1. A working copy that cannot say where it came from is the provenance gap P5 closes; this is the half of it that costs nothing today.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "acquired_at",
+    "origin",
+    "directory",
+    "head_sha",
+    "default_branch"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.acquired.v1"
+    },
+    "acquired_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "origin": {
+      "description": "The clone URL, as typed. Refused before the clone if it carried credentials, precisely because it is recorded here.",
+      "type": "string",
+      "minLength": 1
+    },
+    "directory": {
+      "description": "Where the working copy landed.",
+      "type": "string",
+      "minLength": 1
+    },
+    "head_sha": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_branch": {
+      "description": "The remote's default branch, or null when it could not be determined — which downstream is a refusal, never a guess.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

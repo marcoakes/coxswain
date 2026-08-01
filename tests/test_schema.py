@@ -429,3 +429,134 @@ def test_the_two_schemas_describe_one_criterion(monkeypatch):
     in_spec = load("spec.schema.json")["properties"]["criteria"]["items"]
 
     assert in_rubric == in_spec
+
+
+# --- delivery and acquisition (SPEC_GET_V0.md) ---
+#
+# The delivery manifest is the only bundle in Wringer that describes writes to
+# git. It exists because the amended law 6 buys that power with receipts, so a
+# schema that quietly stopped describing it would matter more here than
+# anywhere else in the program.
+
+
+def deliver_for_real(repo, monkeypatch, tag):
+    """Run a real verify + `wring deliver --send` against a file:// remote."""
+    from test_deliver import CONFIG, MR_REPLY, fake_forge, git
+
+    upstream = repo.parent / f"{repo.name}-{tag}.git"
+    git(repo, "init", "--bare", str(upstream))
+    git(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "config")
+    git(repo, "push", "-u", "origin", "main")
+    (repo / "feature.py").write_text("x = 1\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("FORGE_TOKEN", "t1234567")
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    fake_forge(monkeypatch, reply=MR_REPLY)
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_OK
+    return upstream
+
+
+def test_a_real_delivery_and_acquisition_match_the_published_schemas(
+    repo, monkeypatch, capsys
+):
+    from wringer import acquire, deliver
+
+    upstream = deliver_for_real(repo, monkeypatch, "schema")
+    assert cli.main(["get", f"file://{upstream}", "--into", "clone"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    built = validators()
+    errors: list[str] = []
+
+    written = sorted((repo / deliver.DELIVERIES_DIRNAME).iterdir())[0]
+    manifest = json.loads(
+        (written / deliver.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    check(manifest, load("delivery-manifest.schema.json"), "delivery manifest")
+    for error in built["delivery-manifest.schema.json"].iter_errors(manifest):
+        errors.append(f"delivery: {error.json_path} {error.message}")
+    # the live branch really was exercised, or this test proves less than it
+    # looks like it does
+    assert manifest["mode"] == "live" and manifest["result"]["pushed"] is True
+    assert manifest["result"]["merge_request"]["number"] == 7
+
+    acquired = sorted((repo / acquire.ACQUIRED_DIRNAME).glob("*/manifest.json"))[0]
+    record = json.loads(acquired.read_text(encoding="utf-8"))
+    check(record, load("acquired-manifest.schema.json"), "acquired manifest")
+    for error in built["acquired-manifest.schema.json"].iter_errors(record):
+        errors.append(f"acquired: {error.json_path} {error.message}")
+
+    assert not errors, "\n".join(errors)
+
+
+def test_a_dry_run_delivery_also_matches_the_schema(repo, monkeypatch, capsys):
+    """The dry run's manifest has nulls where the live one has values — the
+    branch that was planned but not created, most of all."""
+    from test_deliver import CONFIG, git
+
+    from wringer import deliver
+
+    upstream = repo.parent / f"{repo.name}-dry.git"
+    git(repo, "init", "--bare", str(upstream))
+    git(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "config")
+    git(repo, "push", "-u", "origin", "main")
+    (repo / "feature.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    assert cli.main(["deliver"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    written = sorted((repo / deliver.DELIVERIES_DIRNAME).iterdir())[0]
+    manifest = json.loads(
+        (written / deliver.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    check(manifest, load("delivery-manifest.schema.json"), "dry delivery")
+    for error in validators()["delivery-manifest.schema.json"].iter_errors(
+        manifest
+    ):
+        raise AssertionError(f"dry delivery: {error.json_path} {error.message}")
+    assert manifest["mode"] == "dry_run"
+    assert manifest["result"] == {
+        "branch": None, "commit": None, "pushed": False, "merge_request": None
+    }
+    # ...but the branch it WOULD create is named, because a dry run that said
+    # nothing was planned would be reporting the wrong thing
+    assert manifest["branch"].startswith("wringer/")
+
+
+def test_every_delivery_event_carries_the_chain(repo, monkeypatch, capsys):
+    """The ledger is the receipt half of law 6's amendment, so its shape gets
+    checked the way every other ledger's does."""
+    from wringer import deliver
+
+    deliver_for_real(repo, monkeypatch, "chain")
+    capsys.readouterr()
+
+    written = sorted((repo / deliver.DELIVERIES_DIRNAME).iterdir())[0]
+    events = [
+        json.loads(line)
+        for line in (written / deliver.EVENTS_FILENAME)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert events, "a live delivery wrote no ledger"
+    for event in events:
+        assert {"type", "ts", "prev_hash"} <= set(event), event
+    # planned before done, for every pair — condition 5
+    kinds = [e["type"] for e in events]
+    for planned, done in (
+        ("branch.planned", "branch.created"),
+        ("commit.planned", "commit.written"),
+        ("push.planned", "push.done"),
+        ("mr.planned", "mr.opened"),
+    ):
+        assert kinds.index(planned) < kinds.index(done), (planned, done)

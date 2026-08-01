@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/delivery-manifest.schema.json",
+  "title": "Wringer delivery manifest",
+  "description": "manifest.json of a `wring deliver` bundle — what a verified change became. Schema version wringer.delivery.v1. This is the only bundle in Wringer that describes writes to git, and it exists because the amended law 6 buys that power with receipts.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "delivery_id",
+    "started_at",
+    "mode",
+    "run_dir",
+    "branch",
+    "base",
+    "remote",
+    "files",
+    "result"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.delivery.v1"
+    },
+    "delivery_id": {
+      "description": "The delivery directory's name, YYYYMMDD-HHMMSS-<4 hex>.",
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "mode": {
+      "description": "dry_run wrote the plan and touched git not at all. live means --send was typed by a human.",
+      "enum": [
+        "dry_run",
+        "live"
+      ]
+    },
+    "run_dir": {
+      "description": "The evidence bundle whose gates passed. An unverified change is refused a branch.",
+      "type": "string"
+    },
+    "branch": {
+      "description": "The branch Wringer would create, or did. Never equal to base.",
+      "type": "string",
+      "minLength": 1
+    },
+    "base": {
+      "description": "The branch the merge request targets, and the one delivery may never touch.",
+      "type": "string",
+      "minLength": 1
+    },
+    "remote": {
+      "type": "string",
+      "minLength": 1
+    },
+    "files": {
+      "description": "Paths the delivery would carry, relative to the repo root.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "branch",
+        "commit",
+        "pushed",
+        "merge_request"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "description": "The branch actually created, or null — in a dry run, and in a live run that failed before creating it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pushed": {
+          "type": "boolean"
+        },
+        "merge_request": {
+          "description": "Null when none was opened — including when the push landed and the forge refused, which is a real state and is recorded rather than hidden.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "number",
+            "url"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "number": {
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
