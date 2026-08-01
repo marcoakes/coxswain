@@ -16,11 +16,14 @@ from pathlib import Path
 
 from wringer import (
     __version__,
+    acquire,
     config,
+    deliver,
     detect,
     doctor,
     evidence,
     fleet,
+    forge,
     gates,
     git,
     judge,
@@ -213,6 +216,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit one JSON object instead of the human report",
     )
     parser_plan.set_defaults(func=cmd_plan)
+
+    parser_get = subparsers.add_parser(
+        "get", help="clone a repository into the workspace"
+    )
+    parser_get.add_argument("url", metavar="URL", help="the repository to clone")
+    parser_get.add_argument(
+        "--into", metavar="DIR", help="clone here instead of into the workspace"
+    )
+    parser_get.set_defaults(func=cmd_get)
+
+    parser_issue = subparsers.add_parser(
+        "issue", help="write a forge issue to a local markdown file"
+    )
+    parser_issue.add_argument(
+        "issue", metavar="ISSUE", help="an issue number or its URL"
+    )
+    parser_issue.set_defaults(func=cmd_issue)
+
+    parser_deliver = subparsers.add_parser(
+        "deliver",
+        help="turn a verified change into a branch and a merge request",
+    )
+    parser_deliver.add_argument(
+        "run",
+        nargs="?",
+        metavar="RUN_DIR",
+        help="the run that verified it; defaults to the most recent",
+    )
+    parser_deliver.add_argument(
+        "--send",
+        action="store_true",
+        help=(
+            "actually create the branch, commit, push and open the MR — the "
+            "only path in Wringer that writes git history. Without it, the "
+            "patch, message, branch and MR body are written and nothing runs."
+        ),
+    )
+    parser_deliver.add_argument(
+        "--task", metavar="ID", help="fill {task} in the branch template"
+    )
+    parser_deliver.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_deliver.set_defaults(func=cmd_deliver)
 
     parser_doctor = subparsers.add_parser(
         "doctor",
@@ -1198,6 +1247,304 @@ def _report_plan(
         f"\nNext:\n  point 'judge.rubric:' at {spec.RUBRIC_FILENAME}\n"
         f"  wring fleet {spec.TASKS_FILENAME}"
     )
+
+
+def cmd_get(args: argparse.Namespace) -> int:
+    """Clone a repository into the workspace (SPEC_GET_V0.md §3)."""
+    root = git.find_root(Path.cwd())
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring get: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.workspace is None and not args.into:
+        print(
+            f"wring get: no 'workspace:' in {config.CONFIG_FILENAME} and no "
+            "--into — there is no default, because Wringer does not choose "
+            "where to put your code. Add one:\n\n  workspace: ../work",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    try:
+        acquire.check_url(args.url)
+        target = acquire.destination(
+            args.url, (root / (cfg.workspace or ".")).resolve(), args.into
+        )
+        acquired = acquire.clone(args.url, target)
+        manifest = acquire.record(root, acquired)
+    except acquire.AcquireError as exc:
+        print(f"wring get: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    print(f"Cloned {acquired.origin}\n  into {acquired.directory}")
+    if acquired.head_sha:
+        print(f"  at   {acquired.head_sha[:12]} on {acquired.default_branch or '?'}")
+    print(f"\nProvenance: {_relative(manifest, root)}")
+    print(
+        "\nNothing in it has been run. Read its .wringer.yaml before you "
+        "verify — a repo's gates are code."
+    )
+    return EXIT_OK
+
+
+def cmd_issue(args: argparse.Namespace) -> int:
+    """Write a forge issue to a local file (SPEC_GET_V0.md §4)."""
+    root = git.find_root(Path.cwd())
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring issue: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.forge is None:
+        print(
+            f"wring issue: no 'forge:' section in {config.CONFIG_FILENAME} — "
+            "there is no default host and never will be. Add one:\n\n"
+            "  forge:\n"
+            "    kind: github\n"
+            "    endpoint: https://api.github.com\n"
+            "    repo: owner/name\n"
+            "    token_env: FORGE_TOKEN",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    if cfg.forge.token_env and os.environ.get(cfg.forge.token_env) is None:
+        print(
+            f"wring issue: 'forge.token_env' names {cfg.forge.token_env}, which "
+            "is not set in this environment",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
+        (cfg.forge.token_env,) if cfg.forge.token_env else ()
+    ))
+    settings = cfg.deliver or config.Deliver()
+
+    try:
+        number = forge.issue_number(args.issue, cfg.forge)
+        fetched = forge.fetch_issue(
+            cfg.forge, number, os.environ.get(cfg.forge.token_env or "")
+        )
+    except forge.ForgeError as exc:
+        print(f"wring issue: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    target = root / settings.issues_dir / f"{fetched.number}.md"
+    if target.exists():
+        try:
+            existing = target.read_text(encoding="utf-8", errors="replace")[:300]
+        except OSError:
+            existing = ""
+        if forge.ISSUE_MARKER not in existing:
+            print(
+                f"wring issue: {_relative(target, root)} exists and `wring "
+                "issue` did not write it — refusing to overwrite it",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+
+    # Scrubbed at the write, like the PRD: the file, any later request and the
+    # wire all carry the same text.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        redactor.scrub(forge.render_issue(fetched)), encoding="utf-8"
+    )
+
+    print(f"Wrote {_relative(target, root)} — {fetched.title}")
+    print(
+        "\nIt is a copy of something a stranger wrote: read it, then\n"
+        f"  wring spec {_relative(target, root)}"
+    )
+    return EXIT_OK
+
+
+def cmd_deliver(args: argparse.Namespace) -> int:
+    """A verified change becomes a branch and an MR (SPEC_GET_V0.md §5).
+
+    The only command in Wringer that writes git history, and it does so only
+    when a human types `--send` — the amended law 6, in one function.
+    """
+    root = git.find_root(Path.cwd())
+
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError as exc:
+        print(f"wring deliver: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if cfg.deliver is None:
+        print(
+            f"wring deliver: no 'deliver:' section in {config.CONFIG_FILENAME} "
+            "— its absence is what makes writing git history unreachable. "
+            "Add one:\n\n"
+            "  deliver:\n"
+            '    branch: "wringer/{run}"\n'
+            "    remote: origin",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    run_dir = _delivery_target(args.run, root)
+    if run_dir is None:
+        return EXIT_CONFIG
+
+    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
+        (cfg.forge.token_env,) if cfg.forge and cfg.forge.token_env else ()
+    ))
+
+    try:
+        planned = deliver.plan(root, cfg, run_dir, run_dir.name, args.task)
+    except deliver.Refused as exc:
+        print(f"wring deliver: {exc}", file=sys.stderr)
+        return exc.exit_code
+    except deliver.DeliverError as exc:
+        print(f"wring deliver: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    try:
+        bundle = deliver.Bundle.create(
+            root / deliver.DELIVERIES_DIRNAME, redactor=redactor
+        )
+    except deliver.DeliverError as exc:
+        print(f"wring deliver: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    # Written before anything runs: what would happen is auditable rather than
+    # asserted, and --send is this same path continuing one step further.
+    bundle.write_plan(planned)
+
+    mode = "live" if args.send else "dry_run"
+    delivered: dict[str, object] = {"branch": None, "commit": None,
+                                    "pushed": False, "merge_request": None}
+    if args.send:
+        try:
+            delivered.update(deliver.send(root, bundle, planned))
+        except deliver.DeliverError as exc:
+            bundle.event("delivery.failed", why=str(exc))
+            bundle.write_manifest(mode, planned, delivered)
+            print(f"wring deliver: {exc}", file=sys.stderr)
+            return EXIT_CONFIG
+
+        opened = _open_merge_request(cfg, bundle, planned, root)
+        if opened is not None:
+            delivered["merge_request"] = opened
+
+    bundle.write_manifest(mode, planned, delivered)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "mode": mode,
+                    # The PLAN's branch, always — a dry run planned one even
+                    # though it created none, and reporting null there would
+                    # tell a consumer nothing was going to happen.
+                    "branch": planned.branch,
+                    "base": planned.base,
+                    "files": len(planned.changed_files),
+                    "delivery_dir": _relative(bundle.directory, root),
+                    "created": delivered["branch"],
+                    "commit": delivered["commit"],
+                    "pushed": delivered["pushed"],
+                    "merge_request": delivered["merge_request"],
+                }
+            )
+        )
+    else:
+        _report_delivery(mode, planned, delivered, bundle, root)
+    return EXIT_OK
+
+
+def _open_merge_request(
+    cfg: config.Config, bundle: deliver.Bundle, planned: deliver.Plan, root: Path
+) -> dict[str, object] | None:
+    """Open the MR, or say plainly that the branch is up and this step is not.
+
+    A push that landed and an MR that did not is a real state, and it is more
+    useful to name it than to fail the whole command over it.
+    """
+    if cfg.forge is None:
+        print(
+            "wring deliver: the branch is pushed, but no 'forge:' section is "
+            "declared, so no merge request was opened.",
+            file=sys.stderr,
+        )
+        return None
+    bundle.event("mr.planned", head=planned.branch, base=planned.base)
+    try:
+        opened = forge.open_merge_request(
+            cfg.forge,
+            os.environ.get(cfg.forge.token_env or ""),
+            planned.title,
+            planned.branch,
+            planned.base,
+            (bundle.directory / deliver.MR_FILENAME).read_text(encoding="utf-8"),
+        )
+    except (forge.ForgeError, OSError) as exc:
+        bundle.event("mr.failed", why=str(exc))
+        print(
+            f"wring deliver: the branch is pushed, but the merge request could "
+            f"not be opened: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    bundle.event("mr.opened", number=opened.number, url=opened.url)
+    return {"number": opened.number, "url": opened.url}
+
+
+def _delivery_target(named: str | None, root: Path) -> Path | None:
+    if named is not None:
+        run_dir = Path(named)
+        if not run_dir.is_dir():
+            print(f"wring deliver: no run directory at {named}", file=sys.stderr)
+            return None
+        return run_dir
+    found = evidence.latest_run(root / evidence.RUNS_DIRNAME)
+    if found is None:
+        print(
+            f"wring deliver: no runs under "
+            f"{(root / evidence.RUNS_DIRNAME).as_posix()} — run 'wring verify' "
+            "first; delivery needs something that passed",
+            file=sys.stderr,
+        )
+        return None
+    return found
+
+
+def _report_delivery(
+    mode: str,
+    planned: deliver.Plan,
+    delivered: dict[str, object],
+    bundle: deliver.Bundle,
+    root: Path,
+) -> None:
+    where = _relative(bundle.directory, root)
+    if mode == "dry_run":
+        print("dry run — nothing was written to git.\n")
+        print(f"Would create branch:  {planned.branch}")
+        print(f"        targeting:    {planned.base}")
+        print(f"        with:         {len(planned.changed_files)} file(s)")
+        print(f"\nThe patch, message, branch and MR body are in:\n{where}/")
+        print(
+            "\nRead them — and edit commit.txt or mr.md if you want — then:\n"
+            "  wring deliver --send"
+        )
+        return
+
+    print(f"Branch:  {delivered.get('branch')}")
+    if delivered.get("commit"):
+        print(f"Commit:  {str(delivered['commit'])[:12]}")
+    print(f"Pushed:  {'yes' if delivered.get('pushed') else 'no'}")
+    merge_request = delivered.get("merge_request")
+    if isinstance(merge_request, dict):
+        print(f"MR:      {merge_request.get('url')}")
+    print(f"\nDelivery evidence: {where}/")
 
 
 def _refuse_unverifiable(root: Path, command: str) -> int | None:

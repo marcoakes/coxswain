@@ -39,7 +39,29 @@ _PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-z_]+)\}")
 GATE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 MAX_GATE_ID_LENGTH = 64
 
-_TOP_LEVEL_KEYS = {"version", "gates", "evidence", "run", "judge", "fleet"}
+_TOP_LEVEL_KEYS = {
+    "version", "gates", "evidence", "run", "judge", "fleet", "workspace",
+    "forge", "deliver",
+}
+_FORGE_KEYS = {"kind", "endpoint", "repo", "token_env", "timeout"}
+_DELIVER_KEYS = {"branch", "base", "remote", "issues_dir"}
+
+# What a branch template may ask Wringer to substitute (SPEC_GET_V0.md §6).
+BRANCH_PLACEHOLDERS = ("task", "run")
+
+# The forges `forge.py` maps. A vendor string never appears outside that
+# module (AGENTS.md rule 5), so this list is also the whole vendor surface.
+FORGE_KINDS = ("github", "gitlab")
+
+DEFAULT_FORGE_TIMEOUT_SECONDS = 30
+DEFAULT_BRANCH_TEMPLATE = "wringer/{run}"
+DEFAULT_REMOTE = "origin"
+DEFAULT_ISSUES_DIR = "issues"
+
+# `owner/name`, the shape both mapped forges use. It becomes a URL path, so
+# it is a slug pair rather than free text — a repo of `../../x` would be a
+# path traversal against someone else's API.
+REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+")
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
@@ -169,6 +191,38 @@ class Fleet:
 
 
 @dataclass(frozen=True)
+class Forge:
+    """The `forge:` section — the issue tracker and MR host (SPEC_GET_V0 §6).
+
+    `kind`, `endpoint` and `repo` have no defaults and never will, for the
+    judge's reason: a repo that has not opted in leaves no reachable code path
+    to a forge at all.
+    """
+
+    kind: str
+    endpoint: str
+    repo: str
+    token_env: str | None = None
+    timeout: int = DEFAULT_FORGE_TIMEOUT_SECONDS
+
+
+@dataclass(frozen=True)
+class Deliver:
+    """The `deliver:` section — how a verified change becomes a branch.
+
+    Every field has a safe default *except the ones that name someone else's
+    infrastructure*, which live in `forge:`. `base` is None by default and is
+    then resolved from the remote: Wringer guessing a default branch is
+    exactly the mistake §1 forbids.
+    """
+
+    branch: str = DEFAULT_BRANCH_TEMPLATE
+    base: str | None = None
+    remote: str = DEFAULT_REMOTE
+    issues_dir: str = DEFAULT_ISSUES_DIR
+
+
+@dataclass(frozen=True)
 class Config:
     version: int
     gates: tuple[Gate, ...]
@@ -183,6 +237,15 @@ class Config:
     judge: Judge | None = None
     # None when the repo has not opted into fleets.
     fleet: Fleet | None = None
+    # None when the repo has not opted into a forge. Its absence is what makes
+    # `wring issue` and the MR half of `wring deliver` unreachable.
+    forge: Forge | None = None
+    # None when the repo has not opted into delivery. Its absence is what
+    # makes writing git history unreachable (SPEC_GET_V0.md §1).
+    deliver: Deliver | None = None
+    # Where `wring get` clones. No default: Wringer does not choose where to
+    # put someone's code.
+    workspace: str | None = None
 
 
 def load(path: Path) -> Config:
@@ -229,6 +292,12 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         raise ConfigError(f"{source}: 'evidence' must be a mapping")
     _validate_evidence(evidence, source)
 
+    workspace = raw.get("workspace")
+    if workspace is not None and (
+        not isinstance(workspace, str) or not workspace.strip()
+    ):
+        raise ConfigError(f"{source}: 'workspace' must be a non-empty string")
+
     return Config(
         version=version,
         gates=gates,
@@ -236,6 +305,118 @@ def parse(raw: Any, source: str = CONFIG_FILENAME) -> Config:
         run=_parse_run(raw.get("run"), source),
         judge=_parse_judge(raw.get("judge"), source),
         fleet=_parse_fleet(raw.get("fleet"), source),
+        forge=_parse_forge(raw.get("forge"), source),
+        deliver=_parse_deliver(raw.get("deliver"), source),
+        workspace=workspace.strip() if workspace else None,
+    )
+
+
+def _parse_forge(raw: Any, source: str) -> Forge | None:
+    """The `forge:` section, or None when the repo has not opted in."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'forge' must be a mapping")
+
+    unknown = sorted(set(raw) - _FORGE_KEYS)
+    if unknown:
+        raise ConfigError(f"{source}: unknown keys under 'forge': {', '.join(unknown)}")
+
+    for key in ("kind", "endpoint", "repo"):
+        value = raw.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(
+                f"{source}: 'forge.{key}' must be a non-empty string — there "
+                "is no default, because Wringer contacts the forge you wrote "
+                "down and never one it guessed"
+            )
+
+    kind = raw["kind"].strip()
+    if kind not in FORGE_KINDS:
+        raise ConfigError(
+            f"{source}: 'forge.kind' must be one of {', '.join(FORGE_KINDS)} "
+            f"(got {kind!r})"
+        )
+
+    endpoint = raw["endpoint"].strip()
+    _validate_endpoint(endpoint, source, "forge.endpoint")
+
+    repo = raw["repo"].strip()
+    if not REPO_PATTERN.fullmatch(repo):
+        raise ConfigError(
+            f"{source}: 'forge.repo' must be 'owner/name' (got {repo!r}) — it "
+            "becomes a path in someone else's API, so it is a slug pair rather "
+            "than free text"
+        )
+
+    token_env = raw.get("token_env")
+    if token_env is not None and (
+        not isinstance(token_env, str) or not token_env.strip()
+    ):
+        raise ConfigError(
+            f"{source}: 'forge.token_env' must be the NAME of an environment "
+            "variable, not a token — Wringer will not read a credential out of "
+            "a config file"
+        )
+
+    return Forge(
+        kind=kind,
+        endpoint=endpoint,
+        repo=repo,
+        token_env=token_env,
+        timeout=_positive_int(
+            raw, "timeout", DEFAULT_FORGE_TIMEOUT_SECONDS, source, section="forge"
+        ),
+    )
+
+
+def _parse_deliver(raw: Any, source: str) -> Deliver | None:
+    """The `deliver:` section, or None when the repo has not opted in.
+
+    Its absence is what makes writing git history unreachable: the amended
+    law 6 is a flag a human types *and* a section a repo wrote down.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: 'deliver' must be a mapping")
+
+    unknown = sorted(set(raw) - _DELIVER_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{source}: unknown keys under 'deliver': {', '.join(unknown)}"
+        )
+
+    branch = raw.get("branch", DEFAULT_BRANCH_TEMPLATE)
+    if not isinstance(branch, str) or not branch.strip():
+        raise ConfigError(f"{source}: 'deliver.branch' must be a non-empty string")
+    unknown_names = sorted(
+        set(_PLACEHOLDER_PATTERN.findall(branch)) - set(BRANCH_PLACEHOLDERS)
+    )
+    if unknown_names:
+        raise ConfigError(
+            f"{source}: 'deliver.branch' uses unknown placeholder(s) "
+            f"{', '.join('{' + n + '}' for n in unknown_names)} — available: "
+            f"{', '.join('{' + p + '}' for p in BRANCH_PLACEHOLDERS)}"
+        )
+
+    for key in ("base", "remote", "issues_dir"):
+        value = raw.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ConfigError(f"{source}: 'deliver.{key}' must be a non-empty string")
+
+    issues_dir = (raw.get("issues_dir") or DEFAULT_ISSUES_DIR).strip()
+    if Path(issues_dir).is_absolute() or ".." in Path(issues_dir).parts:
+        raise ConfigError(
+            f"{source}: 'deliver.issues_dir' must be a path inside the "
+            f"repository (got {issues_dir!r}) — Wringer writes files there"
+        )
+
+    return Deliver(
+        branch=branch.strip(),
+        base=(raw["base"].strip() if raw.get("base") else None),
+        remote=(raw.get("remote") or DEFAULT_REMOTE).strip(),
+        issues_dir=issues_dir,
     )
 
 
@@ -378,35 +559,38 @@ def _parse_judge(raw: Any, source: str) -> Judge | None:
     )
 
 
-def _validate_endpoint(endpoint: str, source: str) -> None:
+def _validate_endpoint(endpoint: str, source: str, key: str = "judge.endpoint") -> None:
     """Checked at parse time, so an unsafe endpoint can never reach a socket.
 
     https anywhere; http only to loopback. No userinfo, because credentials
     do not travel in URLs — and this URL is recorded in the bundle. No query
     string, for the same reason.
+
+    Shared by `judge.endpoint` and `forge.endpoint`: one set of safety rules
+    for every socket in the program, which is the point of having two.
     """
     parsed = urllib.parse.urlsplit(endpoint)
 
     if parsed.scheme not in ("http", "https"):
         raise ConfigError(
-            f"{source}: 'judge.endpoint' must be http:// or https:// "
+            f"{source}: '{key}' must be http:// or https:// "
             f"(got {parsed.scheme or 'no scheme'!r})"
         )
     if not parsed.hostname:
-        raise ConfigError(f"{source}: 'judge.endpoint' has no host")
+        raise ConfigError(f"{source}: '{key}' has no host")
     if parsed.username or parsed.password:
         raise ConfigError(
-            f"{source}: 'judge.endpoint' must not carry credentials — the "
-            "endpoint is recorded in the verdict bundle. Use 'api_key_env'"
+            f"{source}: '{key}' must not carry credentials — the "
+            "endpoint is recorded in the evidence. Use an env-var name"
         )
     if parsed.query:
         raise ConfigError(
-            f"{source}: 'judge.endpoint' must not carry a query string — it is "
-            "recorded in the verdict bundle"
+            f"{source}: '{key}' must not carry a query string — it is "
+            "recorded in the evidence"
         )
     if parsed.scheme == "http" and parsed.hostname not in _LOOPBACK:
         raise ConfigError(
-            f"{source}: 'judge.endpoint' may only use plain http:// to "
+            f"{source}: '{key}' may only use plain http:// to "
             f"loopback (got host {parsed.hostname!r}) — a rubric and a diff "
             "are not things to send in the clear"
         )

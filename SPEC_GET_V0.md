@@ -167,7 +167,7 @@ deliver:
 `wring judge --send` was "the only function that opens a socket". After this
 slice that sentence is false, and it will be **restated rather than quietly
 kept**: every network call in Wringer lives in exactly two functions,
-`judge.send` and `forge.request`, and `grep -rn "urlopen" src/` must return
+`judge.send` and `forge.request`, and `grep -rn "build_opener" src/` must return
 exactly those two. Both are reached only with a flag a human typed, only
 against an endpoint the repo declared, and only after the bytes are on disk.
 
