@@ -20,6 +20,9 @@ build/
 .env.*
 !.env.example
 
+# personal Claude Code settings (permission allowlist) — not the team's
+.claude/settings.local.json
+
 # editor/os
 .DS_Store
 .idea/

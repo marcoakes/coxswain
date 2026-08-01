@@ -501,3 +501,115 @@ def test_an_unreachable_endpoint_summary_says_the_socket_was_opened(
 
     written = (only_draft(repo) / spec.SUMMARY_FILENAME).read_text("utf-8")
     assert "dry run" not in written
+
+
+# --- what an adversarial review found (2026-08-01) -----------------------
+#
+# Each of these reproduced against the first cut of this slice. They are the
+# cases where the code was confidently wrong, which is the failure mode the
+# whole slice is about, so they get named tests rather than a tidy-up.
+
+
+def test_the_wire_never_carries_what_the_request_file_redacts(
+    repo, monkeypatch, capsys
+):
+    """THE audit test. Scrubbing only the artifact would leave request.json
+    saying [REDACTED] beside a socket that carried the real value — a record
+    that denies what happened, which is worse than no record."""
+    secret = "sk-live-AAAABBBBCCCC1234"
+    setup_repo(
+        repo,
+        prd=f"Use the staging key {secret} when testing the export.",
+        config_text=CONFIG.rstrip() + "\n  api_key_env: DRAFT_KEY\n",
+    )
+    monkeypatch.setenv("DRAFT_KEY", secret)
+    monkeypatch.chdir(repo)
+    sent = fake_transport(monkeypatch, reply=reply(DRAFT))
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    on_wire = json.dumps(sent["request"])
+    on_disk = (only_draft(repo) / spec.REQUEST_FILENAME).read_text("utf-8")
+    # the artifact and the socket agree, because both came from one scrubbed
+    # string — and neither carries the credential
+    assert secret not in on_wire
+    assert secret not in on_disk
+    assert "[REDACTED]" in on_wire and "[REDACTED]" in on_disk
+    # nor does the spec file the human is about to commit
+    assert secret not in (repo / spec.SPEC_FILENAME).read_text("utf-8")
+
+
+def test_print_request_is_scrubbed_too(repo, monkeypatch, capsys):
+    secret = "sk-live-DDDDEEEEFFFF5678"
+    setup_repo(
+        repo,
+        prd=f"The key is {secret}.",
+        config_text=CONFIG.rstrip() + "\n  api_key_env: DRAFT_KEY\n",
+    )
+    monkeypatch.setenv("DRAFT_KEY", secret)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["spec", "PRD.md", "--print-request"]) == cli.EXIT_OK
+
+    assert secret not in capsys.readouterr().out
+
+
+def test_a_reply_that_answers_its_own_question_is_refused(
+    repo, monkeypatch, capsys
+):
+    """The second interlock. An `answer` the drafter wrote is the assumption
+    it was told to ask about, wearing a human's clothes — `wring plan` would
+    wave it through and the brief would call it a decision someone made."""
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    presumptuous = dict(
+        DRAFT,
+        open_questions=[
+            dict(DRAFT["open_questions"][0], answer="I'll assume ISO-8601."),
+            DRAFT["open_questions"][1],
+        ],
+    )
+    fake_transport(monkeypatch, reply=reply(presumptuous))
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+
+    err = capsys.readouterr().err
+    assert "answered its own open question" in err
+    assert "date-format" in err
+    assert not (repo / spec.SPEC_FILENAME).exists()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".git/refs/heads/main", ".git/config", "tasks.jsonl",
+     "wringer.rubric.yaml", "wringer.spec.yaml", ".wringer.yaml"],
+)
+def test_a_write_path_that_would_destroy_something_is_refused(repo, path):
+    with pytest.raises(spec.SpecError):
+        spec.check_writable(repo, path, "brief")
+
+
+def test_a_control_character_in_a_path_is_refused_not_crashed(repo):
+    """A NUL reaches the OS layer and raises ValueError out of stat(). A
+    refusal is the answer; a traceback is not."""
+    with pytest.raises(spec.SpecError, match="control character"):
+        spec.check_writable(repo, "briefs/a\x00.md", "brief")
+
+
+def test_every_scalar_the_file_can_hold_reads_back_exactly(repo):
+    """`_scalar` used to `.strip()` the emitter's document marker, which also
+    ate leading and trailing Unicode whitespace from the value — so a title
+    ending in a non-breaking space was quietly written down as a different
+    title. And only '\\n' forced quoting, though YAML breaks lines on
+    U+2028, U+2029 and U+0085 too."""
+    awkward = [
+        "title\xa0", "\xa0lead", "tail　", "a b", "c d",
+        "e\x85f", "cr\rhere", "multi\nline", "a: b", "yes", "null", "123",
+        "  padded  ", "#hash", "- dash", 'q"and\'both', "back\\slash",
+        "emoji \U0001f3af", "",
+    ]
+    for value in awkward:
+        rendered = spec._scalar(value)
+        assert "\n" not in rendered, f"{value!r} rendered across lines"
+        assert yaml.safe_load(f"k: {rendered}")["k"] == value, value

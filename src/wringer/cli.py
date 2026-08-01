@@ -858,8 +858,15 @@ def cmd_spec(args: argparse.Namespace) -> int:
         )
         return EXIT_CONFIG
 
+    # Built BEFORE the PRD is read, because the PRD is scrubbed on the way in
+    # rather than on the way to disk: a request.json saying [REDACTED] beside a
+    # socket that carried the real value is an audit record that lies.
+    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
+        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
+    ))
+
     try:
-        prd = spec.read_prd(Path(args.prd), root)
+        prd = spec.read_prd(Path(args.prd), root, redactor)
     except spec.SpecError as exc:
         print(f"wring spec: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -895,9 +902,6 @@ def cmd_spec(args: argparse.Namespace) -> int:
         )
         return EXIT_CONFIG
 
-    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
-        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
-    ))
     try:
         bundle = spec.Bundle.create(root / spec.SPECS_DIRNAME, redactor=redactor)
     except spec.SpecError as exc:
@@ -1092,18 +1096,31 @@ def _plan_writes(
     # "No translation layer" is a claim, and this is the check behind it.
     spec.validate_rubric_text(rubric_text)
 
-    tasks_path = root / spec.TASKS_FILENAME
+    # Our own two fixed paths still get resolved: either could be a symlink
+    # pointing out of the repository, and write_text follows one.
+    tasks_path = spec.resolve_inside(root, spec.TASKS_FILENAME, spec.TASKS_FILENAME)
+    rubric_path = spec.resolve_inside(
+        root, spec.RUBRIC_FILENAME, spec.RUBRIC_FILENAME
+    )
     if not spec.tasks_file_is_generated(tasks_path):
         raise spec.SpecError(
             f"{spec.TASKS_FILENAME} exists and is not a task file — refusing to "
             "overwrite it"
         )
+    if not spec.rubric_is_generated(rubric_path):
+        raise spec.SpecError(
+            f"{spec.RUBRIC_FILENAME} exists and `wring plan` did not write it — "
+            "refusing to overwrite it. It is the document that decides whether "
+            "the work is accepted, so replacing a hand-written one is not a "
+            "thing to do quietly; move it, or point 'judge.rubric:' elsewhere"
+        )
 
     writes: list[tuple[Path, str]] = [
         (tasks_path, spec.render_tasks(loaded)),
-        (root / spec.RUBRIC_FILENAME, rubric_text),
+        (rubric_path, rubric_text),
     ]
     brief_paths: list[Path] = []
+    claimed: dict[Path, str] = {}
     for task in loaded.tasks:
         where = f"{spec.SPEC_FILENAME}: task '{task.id}'"
         directory = spec.resolve_inside(root, task.dir, f"{where}: 'dir'")
@@ -1112,7 +1129,16 @@ def _plan_writes(
                 f"{where} names dir '{task.dir}', which does not exist — the "
                 "fleet would park it"
             )
-        brief_path = spec.resolve_inside(root, task.brief, f"{where}: 'brief'")
+        brief_path = spec.check_writable(root, task.brief, f"{where}: 'brief'")
+        if brief_path in claimed:
+            # Two tasks, one file. The second write wins, the fleet dispatches
+            # both tasks against it, and one objective is simply gone.
+            raise spec.SpecError(
+                f"{where} names the same brief as task '{claimed[brief_path]}' "
+                f"({task.brief}) — one of the two objectives would be lost, and "
+                "both tasks would be sent the other's"
+            )
+        claimed[brief_path] = task.id
         if not spec.brief_is_generated(brief_path):
             raise spec.SpecError(
                 f"{where} would overwrite {task.brief}, which `wring plan` did "
@@ -1147,12 +1173,25 @@ def _report_plan(
             "these — changing what 'verified' means is yours to do:\n"
         )
         print(diff.rstrip())
+    elif fresh:
+        # No diff, but there IS something to propose: the config's gate list is
+        # not a block-style one this can safely add to. Saying so beats a diff
+        # that looks additive and is not.
+        print(
+            f"\nProposed gates ({', '.join(fresh)}), as text rather than a diff: "
+            f"{config.CONFIG_FILENAME}'s gate list is not in the block style "
+            "this can add to, and a patch that appended a second 'gates:' key "
+            "would delete the gates you already have. Add these by hand:\n"
+        )
+        for gate in loaded.gates:
+            if gate.id in fresh:
+                print(f"  - id: {gate.id}\n    run: {gate.run}")
     if already:
         print(
             f"\nAlready declared, so not proposed: {', '.join(already)}. Check "
             f"they run what the spec meant."
         )
-    if not diff and not already:
+    if not diff and not fresh and not already:
         print(f"\nNo gates proposed; {config.CONFIG_FILENAME} is unchanged.")
 
     print(

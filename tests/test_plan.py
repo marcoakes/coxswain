@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from wringer import cli, config, fleet, rubric, spec
@@ -402,3 +403,182 @@ def test_the_proposed_gates_land_inside_the_gate_list(repo, monkeypatch, capsys)
     assert [g.id for g in parsed.gates] == ["check", "test"]
     # and the judge section it was written above is still readable
     assert parsed.judge is not None and parsed.judge.model == "cheap-model"
+
+
+def test_a_flow_style_config_is_still_read_correctly(repo, monkeypatch, capsys):
+    """A gate id the line scan would miss must not be proposed again — the
+    human applying that diff would get a config their own loader rejects."""
+    setup_repo(
+        repo,
+        config_text="version: 1\n"
+        'gates: [{id: check, run: "true"}, {id: test, run: "pytest"}]\n'
+        "judge:\n  endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+        "  model: cheap-model\n  rubric: wringer.rubric.yaml\n",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan", "--json"]) == cli.EXIT_OK
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gates_proposed"] == []
+    assert payload["gates_already_declared"] == ["test"]
+
+
+def test_an_unparseable_config_still_gets_a_diff(repo, monkeypatch, capsys):
+    """A broken .wringer.yaml is a reason to show the change, not to hide it."""
+    setup_repo(repo)
+    (repo / config.CONFIG_FILENAME).write_text(
+        "version: 1\ngates:\n  - id: check\n    run: true\n  oops: [\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan", "--json"]) == cli.EXIT_OK
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gates_proposed"] == ["test"]
+    assert "+  - id: test" in payload["gate_diff"]
+
+
+# --- what an adversarial review found (2026-08-01) -----------------------
+
+
+def test_a_flow_style_config_gets_words_not_a_destructive_diff(
+    repo, monkeypatch, capsys
+):
+    """THE one that would have cost someone their gates. The old code, unable
+    to find a block-style `gates:` line, appended a SECOND `gates:` key — and
+    YAML keeps the last, so the 'purely additive' diff deleted every gate the
+    repo already declared, after a human read it and approved it."""
+    setup_repo(
+        repo,
+        config_text="version: 1\n"
+        'gates: [{id: check, run: "true"}]\n'
+        "judge:\n  endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+        "  model: cheap-model\n  rubric: wringer.rubric.yaml\n",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["gates_proposed"] == ["test"]
+    # no diff at all, rather than one that lies about being additive
+    assert payload["gate_diff"] == ""
+
+    assert cli.main(["plan"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "as text rather than a diff" in out
+    assert "delete the gates you already have" in out
+    assert "- id: test" in out
+    # and whatever happens, the config is untouched
+    assert config.load(repo / config.CONFIG_FILENAME).gates[0].id == "check"
+
+
+def test_two_tasks_may_not_share_a_brief(repo, monkeypatch, capsys):
+    """One file, two tasks: the second write wins, the fleet dispatches both
+    tasks against it, and one objective is simply gone."""
+    setup_repo(
+        repo,
+        SPEC.rstrip()
+        + "\n  - id: csv-export-ui\n    brief: briefs/csv-export.md\n"
+        "    dir: .\n    objective: Add the button.\n",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan"]) == cli.EXIT_CONFIG
+
+    err = capsys.readouterr().err
+    assert "names the same brief" in err
+    assert not (repo / spec.TASKS_FILENAME).exists()
+
+
+def test_a_hand_written_rubric_is_never_overwritten(repo, monkeypatch, capsys):
+    """`judge.rubric:` has pointed at a file since v0.2, so a repo adopting
+    `wring spec` may already have one — and it is the document that decides
+    whether the work is accepted."""
+    setup_repo(repo)
+    theirs = (
+        "schema_version: wringer.rubric.v1\ntitle: Ours, written by hand\n"
+        "criteria:\n  - id: careful\n    title: We wrote this\n    required: true\n"
+    )
+    (repo / spec.RUBRIC_FILENAME).write_text(theirs, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan"]) == cli.EXIT_CONFIG
+
+    assert "did not write it" in capsys.readouterr().err
+    assert (repo / spec.RUBRIC_FILENAME).read_text(encoding="utf-8") == theirs
+    assert not (repo / spec.TASKS_FILENAME).exists()
+
+
+def test_a_rubric_plan_wrote_is_regenerated(repo, monkeypatch, capsys):
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    assert cli.main(["plan"]) == cli.EXIT_OK
+    assert cli.main(["plan"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    text = (repo / spec.RUBRIC_FILENAME).read_text(encoding="utf-8")
+    assert spec.RUBRIC_MARKER in text
+    # the marker is a YAML comment, so the judge's loader is unmoved by it
+    assert rubric.load(Path(spec.RUBRIC_FILENAME), repo).title == (
+        "Add CSV export to the reports page"
+    )
+
+
+def test_a_symlinked_rubric_cannot_reach_outside_the_repo(
+    repo, tmp_path_factory, monkeypatch, capsys
+):
+    outside = tmp_path_factory.mktemp("outside") / "theirs.yaml"
+    outside.write_text("not ours\n", encoding="utf-8")
+    setup_repo(repo)
+    (repo / spec.RUBRIC_FILENAME).symlink_to(outside)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan"]) == cli.EXIT_CONFIG
+
+    assert "outside the repository" in capsys.readouterr().err
+    assert outside.read_text(encoding="utf-8") == "not ours\n"
+
+
+def test_a_brief_under_a_file_shaped_parent_is_refused_before_any_write(
+    repo, monkeypatch, capsys
+):
+    """mkdir would raise here — after tasks.jsonl and the rubric are already
+    on disk. That is the half-ran state _plan_writes promises is impossible."""
+    setup_repo(repo, SPEC.replace("briefs/csv-export.md", "notes/x.md"))
+    (repo / "notes").write_text("I am a file, not a directory\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan"]) == cli.EXIT_CONFIG
+
+    assert "is not a directory" in capsys.readouterr().err
+    assert not (repo / spec.TASKS_FILENAME).exists()
+    assert not (repo / spec.RUBRIC_FILENAME).exists()
+
+
+def test_a_brief_inside_dot_git_is_refused(repo, monkeypatch, capsys):
+    """Law 6, in its most literal form: Wringer never writes git state."""
+    setup_repo(repo, SPEC.replace("briefs/csv-export.md", ".git/refs/heads/main"))
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan"]) == cli.EXIT_CONFIG
+
+    assert ".git/" in capsys.readouterr().err
+    assert (repo / ".git" / "refs" / "heads" / "main").read_text().strip()
+
+
+@pytest.mark.parametrize(
+    "collides", ["tasks.jsonl", "wringer.rubric.yaml", "wringer.spec.yaml",
+                 ".wringer.yaml"]
+)
+def test_a_brief_over_a_file_plan_owns_is_refused(
+    repo, monkeypatch, capsys, collides
+):
+    setup_repo(repo, SPEC.replace("briefs/csv-export.md", collides))
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["plan"]) == cli.EXIT_CONFIG
+
+    assert "writes or reads itself" in capsys.readouterr().err
