@@ -149,6 +149,33 @@ The whole loop, captured end to end — PRD in, verified change out, receipts
 attached — is [`docs/pm-loop.md`](docs/pm-loop.md). Contract:
 **[SPEC_INTENT_V0.md](SPEC_INTENT_V0.md)**.
 
+## An issue in, a reviewed branch out — `wring deliver`
+
+```
+$ wring deliver --task csv-export --send
+Branch:  wringer/csv-export
+Commit:  6a56db91b556
+Pushed:  yes
+MR:      https://github.com/acme/reports/pull/7
+```
+
+Until this slice Wringer never wrote git history at all. It does now, and the
+power is bought with five conditions rather than assumed: **only a branch it
+created** · **never the default branch** · **no force push assemblable
+anywhere in the program** · **dry run by default** — the patch, commit
+message, branch name, MR body and literal commands land on disk with git
+untouched — and **a ledger event appended before every git write**, so a
+process killed mid-delivery still says what it was attempting. The MR body
+carries the gate table and the run id; it never carries gate logs, because a
+bundle may hold whatever a gate printed and an MR body is public.
+
+`wring get <url>` clones a repo into a declared workspace and records where
+it came from. `wring issue <url>` turns an issue into a *file* — which is
+how untrusted text from the internet should be handled, and why `wring spec`
+needed no changes to accept one. The captured loop is
+[`docs/issue-to-mr.md`](docs/issue-to-mr.md). Contract:
+**[SPEC_GET_V0.md](SPEC_GET_V0.md)**.
+
 ## The format is targetable, not just readable
 
 The bundle is the interface, so it is [published as JSON
