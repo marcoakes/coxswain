@@ -46,7 +46,7 @@ resume` continues a killed one, `wring fleet` supervises hundreds, `wring
 judge` weighs a finished bundle against a rubric, `wring doctor` checks this
 machine's preconditions, the `acp:` worker form talks to any agent that speaks
 the protocol, and `wring spec` / `wring plan` are the front door — a PRD in,
-a spec a human approves, work a fleet can run. 417 tests on Python 3.11–3.13
+a spec a human approves, work a fleet can run. 457 tests on Python 3.11–3.13
 plus macOS in CI.
 
 **Wringer verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares this

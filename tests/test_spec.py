@@ -613,3 +613,125 @@ def test_every_scalar_the_file_can_hold_reads_back_exactly(repo):
         rendered = spec._scalar(value)
         assert "\n" not in rendered, f"{value!r} rendered across lines"
         assert yaml.safe_load(f"k: {rendered}")["k"] == value, value
+
+
+def test_the_dry_run_key_check_opens_no_socket(repo, monkeypatch, capsys):
+    """The --send half must be refused BEFORE the transport, not by the
+    transport happening to fail. Any call here is the bug."""
+    setup_repo(repo, config_text=CONFIG.rstrip() + "\n  api_key_env: DRAFT_KEY\n")
+    monkeypatch.delenv("DRAFT_KEY", raising=False)
+    monkeypatch.chdir(repo)
+
+    from wringer import judge
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a socket was opened without the declared key")
+
+    monkeypatch.setattr(judge, "send", forbidden)
+
+    assert cli.main(["spec", "PRD.md"]) == cli.EXIT_OK
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+    assert "DRAFT_KEY" in capsys.readouterr().err
+
+
+def test_the_drafter_is_shown_the_gates_the_repo_already_declares(
+    repo, monkeypatch, capsys
+):
+    """A drafter shown nothing invents. Law 5 is why proposals are a diff a
+    human applies; this is how to need that safety net less often."""
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["spec", "PRD.md", "--print-request"]) == cli.EXIT_OK
+
+    body = json.loads(capsys.readouterr().out)["messages"][1]["content"]
+    assert "already declares" in body
+    assert "check: true" in body
+
+
+def test_criteria_too_large_to_be_a_rubric_are_refused_at_draft_time(
+    repo, monkeypatch, capsys
+):
+    """Not left for `wring plan`: a spec that reads fine, gets approved, and
+    only then turns out to be unplannable spends the reading for nothing."""
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    bloated = dict(DRAFT, criteria=[
+        {"id": f"c{n}", "title": "T", "guidance": "g" * 2000,
+         "required": True, "human": False}
+        for n in range(20)
+    ])
+    fake_transport(monkeypatch, reply=reply(bloated))
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+
+    assert "these bytes travel" in capsys.readouterr().err
+    assert not (repo / spec.SPEC_FILENAME).exists()
+
+
+@pytest.mark.parametrize(
+    "over, expected",
+    [
+        ({"tasks": [{"id": f"t{n}", "brief": f"briefs/{n}.md", "dir": ".",
+                     "objective": "o"} for n in range(spec.MAX_TASKS + 1)]},
+         "over the limit"),
+        ({"open_questions": [{"id": f"q{n}", "question": "?", "required": False}
+                             for n in range(spec.MAX_OPEN_QUESTIONS + 1)]},
+         "over the limit"),
+    ],
+)
+def test_the_model_controlled_ceilings_hold(repo, monkeypatch, capsys, over,
+                                            expected):
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    fake_transport(monkeypatch, reply=reply(dict(DRAFT, **over)))
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+
+    assert expected in capsys.readouterr().err
+    assert not (repo / spec.SPEC_FILENAME).exists()
+
+
+@pytest.mark.parametrize(
+    "duplicated",
+    [
+        {"tasks": [dict(DRAFT["tasks"][0]),
+                   dict(DRAFT["tasks"][0], brief="briefs/other.md")]},
+        {"open_questions": [DRAFT["open_questions"][0],
+                            dict(DRAFT["open_questions"][0], question="again?")]},
+        {"gates": [{"id": "test", "run": "a"}, {"id": "test", "run": "b"}]},
+    ],
+)
+def test_duplicate_ids_are_refused(repo, monkeypatch, capsys, duplicated):
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    fake_transport(monkeypatch, reply=reply(dict(DRAFT, **duplicated)))
+
+    assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
+
+    assert "duplicate" in capsys.readouterr().err
+    assert not (repo / spec.SPEC_FILENAME).exists()
+
+
+def test_an_oversized_spec_file_is_refused_on_load(repo):
+    (repo / spec.SPEC_FILENAME).write_text(
+        "# " + "x" * (spec.MAX_SPEC_BYTES + 1), encoding="utf-8"
+    )
+    with pytest.raises(spec.SpecError, match="over the"):
+        spec.load(repo / spec.SPEC_FILENAME)
+
+
+@pytest.mark.parametrize("escape", ["../elsewhere", "/etc", "~/somewhere"])
+def test_a_task_dir_that_leaves_the_repo_is_refused(repo, escape):
+    with pytest.raises(spec.SpecError):
+        spec.parse(
+            {
+                "schema_version": spec.SCHEMA_VERSION,
+                "approved": True,
+                "title": "t",
+                "intent": "i",
+                "criteria": DRAFT["criteria"],
+                "tasks": [dict(DRAFT["tasks"][0], dir=escape)],
+            },
+            "test",
+        )

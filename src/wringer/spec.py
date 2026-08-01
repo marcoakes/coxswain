@@ -496,13 +496,33 @@ def quote_intent(prd: str) -> str:
     )
 
 
-def render_request(prd: str, model: str, max_output_tokens: int) -> dict:
-    """The exact chat-completions body. Built from the PRD and nothing else."""
+def render_request(
+    prd: str,
+    model: str,
+    max_output_tokens: int,
+    declared: tuple[config.Gate, ...] = (),
+) -> dict:
+    """The exact chat-completions body.
+
+    Built from the PRD and, if the repo has any, the gate commands it already
+    declares — shown so the drafter can propose *those* rather than guess at a
+    build system it cannot see. A drafter shown nothing invents; law 5 is why
+    the proposals are a diff a human applies, and this is how to need that
+    safety net less often.
+    """
+    known = "\n".join(f"- {g.id}: {g.run}" for g in declared)
     user = (
         "# Product requirements\n\n"
         f"{prd}\n\n"
         "---\n\n"
-        "## Your task\n"
+        + (
+            f"## Gates this repository already declares\n{known}\n\n"
+            "Propose only gates that are missing, and phrase them the way "
+            "these are.\n\n"
+            if known
+            else ""
+        )
+        + "## Your task\n"
         "Turn the requirements above into a build specification.\n\n"
         "Rules, in order of importance:\n"
         "1. **Never guess.** Anything you had to assume becomes an entry in "
@@ -609,7 +629,7 @@ def parse_response(body: Any, prd: str) -> Spec:
                 "Nothing was written"
             )
 
-    return parse(
+    drafted_spec = parse(
         {
             "schema_version": SCHEMA_VERSION,
             # Written here, not read from the reply. The interlock is a
@@ -625,6 +645,11 @@ def parse_response(body: Any, prd: str) -> Spec:
         },
         "the drafted spec",
     )
+    # Checked at draft time, not left for `wring plan`: a spec that reads fine,
+    # gets approved, and only then turns out to be unplannable spends the
+    # human's attention for nothing.
+    validate_rubric_text(render_rubric(drafted_spec))
+    return drafted_spec
 
 
 def _strip_fences(text: str) -> str:

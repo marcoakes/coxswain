@@ -882,7 +882,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
         return EXIT_CONFIG
 
     request = spec.render_request(
-        prd, cfg.judge.model, cfg.judge.max_output_tokens
+        prd, cfg.judge.model, cfg.judge.max_output_tokens, cfg.gates
     )
     if args.print_request:
         print(json.dumps(request, indent=2))
