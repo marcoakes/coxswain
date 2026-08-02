@@ -70,10 +70,20 @@ def check_url(url: str) -> None:
             f"'{parsed.scheme or 'no scheme'}' is not a scheme Wringer clones "
             f"from — use one of: {', '.join(ALLOWED_SCHEMES)}, or git@host:path"
         )
-    if parsed.username or parsed.password:
+    # A password is always a credential. A *username* is one only over http(s),
+    # where `https://<token>@host/...` is exactly how people paste tokens — over
+    # ssh, `ssh://git@host/...` is the ordinary form and carries no secret.
+    # Refusing that would have refused the commonest clone URL there is.
+    if parsed.password:
         raise AcquireError(
-            "the URL must not carry credentials — it is recorded in the "
+            "the URL must not carry a password — it is recorded in the "
             "acquisition manifest. Let git's own credential helper answer"
+        )
+    if parsed.username and parsed.scheme in ("http", "https"):
+        raise AcquireError(
+            "the URL must not carry a username over http(s) — that is how a "
+            "token gets pasted, and this URL is recorded in the acquisition "
+            "manifest. Let git's own credential helper answer"
         )
 
 

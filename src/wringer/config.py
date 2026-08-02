@@ -61,7 +61,23 @@ DEFAULT_ISSUES_DIR = "issues"
 # `owner/name`, the shape both mapped forges use. It becomes a URL path, so
 # it is a slug pair rather than free text — a repo of `../../x` would be a
 # path traversal against someone else's API.
-REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+")
+# Every segment must START with a letter or digit, which is what makes `..`
+# impossible: `forge.repo` is interpolated into a path on someone else's API,
+# and `owner/../../admin` would fetch from a repository this config never
+# declared. GitLab percent-encodes the whole string and would have been safe;
+# GitHub does not, and "we are safe on one of the two forges" is not a rule.
+REPO_PATTERN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)+"
+)
+
+# `deliver.remote` and `deliver.base` are passed to git as POSITIONAL
+# arguments, so a value beginning with '-' is read as an option. A remote of
+# `--force` would make a force push assemblable at runtime with the word
+# appearing nowhere in the source — which is SPEC_GET_V0.md §1's third
+# condition, broken without breaking the grep that checks it. A remote of
+# `--receive-pack=...` is worse. They are slugs, checked here, before the
+# value can reach an argv.
+REF_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
@@ -404,6 +420,19 @@ def _parse_deliver(raw: Any, source: str) -> Deliver | None:
         value = raw.get(key)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ConfigError(f"{source}: 'deliver.{key}' must be a non-empty string")
+
+    # Both reach git as positional arguments, so neither may look like one of
+    # git's own options. See REF_NAME_PATTERN.
+    for key in ("base", "remote"):
+        value = raw.get(key)
+        if value is not None and not REF_NAME_PATTERN.fullmatch(value.strip()):
+            raise ConfigError(
+                f"{source}: 'deliver.{key}' must be a plain name — letters, "
+                f"digits, '.', '_', '-' and '/', starting with a letter or "
+                f"digit (got {value.strip()!r}). It is passed to git as an "
+                "argument, and a value that begins with '-' is read as an "
+                "option rather than a name"
+            )
 
     issues_dir = (raw.get("issues_dir") or DEFAULT_ISSUES_DIR).strip()
     if Path(issues_dir).is_absolute() or ".." in Path(issues_dir).parts:

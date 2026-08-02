@@ -131,7 +131,8 @@ def test_get_clones_and_records_where_it_came_from(repo, monkeypatch, capsys):
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("https://u:p@example.com/x.git", "credentials"),
+        ("https://u:p@example.com/x.git", "must not carry a password"),
+        ("https://ghp_tokentoken@example.com/x.git", "username over http(s)"),
         ("ftp://example.com/x.git", "not a scheme"),
         ("ext::sh -c whoami", "not a scheme"),
     ],
@@ -663,3 +664,115 @@ def test_no_git_identity_is_refused_before_the_branch_exists(
     assert "does not invent one" in err
     # and no branch was created, which is the whole point of checking early
     assert git(delivery_repo, "branch", "--list") == "* main"
+
+
+# --- config values that reach git's argv or someone else's URL -----------
+#
+# Found by probing the P3 slice after it shipped. Both are the same shape: a
+# string from `.wringer.yaml` arriving somewhere it is read as syntax rather
+# than as a name. `.wringer.yaml` is code by design (SECURITY.md), so neither
+# is a privilege escalation — but SPEC_GET_V0.md §1's third condition says no
+# force push is assemblable ANYWHERE in the program, and a remote of
+# `--force` assembled one without the word appearing in the source.
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["--force", "-f", "--mirror", "--receive-pack=touch /tmp/pwned", "-", "--"],
+)
+@pytest.mark.parametrize("key", ["remote", "base"])
+def test_a_deliver_name_can_never_look_like_a_git_option(key, value):
+    from wringer import config
+
+    with pytest.raises(config.ConfigError, match="plain name"):
+        config.parse(
+            {
+                "version": 1,
+                "gates": [{"id": "t", "run": "true"}],
+                "deliver": {key: value},
+            }
+        )
+
+
+@pytest.mark.parametrize("value", ["origin", "upstream", "my-fork", "main",
+                                   "release/2.0", "a_b.c"])
+def test_ordinary_remote_and_branch_names_still_parse(value):
+    from wringer import config
+
+    parsed = config.parse(
+        {
+            "version": 1,
+            "gates": [{"id": "t", "run": "true"}],
+            "deliver": {"remote": value, "base": value},
+        }
+    )
+    assert parsed.deliver is not None
+    assert parsed.deliver.remote == value and parsed.deliver.base == value
+
+
+@pytest.mark.parametrize(
+    "repo_name",
+    ["../..", "owner/../../admin", "a/b/../../c", "-x/y", "./x", "owner/.."],
+)
+def test_a_forge_repo_can_never_escape_the_declared_repository(repo_name):
+    """It is interpolated into a path on someone else's API. GitLab
+    percent-encodes the whole string and would have been safe; GitHub does
+    not, and being safe on one of the two forges is not a rule."""
+    from wringer import config
+
+    with pytest.raises(config.ConfigError, match="owner/name"):
+        config.parse(
+            {
+                "version": 1,
+                "gates": [{"id": "t", "run": "true"}],
+                "forge": {
+                    "kind": "github",
+                    "endpoint": "https://api.github.com",
+                    "repo": repo_name,
+                },
+            }
+        )
+
+
+def test_the_declared_repo_is_the_only_one_a_url_can_reach():
+    """Belt to the parse-time braces: even a well-formed repo cannot be
+    swapped by the URL a human pastes."""
+    from wringer import config
+
+    forge_cfg = config.parse(
+        {
+            "version": 1,
+            "gates": [{"id": "t", "run": "true"}],
+            "forge": {
+                "kind": "github",
+                "endpoint": "https://api.github.com",
+                "repo": "acme/reports",
+            },
+        }
+    ).forge
+    assert forge_cfg is not None
+    url = forge._url(forge_cfg, "/repos/{repo}/issues/{number}", number=1)
+    assert url == "https://api.github.com/repos/acme/reports/issues/1"
+    with pytest.raises(forge.ForgeError, match="declares"):
+        forge.issue_number("https://github.com/evil/other/issues/1", forge_cfg)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["user:pw@host:path/x.git", "a@b@evil.com:x.git", "ssh://u:p@h/x.git",
+     "https://u:p@example.com/x.git", "ext::sh -c whoami", "-u/x.git",
+     # the way a token actually gets pasted
+     "https://ghp_tokentokentoken@github.com/o/n.git"],
+)
+def test_a_clone_url_that_carries_credentials_or_a_transport_is_refused(url):
+    with pytest.raises(acquire.AcquireError):
+        acquire.check_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["git@github.com:owner/name.git", "https://github.com/o/n.git",
+     "ssh://git@host/o/n.git", "file:///tmp/x"],
+)
+def test_the_clone_urls_people_actually_use_are_accepted(url):
+    acquire.check_url(url)
