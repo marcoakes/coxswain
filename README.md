@@ -32,6 +32,17 @@ Wringer (CLI: `wring`) compiles **intent** — tickets, PRDs, Slack messages —
 
 Every cloud's harness locks you to its runtime, its identity system, its gateway. **Nobody owns the neutral layer.** That's the bet — Kubernetes-vs-managed-containers, replayed one layer up.
 
+<div align="center">
+
+<img src="docs/demo.svg" alt="wring run: a planted bug, one worker turn, gates green, receipts on disk" width="700">
+
+*A real session, not a mock-up: a planted bug, one worker turn, the gates
+green — and a bundle on disk to check the claim against. Regenerate it with
+`scripts/demo.sh`; the recorded transcript is committed beside it at
+[`docs/demo.cast.json`](docs/demo.cast.json).*
+
+</div>
+
 ## What ships first
 
 **Proof beats orchestration.** v0.1.0 is a standalone evidence compiler — one command:
