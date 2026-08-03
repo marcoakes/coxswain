@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/marcoakes/wringer/blob/main/schema/delivery-manifest.schema.json",
   "title": "Wringer delivery manifest",
-  "description": "manifest.json of a `wring deliver` bundle — what a verified change became. Schema version wringer.delivery.v1. This is the only bundle in Wringer that describes writes to git, and it exists because the amended law 6 buys that power with receipts.",
+  "description": "manifest.json of a `wring deliver` bundle \u2014 what a verified change became. Schema version wringer.delivery.v1. This is the only bundle in Wringer that describes writes to git, and it exists because the amended law 6 buys that power with receipts.",
   "type": "object",
   "required": [
     "schema_version",
@@ -14,6 +14,7 @@
     "base",
     "remote",
     "files",
+    "spec_sha256",
     "result"
   ],
   "additionalProperties": false,
@@ -62,6 +63,14 @@
         "type": "string"
       }
     },
+    "spec_sha256": {
+      "description": "sha256 of the wringer.spec.yaml that authorised this change, or null when no spec drove it. The approved: true in that file is the authority the whole build ran on, and nothing else records which spec it was.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "result": {
       "type": "object",
       "required": [
@@ -73,7 +82,7 @@
       "additionalProperties": false,
       "properties": {
         "branch": {
-          "description": "The branch actually created, or null — in a dry run, and in a live run that failed before creating it.",
+          "description": "The branch actually created, or null \u2014 in a dry run, and in a live run that failed before creating it.",
           "type": [
             "string",
             "null"
@@ -89,7 +98,7 @@
           "type": "boolean"
         },
         "merge_request": {
-          "description": "Null when none was opened — including when the push landed and the forge refused, which is a real state and is recorded rather than hidden.",
+          "description": "Null when none was opened \u2014 including when the push landed and the forge refused, which is a real state and is recorded rather than hidden.",
           "type": [
             "object",
             "null"

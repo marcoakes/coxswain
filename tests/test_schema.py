@@ -655,3 +655,100 @@ def test_a_pre_chain_bundle_is_still_a_valid_v1_bundle():
     # and the chained form is equally valid — both are v1
     chained = dict(event, prev_hash="b" * 64)
     assert not list(built["evidence-event.schema.json"].iter_errors(chained))
+
+# --- per-file digests (WRINGER_RELEASE_PLAN.md R3) -----------------------
+#
+# The `prev_hash` chain makes the LEDGER tamper-evident and says nothing about
+# the rest of the bundle. `wring attest` (P5) cannot claim "proven by gates G,
+# and none of it has been altered since" without a digest per file — and every
+# bundle written before this existed is one that can never be attested. It
+# lands now because `wringer.evidence.v1` is frozen and this is a SIBLING
+# file, so it costs nothing today and a version bump later.
+
+
+def digests_of(bundle: Path) -> dict:
+    return json.loads((bundle / evidence.DIGESTS_FILENAME).read_text("utf-8"))
+
+
+def all_match(bundle: Path, recorded: dict) -> bool:
+    import hashlib
+
+    for name, expected in recorded["files"].items():
+        actual = hashlib.sha256((bundle / name).read_bytes()).hexdigest()
+        if actual != expected:
+            return False
+    return True
+
+
+def test_a_bundle_records_a_digest_for_every_file_it_wrote(
+    repo, write_config, monkeypatch, capsys
+):
+    write_config(repo, TWO_GATES)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    bundle = only_bundle(repo)
+
+    recorded = digests_of(bundle)
+    check(recorded, load("digests.schema.json"), "digests.json")
+    assert recorded["algorithm"] == "sha256"
+
+    # every file in the bundle except digests.json itself
+    on_disk = {
+        p.relative_to(bundle).as_posix()
+        for p in bundle.rglob("*")
+        if p.is_file() and p.name != evidence.DIGESTS_FILENAME
+    }
+    assert set(recorded["files"]) == on_disk
+    assert all_match(bundle, recorded)
+
+
+def test_editing_any_bundle_file_is_detectable(
+    repo, write_config, monkeypatch, capsys
+):
+    """The whole point. Tamper-EVIDENCE, not tamper-proofing: anyone who can
+    write the bundle can rewrite digests.json too. What this removes is the
+    SILENT edit."""
+    write_config(repo, TWO_GATES)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+    bundle = only_bundle(repo)
+    recorded = digests_of(bundle)
+    assert all_match(bundle, recorded)
+
+    doctored = bundle / evidence.GATES_DIRNAME / "001_quick" / "stdout.log"
+    doctored.write_text("this is not what the gate printed\n", encoding="utf-8")
+
+    assert not all_match(bundle, recorded)
+
+
+def test_the_digest_file_covers_the_manifest_and_the_summary():
+    """It is written LAST for exactly this reason — a digest set that omitted
+    the manifest would leave the run's own index unprotected."""
+    # asserted structurally against a real bundle in the test above; here we
+    # pin the requirement so a reordering breaks a named test
+    import inspect
+
+    from wringer import verify as verify_module
+
+    source = inspect.getsource(verify_module.run)
+    assert source.index("write_manifest") < source.index("write_digests")
+    assert source.index("summary.write") < source.index("write_digests")
+
+
+def test_a_real_bundle_digest_file_validates_against_the_real_engine(
+    repo, write_config, monkeypatch, capsys
+):
+    built = validators()
+    write_config(repo, FAILING)
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_GATE_FAILED
+    capsys.readouterr()
+
+    recorded = digests_of(only_bundle(repo))
+    errors = [
+        f"{e.json_path} {e.message}"
+        for e in built["digests.schema.json"].iter_errors(recorded)
+    ]
+    assert not errors, "\n".join(errors)

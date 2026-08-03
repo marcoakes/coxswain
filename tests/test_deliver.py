@@ -893,3 +893,51 @@ def test_a_branch_that_exists_only_on_the_remote_is_refused(
 
     assert cli.main(["deliver"]) == cli.EXIT_REFUSED
     assert "already exists" in capsys.readouterr().err
+
+def test_a_delivery_records_the_spec_that_authorised_it(
+    delivery_repo, monkeypatch, capsys
+):
+    """`approved: true` in wringer.spec.yaml is the authority the whole build
+    runs on, and nothing recorded WHICH spec that was — so `wring attest`'s
+    first clause had nothing to point at, and an approved spec could be
+    edited afterwards with no trace."""
+    import hashlib
+
+    from wringer import spec as spec_module
+
+    approved = (
+        "schema_version: wringer.spec.v1\napproved: true\ntitle: t\n"
+        "intent: |2\n  words\ncriteria:\n  - id: c1\n    title: T\n"
+        "    required: true\n    human: false\n"
+        "tasks:\n  - id: t1\n    brief: briefs/t1.md\n    dir: .\n"
+        "    objective: o\n"
+    )
+    (delivery_repo / spec_module.SPEC_FILENAME).write_text(approved, "utf-8")
+    verified(delivery_repo, monkeypatch, capsys)
+
+    assert cli.main(["deliver"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    written = sorted((delivery_repo / deliver.DELIVERIES_DIRNAME).iterdir())[0]
+    manifest = json.loads(
+        (written / deliver.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    assert manifest["spec_sha256"] == hashlib.sha256(
+        approved.encode("utf-8")
+    ).hexdigest()
+
+
+def test_a_delivery_with_no_spec_says_so_rather_than_guessing(
+    delivery_repo, monkeypatch, capsys
+):
+    """A delivery can be a plain verified change. Null is the honest value."""
+    verified(delivery_repo, monkeypatch, capsys)
+
+    assert cli.main(["deliver"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    written = sorted((delivery_repo / deliver.DELIVERIES_DIRNAME).iterdir())[0]
+    manifest = json.loads(
+        (written / deliver.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    assert manifest["spec_sha256"] is None

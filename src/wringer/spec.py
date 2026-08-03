@@ -147,6 +147,27 @@ class Spec:
 # --- reading a spec file -------------------------------------------------
 
 
+def authorising_sha256(root: Path) -> str | None:
+    """The hash of the spec that authorised this work, if there is one.
+
+    `wringer.spec.yaml` is the document a human approved — the `approved:
+    true` in it is the authority everything downstream runs on. Nothing
+    recorded *which* spec that was, so `wring attest`'s first clause
+    ("authorized by spec S") had nothing to point at, and a spec could be
+    edited after approval with no trace.
+
+    Cheap here, impossible later: this goes into manifests whose schemas stop
+    being amendable when 0.2.0 tags.
+    """
+    import hashlib
+
+    path = root / SPEC_FILENAME
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def load(path: Path) -> Spec:
     """Read and validate `wringer.spec.yaml`.
 

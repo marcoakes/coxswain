@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/digests.schema.json",
+  "title": "Wringer bundle digests",
+  "description": "`digests.json` — a sha256 for every other file in a bundle. A SIBLING of manifest.json rather than a key inside it: `wringer.evidence.v1` shipped in v0.1.0 and is frozen, so the manifest cannot grow one, and a reader that does not know this file simply ignores it. The `prev_hash` chain makes the LEDGER tamper-evident and says nothing about the rest of the bundle — edit a gate's stdout.log and no chain notices. This is what lets `wring attest` claim 'proven by gates G, and none of it has been altered since' about the whole bundle.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "algorithm",
+    "files"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.digests.v1"
+    },
+    "algorithm": {
+      "description": "The digest algorithm. Named rather than assumed, so a future change is a value rather than a silent reinterpretation of every existing file.",
+      "enum": [
+        "sha256"
+      ]
+    },
+    "files": {
+      "description": "Bundle-relative POSIX path -> hex digest. Written LAST, so it covers manifest.json and summary.md too. It cannot cover itself, and nothing on a disk its owner controls could: this is tamper-evidence, which turns a silent edit into a detectable one, not tamper-proofing.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  }
+}

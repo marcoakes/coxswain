@@ -84,6 +84,10 @@ class Plan:
     changed_files: tuple[str, ...]
     run_dir: str
     commands: tuple[str, ...]
+    # The approved spec this change answers, if any. Recorded because
+    # `approved: true` is the authority the whole build ran on, and
+    # nothing else in the program wrote down which spec that was.
+    spec_sha256: str | None = None
 
 
 def resolve_branch(template: str, run_id: str, task: str | None) -> str:
@@ -358,6 +362,7 @@ def plan(
         patch=patch,
         changed_files=carried,
         run_dir=str(run_dir),
+        spec_sha256=_spec_module().authorising_sha256(root),
         commands=(
             f"git switch --create {branch}",
             # the planned paths on stdin — never a bare add --all; see send()
@@ -367,6 +372,12 @@ def plan(
             f"POST a merge request: {branch} -> {base}",
         ),
     )
+
+
+def _spec_module():
+    from wringer import spec as spec_module
+
+    return spec_module
 
 
 def _title(run_dir: Path, root: Path, task: str | None) -> str:
@@ -544,6 +555,10 @@ class Bundle:
             "base": planned.base,
             "remote": planned.remote,
             "files": list(planned.changed_files),
+            # What authorised this delivery, so `wring attest` has something
+            # to point at. Null when no spec drove it — a delivery can be a
+            # plain verified change, and saying "none" is honest.
+            "spec_sha256": planned.spec_sha256,
             "result": delivered,
         }
         (self.directory / MANIFEST_FILENAME).write_text(
