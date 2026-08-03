@@ -47,7 +47,7 @@ resume` continues a killed one, `wring fleet` supervises hundreds, `wring
 judge` weighs a finished bundle against a rubric, `wring doctor` checks this
 machine's preconditions, the `acp:` worker form talks to any agent that speaks
 the protocol, and `wring spec` / `wring plan` are the front door — a PRD in,
-a spec a human approves, work a fleet can run; and P3 brings work in as a URL and sends it back out as a reviewed branch. 486 tests on Python 3.11–3.13
+a spec a human approves, work a fleet can run; and P3 brings work in as a URL and sends it back out as a reviewed branch. 536 tests on Python 3.11–3.13
 plus macOS in CI.
 
 **Wringer verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares this
@@ -154,6 +154,8 @@ block first — the clean console is the product.
 | `rubric.py` | `wringer.rubric.v1` — its own file because its bytes travel, so it gets its own size and shape limits | live under `.wringer/` (a rubric is source, not evidence) |
 | `fleet.py` | `wring fleet`: a bounded pool of child `wring run` subprocesses, the self-healing ladder, reaping by ledger growth, honest partial-success counts | do the work itself — it is only a supervisor |
 | `loop.py` | v0.2's `wring run`: verify → brief → worker → verify, the plateau fingerprint, and the `wringer.loop.v1` bundle under `.wringer/loops/` | call an LLM, touch git, or nest a verify bundle inside a loop bundle (runs are referenced by path) |
+| `acp.py` | the Agent Client Protocol client: spawn the agent, JSON-RPC over stdio, one session per iteration, kill on timeout through the same process-group machinery. Wringer is the ACP *client*, never the agent (SPEC_ACP_V0.md) | bundle, install or recommend an agent |
+| `doctor.py` | `wring doctor`: machine-checkable preconditions, one line per check, `--json`, exit 1 on anything blocking | repair anything — it diagnoses and stops |
 | `spec.py` | `wring spec` / `wring plan`: `wringer.spec.v1`, the drafting request, the strict reply parser, the file renderer, and what `wring plan` compiles out of an approved spec — `tasks.jsonl`, the briefs, `wringer.rubric.yaml`, and the proposed gate diff | open a socket (it calls `judge.send`), install a gate, touch git, run anything, or read `approved` from a reply |
 
 Every module in the spec's layout now exists.
@@ -231,6 +233,7 @@ semantics in the spec before building it.
 | 2 | config or environment error |
 | 3 | unsafe dirty state / refused precondition |
 | 4 | interrupted |
+| 5 | `wring judge` only: needs a human — nothing competent scored the evidence |
 
 **The evidence bundle is the product** — boring, stable, grep-friendly,
 and the interface future judges and agents consume ([RFC #2](https://github.com/marcoakes/wringer/issues/2)).

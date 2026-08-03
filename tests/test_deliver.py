@@ -776,3 +776,120 @@ def test_a_clone_url_that_carries_credentials_or_a_transport_is_refused(url):
 )
 def test_the_clone_urls_people_actually_use_are_accepted(url):
     acquire.check_url(url)
+
+
+# --- Phase 1: the claims must be true (WRINGER_RELEASE_PLAN.md §2) -------
+#
+# `gates_passed` reads a bundle's STATUS. It says nothing about WHAT passed.
+# Without the checks below, a user could verify, keep working, and deliver —
+# and the merge request would carry that run's gate table over code the gates
+# never saw. Reproduced before it was fixed: a tree whose gate greps for GOOD
+# shipped a file containing BROKEN, under an MR body reading "check | passed".
+
+
+def test_delivering_a_tree_the_gates_never_saw_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """THE test. Verify, keep working, deliver — the second must refuse."""
+    verified(delivery_repo, monkeypatch, capsys)
+    # keep working after the gates ran
+    (delivery_repo / "feature.py").write_text("def added():\n    return 2\n",
+                                              encoding="utf-8")
+    (delivery_repo / "afterwards.py").write_text("late = True\n", encoding="utf-8")
+
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_GATE_FAILED
+
+    err = capsys.readouterr().err
+    assert "working tree has moved" in err
+    assert "code it never saw" in err
+    assert git(delivery_repo, "branch", "--list").strip() == "* main"
+
+
+def test_an_edit_to_an_already_changed_file_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """The file list can match while the bytes do not — the commonest way a
+    tree moves without its shape moving. The captured patch catches it."""
+    verified(delivery_repo, monkeypatch, capsys)
+    tracked = delivery_repo / ".wringer.yaml"
+    tracked.write_text(
+        tracked.read_text(encoding="utf-8") + "\n# edited after verifying\n",
+        encoding="utf-8",
+    )
+    # same file list as the run, different contents
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_GATE_FAILED
+
+    err = capsys.readouterr().err
+    assert "differ from what" in err or "working tree has moved" in err
+
+
+def test_a_new_head_since_the_run_is_refused(delivery_repo, monkeypatch, capsys):
+    verified(delivery_repo, monkeypatch, capsys)
+    (delivery_repo / "committed.py").write_text("z = 1\n", encoding="utf-8")
+    git(delivery_repo, "add", "committed.py")
+    git(delivery_repo, "commit", "-m", "moved HEAD")
+
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_GATE_FAILED
+
+    assert "but HEAD is now" in capsys.readouterr().err
+
+
+def test_the_commit_carries_only_the_planned_paths(
+    delivery_repo, monkeypatch, capsys
+):
+    """`git commit` commits the whole index, so anything staged beforehand
+    rode along — into a public branch, under an MR claiming it was verified.
+    `--only` makes the plan's file list the commit."""
+    (delivery_repo / "staged-earlier.txt").write_text("mine\n", encoding="utf-8")
+    git(delivery_repo, "add", "staged-earlier.txt")
+    verified(delivery_repo, monkeypatch, capsys)
+    monkeypatch.setenv("FORGE_TOKEN", "t1234567")
+    fake_forge(monkeypatch, reply=MR_REPLY)
+
+    assert cli.main(["deliver", "--send"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    shipped = git(delivery_repo, "show", "--name-only", "--format=",
+                  "HEAD").splitlines()
+    # it was staged before the run, so the run DID see it and it is delivered;
+    # what matters is that the commit is exactly the plan's list
+    written = sorted((delivery_repo / deliver.DELIVERIES_DIRNAME).iterdir())[0]
+    planned = json.loads(
+        (written / deliver.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )["files"]
+    assert sorted(shipped) == sorted(planned)
+
+
+def test_deliver_base_cannot_unlock_the_default_branch(
+    delivery_repo, monkeypatch, capsys
+):
+    """Condition 2 was defeated by a config key: naming a different `base`
+    skipped the default-branch lookup entirely."""
+    (delivery_repo / ".wringer.yaml").write_text(
+        CONFIG.replace('branch: "wringer/{run}"', 'branch: "main"')
+        .replace("base: main", "base: release"),
+        encoding="utf-8",
+    )
+    verified(delivery_repo, monkeypatch, capsys)
+
+    assert cli.main(["deliver"]) == cli.EXIT_REFUSED
+
+    assert "remote's default branch" in capsys.readouterr().err
+
+
+def test_a_branch_that_exists_only_on_the_remote_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """Condition 1 said *only a branch Wringer created*; checking local refs
+    alone let it push into a branch someone else already had."""
+    verified(delivery_repo, monkeypatch, capsys)
+    assert cli.main(["deliver", "--json"]) == cli.EXIT_OK
+    planned = json.loads(capsys.readouterr().out)["branch"]
+
+    git(delivery_repo, "branch", planned)
+    git(delivery_repo, "push", "origin", planned)
+    git(delivery_repo, "branch", "-D", planned)
+    git(delivery_repo, "update-ref", "-d", f"refs/remotes/origin/{planned}")
+
+    assert cli.main(["deliver"]) == cli.EXIT_REFUSED
+    assert "already exists" in capsys.readouterr().err

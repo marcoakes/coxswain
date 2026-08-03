@@ -110,7 +110,8 @@ turn them into text.
 - **No writes outside the repo.** Evidence goes to `.wringer/runs/` under the
   detected git root. Gate ids are validated as slugs precisely so a config
   cannot direct a write outside the bundle.
-- **No credentials handled.** Wringer reads git state with read-only
+- **No credential is ever read from a config file, stored, or relayed.** A repo names an environment *variable*; Wringer reads its value at runtime, folds it into the redactor so it cannot reach an artifact, and passes it to one request. Git's own credential helper answers for git — Wringer never sees that one at all.
+- **Read-only git, except one command.** Wringer reads git state with read-only
   commands and never authenticates anywhere.
 
 ## Supported versions

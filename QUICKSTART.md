@@ -378,6 +378,6 @@ contents never enter `diff.patch`.
 
 ## What it will never do
 
-Write code (the harness never writes code — agents do), call any LLM, open
+Write code (the harness never writes code — agents do), open
 PRs, replace your CI, or upload anything anywhere. Evidence stays on your
 disk; `.wringer/` is gitignored by the template.

@@ -12,6 +12,7 @@ decision.)
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,6 +115,36 @@ def diff(root: Path, head_sha: str | None) -> str | None:
     )
 
 
+def diff_untracked(root: Path, paths: tuple[str, ...]) -> str:
+    """A new-file patch for files git has never seen.
+
+    `git diff` cannot show them — the reason `diff.patch` is deliberately
+    silent about untracked content in an evidence bundle. But a *delivery*
+    plan is read by a human deciding whether to publish, and a change made
+    entirely of new files rendered an empty patch: approving `--send` on it
+    meant approving nothing.
+
+    `--no-index` gets a real diff without staging anything, so the dry run
+    still touches git's index not at all. Binary files come back as git's own
+    "Binary files differ" line rather than as bytes.
+    """
+    chunks: list[str] = []
+    for path in paths:
+        if not (root / path).is_file():
+            continue
+        # --no-index exits 1 when the files differ, which is always here.
+        text = _git(
+            ["diff", "--no-color", "--no-ext-diff", "--no-textconv",
+             "--no-index", "--", os.devnull, path],
+            cwd=root,
+            strip=False,
+            allow_failure=True,
+        )
+        if text:
+            chunks.append(text)
+    return "".join(chunks)
+
+
 def status(root: Path) -> str | None:
     """`git status --porcelain`; None outside a repo.
 
@@ -151,12 +182,21 @@ def _parse_status(porcelain: str | None) -> tuple[tuple[str, ...], tuple[str, ..
     return tuple(changed), tuple(untracked)
 
 
-def _git(args: list[str], cwd: Path, strip: bool = True) -> str | None:
+def _git(
+    args: list[str],
+    cwd: Path,
+    strip: bool = True,
+    allow_failure: bool = False,
+) -> str | None:
     """Run a read-only git command; None if git or the repo is unavailable.
 
     `strip=False` matters for anything whose leading whitespace is data:
     porcelain status codes are two columns, and ` M file` means something
     different from `M  file`.
+
+    `allow_failure` is for the commands whose *non-zero* exit is the normal
+    answer — `diff --no-index` exits 1 whenever the files differ, which for a
+    new-file diff is always.
     """
     try:
         proc = subprocess.run(
@@ -170,6 +210,6 @@ def _git(args: list[str], cwd: Path, strip: bool = True) -> str | None:
         return None
     except subprocess.TimeoutExpired:  # wedged git — record nulls, keep going
         return None
-    if proc.returncode != 0:
+    if proc.returncode != 0 and not allow_failure:
         return None
     return proc.stdout.strip() if strip else proc.stdout

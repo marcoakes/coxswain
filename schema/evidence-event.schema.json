@@ -6,8 +6,7 @@
   "type": "object",
   "required": [
     "type",
-    "ts",
-    "prev_hash"
+    "ts"
   ],
   "properties": {
     "type": {
@@ -39,8 +38,7 @@
         "run_id",
         "wringer_version",
         "repo",
-        "sha",
-        "prev_hash"
+        "sha"
       ],
       "additionalProperties": false,
       "properties": {
@@ -79,8 +77,7 @@
         "type",
         "ts",
         "dirty",
-        "changed_files",
-        "prev_hash"
+        "changed_files"
       ],
       "additionalProperties": false,
       "properties": {
@@ -119,8 +116,7 @@
         "type",
         "ts",
         "gate_id",
-        "command",
-        "prev_hash"
+        "command"
       ],
       "additionalProperties": false,
       "properties": {
@@ -149,8 +145,7 @@
         "ts",
         "gate_id",
         "exit_code",
-        "duration_ms",
-        "prev_hash"
+        "duration_ms"
       ],
       "additionalProperties": false,
       "properties": {
@@ -188,8 +183,7 @@
       "required": [
         "type",
         "ts",
-        "status",
-        "prev_hash"
+        "status"
       ],
       "additionalProperties": false,
       "properties": {

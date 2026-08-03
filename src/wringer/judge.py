@@ -15,7 +15,8 @@ loop, a brief, or a worker log.
 **Dry run is the default.** `request.json` is written before the transport
 is ever consulted, so what leaves the machine is auditable rather than
 asserted, and `--send` is the same code path continuing one step further.
-`send()` below is the only function in Wringer that opens a socket.
+`send()` below is one of the two functions in Wringer that open a
+socket; `forge.request` is the other (SPEC_GET_V0.md §7).
 """
 
 from __future__ import annotations
@@ -296,7 +297,8 @@ def _strip_fences(text: str) -> str:
 def send(request: dict, endpoint: str, timeout: int, api_key: str | None) -> dict:
     """Post the request and return the parsed reply.
 
-    **The only function in Wringer that opens a socket** — deliberately, so
+    **One of the two functions in Wringer that open a socket** — deliberately,
+    so
     that `grep -rn build_opener src/` has exactly two answers — this and
     `forge.request`, added in P3 and named in SPEC_GET_V0.md §7. It is reached only
     from `wring judge --send`, only when a repo declared an endpoint, and

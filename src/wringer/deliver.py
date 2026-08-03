@@ -139,25 +139,135 @@ def gates_passed(run_dir: Path) -> tuple[bool, str | None]:
     return result.get("status") == "passed", result.get("failed_gate")
 
 
-def branch_exists(root: Path, name: str) -> bool:
-    return _git(root, ["rev-parse", "--verify", "--quiet", f"refs/heads/{name}"],
-                check=False)[0] == 0
+def branch_exists(root: Path, name: str, remote: str | None = None) -> bool:
+    """Whether the branch already exists — locally OR on the remote.
+
+    Checking only local refs let delivery create a branch that already exists
+    upstream, and push into someone else's history. Condition 1 says *only a
+    branch Wringer created*; a name that exists anywhere is not one of those.
+    """
+    refs = [f"refs/heads/{name}"]
+    if remote:
+        refs.append(f"refs/remotes/{remote}/{name}")
+    for ref in refs:
+        if _git(root, ["rev-parse", "--verify", "--quiet", ref], check=False)[0] == 0:
+            return True
+    if remote:
+        # A remote ref we have never fetched is still a branch that exists.
+        code, out = _git(
+            root, ["ls-remote", "--heads", remote, f"refs/heads/{name}"], check=False
+        )
+        if code == 0 and out.strip():
+            return True
+    return False
 
 
-def resolve_base(root: Path, settings: config.Deliver) -> str:
-    """The branch the MR targets, and the one delivery may never touch."""
-    if settings.base:
-        return settings.base
+def check_verified_tree(root: Path, run_dir: Path, state: git.RepoState) -> None:
+    """Refuse unless the bundle describes the tree being shipped.
+
+    **The most important refusal in this module.** `gates_passed` reads the
+    bundle's *status*; it says nothing about *what* passed. Without this, a
+    user could verify, keep working, and deliver — and the MR body would
+    report the gate table of a run that never saw the delivered code.
+
+    That is not a near-miss. It is Wringer publishing a claim of verification
+    about code that was never verified: law 1 and law 2, broken by the one
+    command that speaks to the outside world, in the product whose entire
+    pitch is "your agent says it passed; prove it".
+
+    Two things must match: the commit the bundle was taken against, and the
+    working-tree changes it captured. The second is the one that bites — the
+    common case is an unchanged HEAD and edits made after the gates ran.
+    """
+    try:
+        manifest = evidence.read_manifest(run_dir)
+    except evidence.EvidenceError as exc:
+        raise DeliverError(str(exc)) from exc
+
+    repo = manifest.get("repo", {})
+    verified_sha = repo.get("head_sha")
+    if verified_sha and state.head_sha and verified_sha != state.head_sha:
+        raise Refused(
+            f"{run_dir.name} verified {verified_sha[:12]}, but HEAD is now "
+            f"{state.head_sha[:12]}. The gates never ran against the tree you "
+            "are delivering — run 'wring verify' again",
+            1,
+        )
+
+    # What the tree looked like when the gates ran, from the bundle's own
+    # git.status event. Compared as sets: order is not meaning.
+    try:
+        recorded = evidence.read_events(run_dir)
+    except evidence.EvidenceError as exc:
+        raise DeliverError(str(exc)) from exc
+    snapshot = next(
+        (e for e in recorded if e.get("type") == "git.status"), None
+    )
+    if snapshot is None:
+        return  # a bundle with no git snapshot cannot contradict the tree
+
+    then = set(snapshot.get("changed_files", [])) | set(
+        snapshot.get("untracked", [])
+    )
+    now = set(state.changed_files) | set(state.untracked)
+    then = {p for p in then if not p.startswith(f"{EVIDENCE_DIRNAME}/")}
+    now = {p for p in now if not p.startswith(f"{EVIDENCE_DIRNAME}/")}
+    if then != now:
+        added, removed = sorted(now - then), sorted(then - now)
+        detail = []
+        if added:
+            detail.append(f"changed since: {', '.join(added[:5])}")
+        if removed:
+            detail.append(f"no longer changed: {', '.join(removed[:5])}")
+        raise Refused(
+            f"the working tree has moved since {run_dir.name} verified it "
+            f"({'; '.join(detail)}). Delivering now would attach that run's "
+            "gate results to code it never saw — run 'wring verify' again",
+            1,
+        )
+
+    # The same file list can hold different bytes, so compare the patch too.
+    # This is what catches an edit to a file that was already changed when the
+    # gates ran — the commonest way a tree moves without its shape moving.
+    captured = run_dir / evidence.DIFF_FILENAME
+    if captured.is_file():
+        before = captured.read_text(encoding="utf-8", errors="replace")
+        after = git.diff(root, state.head_sha) or ""
+        if before.strip() != after.strip():
+            raise Refused(
+                f"the tracked changes differ from what {run_dir.name} verified. "
+                "The file list matches but the contents do not, so that run's "
+                "gate results describe different code — run 'wring verify' again",
+                1,
+            )
+    # KNOWN GAP, closed when per-file digests land (plan R3): an *untracked*
+    # file's contents are not in the bundle — git cannot diff what it has never
+    # seen — so a content-only edit to an untracked file is not detected here.
+    # The file list and every tracked byte are. Stated rather than papered over.
+
+
+def resolve_base(root: Path, settings: config.Deliver) -> tuple[str, str | None]:
+    """The branch the MR targets, and the remote's default branch.
+
+    Both, always — because condition 2 is "never the default branch", and a
+    configured `deliver.base` used to skip the lookup entirely. That let a
+    config key defeat the condition: set `base: main` and the branch template
+    to `main`, and delivery would happily commit to and push the default
+    branch. The default is now resolved whatever `base` says, so it can be
+    refused against.
+    """
     from wringer import acquire
 
-    found = acquire.default_branch(root, settings.remote)
-    if not found:
+    default = acquire.default_branch(root, settings.remote)
+    if settings.base:
+        return settings.base, default
+    if not default:
         raise Refused(
             "the remote's default branch could not be determined, so Wringer "
             "cannot be sure it is avoiding it. Set 'deliver.base' explicitly",
             3,
         )
-    return found
+    return default, default
 
 
 def plan(
@@ -184,6 +294,8 @@ def plan(
         )
 
     state = git.inspect(root)
+    check_verified_tree(root, run_dir, state)
+
     # The delivered set, honestly: `.wringer/` is excluded at `git add` time,
     # so counting it here would make the plan describe a commit that will not
     # happen. A repo that gitignored it never sees these paths at all.
@@ -196,7 +308,7 @@ def plan(
     if not carried:
         raise Refused("there is nothing to deliver — the working tree is clean", 1)
 
-    base = resolve_base(root, settings)
+    base, default = resolve_base(root, settings)
     branch = resolve_branch(settings.branch, run_id, task)
 
     if branch == base:
@@ -205,21 +317,37 @@ def plan(
             "branch. Wringer never commits to the branch it is merging into",
             3,
         )
+    if default and branch == default:
+        # Condition 2, enforced even when `deliver.base` names something else.
+        raise Refused(
+            f"the branch template resolved to '{branch}', which is the "
+            f"remote's default branch. Wringer never writes to it, whatever "
+            "'deliver.base' says",
+            3,
+        )
     if state.branch == branch:
         raise Refused(
             f"you are standing on '{branch}'. Wringer commits to a branch it "
             "created, never the one you are on",
             3,
         )
-    if branch_exists(root, branch):
+    if branch_exists(root, branch, settings.remote):
         raise Refused(
-            f"branch '{branch}' already exists. Wringer only ever commits to a "
-            "branch it created itself, so it will not check this one out",
+            f"branch '{branch}' already exists (locally or on "
+            f"'{settings.remote}'). Wringer only ever commits to a branch it "
+            "created itself, so it will not check this one out",
             3,
         )
 
     title = _title(run_dir, root, task)
-    patch = git.diff(root, state.head_sha) or ""
+    # Tracked changes, plus a real new-file diff for the untracked ones. A
+    # change made entirely of new files used to render an EMPTY patch, so the
+    # human approving `--send` approved nothing. `--no-index` gets the content
+    # without staging, so the dry run still touches git's index not at all.
+    untracked = tuple(p for p in carried if p in set(state.untracked))
+    patch = (git.diff(root, state.head_sha) or "") + git.diff_untracked(
+        root, untracked
+    )
     return Plan(
         branch=branch,
         base=base,
@@ -444,12 +572,6 @@ def send(
     bundle.event("branch.created", branch=planned.branch)
 
     bundle.event("commit.planned", files=list(planned.changed_files))
-    # NEVER stage `.wringer/`. A repo that ran `wring init` has it gitignored,
-    # but `wring verify` alone does not write a .gitignore — so a plain
-    # `add --all` would sweep the evidence bundle into a commit and push it to
-    # a public branch. SECURITY.md is explicit that a bundle may hold whatever
-    # a gate printed, and README promises nothing uploads, ever. The MR body
-    # omitting gate logs would be pointless beside a commit that carried them.
     # Stage exactly what the plan said it would carry — never `add --all`.
     # A repo that ran `wring init` has `.wringer/` gitignored, but `wring
     # verify` alone writes no .gitignore, so `add --all` swept the whole
@@ -465,8 +587,25 @@ def send(
         ["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"],
         stdin="\0".join(planned.changed_files),
     )
-    message = bundle.read_commit_message(planned)
-    _run(root, ["commit", "--file", "-"], stdin=message)
+    # `--only` commits the named paths and NOTHING else. Staging the right
+    # paths was not enough: `git commit` commits the whole index, so anything
+    # the user had already staged — a `.wringer/` bundle, an unrelated
+    # half-finished edit — rode along into a public branch and into an MR
+    # claiming those files were verified. The plan's file list IS the commit.
+    #
+    # The message comes from the file rather than stdin because stdin is
+    # carrying the pathspecs; `--file -` and `--pathspec-from-file=-` cannot
+    # both have it. That file is also the one the dry run invited the human to
+    # edit, so reading it here is the behaviour we want anyway.
+    message_file = bundle.directory / COMMIT_FILENAME
+    if not message_file.is_file():
+        message_file.write_text(planned.commit_message, encoding="utf-8")
+    _run(
+        root,
+        ["commit", "--only", "--file", str(message_file),
+         "--pathspec-from-file=-", "--pathspec-file-nul"],
+        stdin="\0".join(planned.changed_files),
+    )
     done["commit"] = _read(root, ["rev-parse", "HEAD"])
     bundle.event("commit.written", sha=done["commit"])
 

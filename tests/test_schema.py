@@ -560,3 +560,98 @@ def test_every_delivery_event_carries_the_chain(repo, monkeypatch, capsys):
         ("mr.planned", "mr.opened"),
     ):
         assert kinds.index(planned) < kinds.index(done), (planned, done)
+
+
+# --- the committed demo bundle (WRINGER_RELEASE_PLAN.md R1) --------------
+#
+# `.wringer.example/` is the receipt the README points at as the answer to
+# "how do I know?". It was produced by v0.1.0, before `prev_hash` existed.
+#
+# P0 added `prev_hash` to every event AND made it `required` in the published
+# schema, with the version string still `wringer.evidence.v1`. Two
+# incompatible formats then claimed one version, and the repo's own showcase
+# bundle failed the schema the repo publishes. Nobody noticed because every
+# other schema test validates a bundle produced by the current code.
+#
+# The fix was not a version bump: it was to stop requiring, in v1, a field
+# that v1 never had. These tests are what would have caught it.
+
+EXAMPLE_DIR = Path(__file__).resolve().parent.parent / ".wringer.example" / "runs"
+
+
+def example_bundle() -> Path:
+    found = sorted(p for p in EXAMPLE_DIR.iterdir() if p.is_dir())
+    assert found, f"no committed demo bundle under {EXAMPLE_DIR}"
+    return found[0]
+
+
+def test_the_committed_demo_bundle_matches_the_published_schemas():
+    """The repo's own receipt must validate against the repo's own schemas.
+
+    If this fails, either the bundle is stale or a released schema grew a
+    requirement it cannot have. Both are the same bug: a version string that
+    stopped meaning one thing.
+    """
+    bundle = example_bundle()
+
+    check(
+        json.loads((bundle / evidence.MANIFEST_FILENAME).read_text("utf-8")),
+        load("manifest.schema.json"),
+        "example manifest.json",
+    )
+    for line in (bundle / evidence.EVIDENCE_FILENAME).read_text("utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        check(event, branch(event["type"]), f"example event {event['type']}")
+    for result in sorted((bundle / evidence.GATES_DIRNAME).glob("*/result.json")):
+        check(
+            json.loads(result.read_text("utf-8")),
+            load("gate-result.schema.json"),
+            f"example {result.parent.name}",
+        )
+
+
+def test_the_committed_demo_bundle_validates_against_the_real_engine():
+    built = validators()
+    bundle = example_bundle()
+    errors: list[str] = []
+
+    for error in built["manifest.schema.json"].iter_errors(
+        json.loads((bundle / evidence.MANIFEST_FILENAME).read_text("utf-8"))
+    ):
+        errors.append(f"manifest: {error.json_path} {error.message}")
+    for line in (bundle / evidence.EVIDENCE_FILENAME).read_text("utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        for error in built["evidence-event.schema.json"].iter_errors(event):
+            errors.append(f"{event['type']}: {error.json_path} {error.message}")
+
+    assert not errors, "\n".join(errors)
+
+
+def test_a_pre_chain_bundle_is_still_a_valid_v1_bundle():
+    """The point of R1, stated as a property rather than a file.
+
+    `wringer.evidence.v1` shipped without `prev_hash`. A reader of v1 must
+    accept a v1 bundle. Wringer still WRITES the chain — tamper-evidence is
+    unaffected going forward — and `wring attest` may one day refuse to
+    attest a bundle that has none. That is an honest refusal; calling the
+    bundle schema-invalid was not.
+    """
+    built = validators()
+    event = {
+        "type": "run.started",
+        "ts": "2026-07-30T23:16:45.123+01:00",
+        "run_id": "20260730-231645-a57c",
+        "wringer_version": "0.1.0",
+        "repo": "wringer",
+        "sha": "a" * 40,
+    }
+    assert "prev_hash" not in event
+    assert not list(built["evidence-event.schema.json"].iter_errors(event))
+
+    # and the chained form is equally valid — both are v1
+    chained = dict(event, prev_hash="b" * 64)
+    assert not list(built["evidence-event.schema.json"].iter_errors(chained))

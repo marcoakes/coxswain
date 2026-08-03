@@ -50,7 +50,7 @@ Three mechanisms carry it:
 ```bash
 wring judge                      # dry run against the latest bundle: builds, sends nothing
 wring judge RUN_DIR              # judge a named bundle instead of the latest
-wring judge --send               # the only path in Wringer that opens a socket
+wring judge --send               # opens a socket; see SPEC_GET_V0 §7 for the full list
 wring judge --print-request      # write the exact would-be body to stdout, exit 0
 wring judge --rubric PATH        # override the configured rubric
 wring judge --json               # one object on stdout, no human report
@@ -229,7 +229,7 @@ a feature nobody shipped. **The maintainer approved this replacement on
 2026-07-31; it is now the binding wording:**
 
 > No LLM and no network — by default, and in every command that proves
-> anything. `wring judge --send` is the single exception: it exists only when
+> anything. `wring judge --send` was the single exception when this was written; P2 and P3 added `wring spec --send` and `wring deliver --send`, and `wring get`/`wring issue` fetch. See SPEC_GET_V0 §7. It exists only when
 > your repo declares an endpoint, it writes the exact bytes to disk before it
 > opens a socket, and it never runs unless you type `--send`.
 

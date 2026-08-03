@@ -165,10 +165,20 @@ deliver:
 ## 7. Network
 
 `wring judge --send` was "the only function that opens a socket". After this
-slice that sentence is false, and it will be **restated rather than quietly
-kept**: every network call in Wringer lives in exactly two functions,
-`judge.send` and `forge.request`, and `grep -rn "build_opener" src/` must return
-exactly those two. Both are reached only with a flag a human typed, only
+slice that sentence is false, and it is **restated rather than quietly
+kept**. The rule that actually matters, and that holds:
+
+> **Nothing that proves anything touches a network, and nothing leaves the
+> machine without a flag a human typed.**
+
+`verify`, `run`, `resume`, `fleet` and `plan` cannot reach a network at all.
+Three commands SEND, each behind `--send` and each writing the exact bytes to
+disk first: `judge`, `spec`, `deliver`. Two commands FETCH, and are not behind
+a flag because fetching is their entire purpose — `wring get` clones a
+repository, `wring issue` reads one issue. A user typing either knows they are
+reaching a network; a `--send` on them would be ceremony rather than safety.
+Every socket lives in `judge.send` or `forge.request`, and
+`grep -rn "build_opener" src/` must return exactly those two. Both are reached only with a flag a human typed, only
 against an endpoint the repo declared, and only after the bytes are on disk.
 
 Vendor strings live behind `forge.py` (AGENTS.md rule 5): GitHub and GitLab
