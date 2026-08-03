@@ -444,7 +444,7 @@ def deliver_for_real(repo, monkeypatch, tag):
     from test_deliver import CONFIG, MR_REPLY, fake_forge, git
 
     upstream = repo.parent / f"{repo.name}-{tag}.git"
-    git(repo, "init", "--bare", str(upstream))
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
     git(repo, "remote", "add", "origin", f"file://{upstream}")
     (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
     (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
@@ -502,7 +502,7 @@ def test_a_dry_run_delivery_also_matches_the_schema(repo, monkeypatch, capsys):
     from wringer import deliver
 
     upstream = repo.parent / f"{repo.name}-dry.git"
-    git(repo, "init", "--bare", str(upstream))
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
     git(repo, "remote", "add", "origin", f"file://{upstream}")
     (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
     (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")

@@ -80,7 +80,7 @@ def delivery_repo(repo: Path) -> Path:
     # session, and a bare repo reused between tests takes the first one's
     # history and then rejects everyone else's push as non-fast-forward.
     upstream = repo.parent / f"{repo.name}-upstream.git"
-    git(repo, "init", "--bare", str(upstream))
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
     git(repo, "remote", "add", "origin", f"file://{upstream}")
     (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
     # As `wring init` would: evidence stays local, and an un-ignored .wringer/
@@ -566,7 +566,7 @@ def test_a_delivery_never_carries_the_evidence_bundle(repo, monkeypatch, capsys)
     """
     secret = "hunter2-printed-by-a-gate"
     upstream = repo.parent / f"{repo.name}-leak.git"
-    git(repo, "init", "--bare", str(upstream))
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
     git(repo, "remote", "add", "origin", f"file://{upstream}")
     (repo / ".wringer.yaml").write_text(
         CONFIG.replace('run: "true"', f'run: "echo {secret}"'), encoding="utf-8"
@@ -599,7 +599,7 @@ def test_the_plan_counts_only_what_it_will_carry(repo, monkeypatch, capsys):
     """The count in the report and the MR body must describe the commit that
     will happen, not the working tree that happens to be dirty."""
     upstream = repo.parent / f"{repo.name}-count.git"
-    git(repo, "init", "--bare", str(upstream))
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
     git(repo, "remote", "add", "origin", f"file://{upstream}")
     (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
     git(repo, "add", "-A")
@@ -624,7 +624,7 @@ def test_a_tree_dirty_only_with_evidence_has_nothing_to_deliver(
     own bundle, there is genuinely nothing to deliver — and delivering an
     empty commit describing someone's evidence would be worse than refusing."""
     upstream = repo.parent / f"{repo.name}-onlyev.git"
-    git(repo, "init", "--bare", str(upstream))
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
     git(repo, "remote", "add", "origin", f"file://{upstream}")
     (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
     git(repo, "add", "-A")
@@ -870,6 +870,9 @@ def test_deliver_base_cannot_unlock_the_default_branch(
         .replace("base: main", "base: release"),
         encoding="utf-8",
     )
+    # stand somewhere else: "you are standing on it" is also a correct
+    # refusal, and it would fire first and hide the one under test
+    git(delivery_repo, "switch", "--create", "sidebar")
     verified(delivery_repo, monkeypatch, capsys)
 
     assert cli.main(["deliver"]) == cli.EXIT_REFUSED
