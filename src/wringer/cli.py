@@ -102,6 +102,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the config's max_iterations for this run",
     )
     parser_run.add_argument(
+        "--worker-timeout",
+        type=int,
+        metavar="SECONDS",
+        help="override the config's worker_timeout for this run",
+    )
+    parser_run.add_argument(
+        "--wall-clock",
+        type=int,
+        metavar="SECONDS",
+        help="stop the whole loop after this long, whatever the iteration count",
+    )
+    parser_run.add_argument(
         "--json",
         action="store_true",
         help="emit one JSON object instead of the human report",
@@ -442,6 +454,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             root,
             cfg,
             max_iterations=args.max_iterations,
+            worker_timeout=args.worker_timeout,
+            wall_clock=args.wall_clock,
             on_iteration=None if quiet else _report_iteration,
             on_gate=None if quiet else _report_gate,
             on_worker=None if quiet else _report_worker,
@@ -594,7 +608,11 @@ def cmd_fleet(args: argparse.Namespace) -> int:
             f"{outcome.parked} parked."
         )
         if outcome.parked:
-            print("Parked work kept its evidence and re-enters the queue on resume.")
+            print(
+                "Parked work kept its evidence in the fleet bundle. There is\n"
+                "no fleet resume yet — re-run 'wring fleet' with a task file\n"
+                "holding the parked ids to try them again."
+            )
         print(f"Fleet evidence: {_relative(outcome.directory, root)}/")
 
     return EXIT_OK if outcome.join_satisfied else EXIT_GATE_FAILED

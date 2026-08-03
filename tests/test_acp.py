@@ -332,3 +332,62 @@ def test_env_passthrough_names_variables_never_values():
 
     assert "NAMES" in str(caught.value)
     assert "credential" in str(caught.value)
+
+
+def test_a_write_to_an_agent_that_stopped_reading_cannot_block_forever():
+    """The eight-hour incident's shape, in the seam built to honour it.
+
+    A pipe write blocks once the buffer fills and the far end stops reading.
+    That block is armed BEFORE `worker_timeout` and `wall_clock` exist —
+    both are only consulted after the write returns — so an agent that hangs
+    without draining stdin used to hold Wringer open indefinitely: no
+    deadline, no breaker, no ledger growth, nothing to reap.
+
+    Tested at the write itself rather than through the loop, because a
+    realistic prompt fits in the buffer and never blocks: an end-to-end test
+    passes just as happily against the broken implementation, which is how
+    this nearly shipped twice.
+
+    Without the fix this HANGS rather than fails. The elapsed-time assertion
+    is what makes the difference visible.
+    """
+    import subprocess
+    import time
+
+    from wringer import acp
+
+    # nothing ever reads this process's stdin
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        started = time.monotonic()
+        connection = acp.Connection(proc, deadline=started + 3)
+        # comfortably past any pipe buffer (64 KB on Linux, 16 KB on some BSDs)
+        with pytest.raises(acp.AcpError) as raised:
+            connection.send_request("session/prompt", {"blob": "x" * 500_000})
+        elapsed = time.monotonic() - started
+
+        assert "stopped reading" in str(raised.value)
+        assert elapsed < 30, (
+            f"the write took {elapsed:.1f}s — it is not bounded by the turn's "
+            "deadline"
+        )
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+def test_a_healthy_agent_is_not_slowed_by_the_write_ceiling(repo, monkeypatch,
+                                                            capsys):
+    """The bound must not cost anything when the agent behaves."""
+    setup(repo, "fix")
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["run"]) == cli.EXIT_OK
+
+    capsys.readouterr()
+    assert (repo / "calc.py").read_text(encoding="utf-8").strip() == "FIXED"

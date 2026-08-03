@@ -198,6 +198,11 @@ class Fleet:
     on_exhausted: str = "park"
     join: str = "all"
     child_max_iterations: int | None = None
+    # Invariant 8: budgets nest. A child's ceilings come from the fleet
+    # that spawned it, and the fleet's own deadline is not a substitute —
+    # it kills the supervisor, not the worker burning the budget.
+    child_worker_timeout: int | None = None
+    child_wall_clock: int | None = None
     worker_fallbacks: tuple[str, ...] = ()
     # Off by default. When on, the fleet gives each task its own git
     # worktree so parallel children cannot fight over one working tree.
@@ -524,6 +529,18 @@ def _parse_fleet(raw: Any, source: str) -> Fleet | None:
             else _positive_int(
                 child, "max_iterations", 1, source, section="fleet.child"
             )
+        ),
+        child_worker_timeout=(
+            None
+            if child.get("worker_timeout") is None
+            else _positive_int(
+                child, "worker_timeout", 1, source, section="fleet.child"
+            )
+        ),
+        child_wall_clock=(
+            None
+            if child.get("wall_clock") is None
+            else _positive_int(child, "wall_clock", 1, source, section="fleet.child")
         ),
         worker_fallbacks=tuple(fallbacks),
     )

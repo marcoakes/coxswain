@@ -183,6 +183,10 @@ def run(
         status=status,
         interrupted=interrupted,
     )
+    # LAST, so it covers everything else the run wrote. `digests.json` is what
+    # lets a later `wring attest` say "and none of it has been altered since"
+    # about the whole bundle rather than only the ledger.
+    bundle.write_digests()
 
     return Outcome(
         bundle=bundle,

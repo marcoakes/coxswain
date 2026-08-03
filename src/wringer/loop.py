@@ -436,6 +436,8 @@ def run(
     root: Path,
     cfg: config.Config,
     max_iterations: int | None = None,
+    worker_timeout: int | None = None,
+    wall_clock: int | None = None,
     on_iteration: Reporter | None = None,
     on_gate: verify.GateReporter | None = None,
     on_worker: Reporter | None = None,
@@ -451,6 +453,14 @@ def run(
     assert cfg.run is not None
     settings = cfg.run
     budget = max_iterations if max_iterations is not None else settings.max_iterations
+    # Invariant 8: budgets NEST. A fleet's per-child ceilings override the
+    # repo's own, because the outer budget is the one that was reasoned
+    # about. Without this the fleet's `child:` keys were parsed and thrown
+    # away, and a child could outlive the fleet that spawned it.
+    turn_ceiling = (
+        worker_timeout if worker_timeout is not None else settings.worker_timeout
+    )
+    whole_loop = wall_clock if wall_clock is not None else settings.wall_clock
 
     planned = verify.plan(cfg, None)
     redactor = Redactor.from_config(cfg.evidence)
@@ -494,8 +504,8 @@ def run(
     )
     already = resuming.iterations_done if resuming is not None else 0
     deadline = (
-        time.monotonic() + settings.wall_clock
-        if settings.wall_clock is not None
+        time.monotonic() + whole_loop
+        if whole_loop is not None
         else None
     )
 
@@ -594,12 +604,12 @@ def run(
         try:
             if acp_worker is not None:
                 result = _run_acp_worker(
-                    bundle, acp_worker, brief, settings.worker_timeout,
+                    bundle, acp_worker, brief, turn_ceiling,
                     iteration, root,
                 )
             else:
                 result = _run_worker(
-                    bundle, command, settings.worker_timeout, iteration, root
+                    bundle, command, turn_ceiling, iteration, root
                 )
         except KeyboardInterrupt:
             # A worker.started with no worker.finished, mirroring how verify

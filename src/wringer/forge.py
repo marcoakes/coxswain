@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import urllib.parse
 from dataclasses import dataclass
 from typing import Any
@@ -218,11 +219,34 @@ def request(
             return None
 
     opener = urllib.request.build_opener(_NoRedirects)
-    try:
-        with opener.open(posted, timeout=timeout) as reply:
-            raw = reply.read(MAX_ISSUE_BYTES + 1)
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        raise ForgeError(f"the forge could not be reached: {exc}") from exc
+
+    # `timeout=` is a per-socket-OPERATION timeout: a server that dribbles one
+    # byte before each expiry resets it forever, so `forge.timeout` bounded no
+    # total. Invariant 3 says nothing waits without a deadline, and this is a
+    # deadline. The exchange runs on a daemon thread joined once.
+    result: list[bytes] = []
+    failure: list[Exception] = []
+
+    def exchange() -> None:
+        try:
+            with opener.open(posted, timeout=timeout) as reply:
+                result.append(reply.read(MAX_ISSUE_BYTES + 1))
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
+            failure.append(exc)
+
+    caller = threading.Thread(target=exchange, daemon=True)
+    caller.start()
+    caller.join(timeout)
+    if caller.is_alive():
+        raise ForgeError(
+            f"the forge did not finish within {timeout}s — abandoning the "
+            "request rather than waiting on a connection that may never end"
+        )
+    if failure:
+        raise ForgeError(
+            f"the forge could not be reached: {failure[0]}"
+        ) from failure[0]
+    raw = result[0] if result else b""
 
     if len(raw) > MAX_ISSUE_BYTES:
         raise ForgeError(

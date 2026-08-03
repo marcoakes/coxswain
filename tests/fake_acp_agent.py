@@ -14,6 +14,7 @@ Behaviour is chosen by argv so one file covers every case the loop needs:
     idle       do nothing and stop cleanly
     crash      exit mid-turn, before answering the prompt
     hang       accept the prompt and never answer
+    deaf       answer session/new, then never read stdin again (pipe fills)
     garbage    emit a line that is not JSON, then behave
 """
 
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 
 BEHAVIOUR = sys.argv[1] if len(sys.argv) > 1 else "fix"
 

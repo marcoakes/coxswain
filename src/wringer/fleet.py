@@ -230,8 +230,11 @@ class Bundle:
         if parked:
             lines += [
                 "",
-                "Parked work is not lost: it kept its evidence and re-enters the "
-                "queue on `wring resume`.",
+                "Parked work is not lost: its evidence is above and in the "
+                "child loop directories. **There is no fleet resume yet** — "
+                "`wring resume` continues a single killed *loop*, not a fleet. "
+                "To retry, re-run `wring fleet` with a task file holding the "
+                "parked ids.",
             ]
         (self.directory / SUMMARY_FILENAME).write_text(
             "\n".join(lines) + "\n", encoding="utf-8"
@@ -417,9 +420,17 @@ def _spawn(
     if fallback:
         env["WRINGER_WORKER_FALLBACK"] = fallback
 
+    # Invariant 8: budgets nest. These were parsed and silently discarded, so
+    # a child could outlive the fleet that spawned it — and the fleet's own
+    # deadline is no substitute, because it kills the supervisor rather than
+    # the worker burning the budget.
     argv = [sys.executable, "-m", "wringer", "run"]
     if settings.child_max_iterations is not None:
         argv += ["--max-iterations", str(settings.child_max_iterations)]
+    if settings.child_worker_timeout is not None:
+        argv += ["--worker-timeout", str(settings.child_worker_timeout)]
+    if settings.child_wall_clock is not None:
+        argv += ["--wall-clock", str(settings.child_wall_clock)]
 
     proc = subprocess.Popen(
         argv,

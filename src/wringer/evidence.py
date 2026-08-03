@@ -28,6 +28,17 @@ from wringer.redact import Redactor
 SCHEMA_VERSION = "wringer.evidence.v1"
 EVIDENCE_FILENAME = "evidence.jsonl"
 MANIFEST_FILENAME = "manifest.json"
+# A sibling file, not a manifest key: `wringer.evidence.v1` shipped in v0.1.0
+# and is frozen, so the manifest cannot grow one. Additive — a reader that
+# does not know this file ignores it, and every v1 bundle stays a v1 bundle.
+#
+# The `prev_hash` chain makes the LEDGER tamper-evident and says nothing about
+# the rest of the bundle: edit `gates/001_test/stdout.log` and no chain
+# notices. `wring attest` (P5) cannot make its central claim — "proven by
+# gates G, and none of it has been altered since" — without this, and every
+# bundle written before it exists is a bundle that can never be attested.
+DIGESTS_FILENAME = "digests.json"
+DIGESTS_SCHEMA_VERSION = "wringer.digests.v1"
 RESULT_FILENAME = "result.json"
 DIFF_FILENAME = "diff.patch"
 STATUS_FILENAME = "status.txt"
@@ -348,6 +359,47 @@ class Bundle:
 
     def _scrub(self, value: Any) -> Any:
         return deep_scrub(self.redactor, value)
+
+    def write_digests(self) -> Path:
+        """Hash every file in the bundle, into a sibling `digests.json`.
+
+        **Written last**, so it covers everything else — including
+        `manifest.json` and `summary.md`. It cannot cover itself, which is the
+        one thing a reader must understand: `digests.json` proves the bundle
+        has not changed *around* it, and a chained ledger proves the ledger.
+        Neither proves the digest file itself, and nothing on a disk its owner
+        controls could. That is tamper-EVIDENCE, and it is what turns a silent
+        edit into a detectable one.
+
+        Paths are POSIX and repo-bundle-relative so a digest computed on Linux
+        matches one computed on macOS.
+        """
+        import hashlib
+
+        entries: dict[str, str] = {}
+        for path in sorted(self.directory.rglob("*")):
+            if not path.is_file() or path.name == DIGESTS_FILENAME:
+                continue
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(65536), b""):
+                    digest.update(chunk)
+            entries[path.relative_to(self.directory).as_posix()] = digest.hexdigest()
+
+        target = self.directory / DIGESTS_FILENAME
+        target.write_text(
+            json.dumps(
+                {
+                    "schema_version": DIGESTS_SCHEMA_VERSION,
+                    "algorithm": "sha256",
+                    "files": entries,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return target
 
     def write_manifest(
         self, state: RepoState, status: str, failed_gate: str | None

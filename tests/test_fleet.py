@@ -451,3 +451,85 @@ def test_worktree_must_be_a_boolean():
                 "fleet": {"deadline": 60, "worktree": "yes"},
             }
         )
+
+def test_the_fleets_child_budgets_reach_the_child(repo, monkeypatch):
+    """Invariant 8: budgets NEST.
+
+    `fleet.child.worker_timeout` and `fleet.child.wall_clock` were validated
+    by the config parser and then silently discarded, so a child could
+    outlive the fleet that spawned it. The fleet's own deadline is no
+    substitute — it kills the supervisor, not the worker burning the budget.
+    """
+    from wringer import config, fleet
+
+    parsed = config.parse({
+        "version": 1,
+        "gates": [{"id": "t", "run": "true"}],
+        "fleet": {
+            "deadline": 600,
+            "child": {"max_iterations": 2, "worker_timeout": 7,
+                      "wall_clock": 33},
+        },
+    })
+    assert parsed.fleet is not None
+    # carried, not dropped
+    assert parsed.fleet.child_max_iterations == 2
+    assert parsed.fleet.child_worker_timeout == 7
+    assert parsed.fleet.child_wall_clock == 33
+
+    # and handed to the child process
+    spawned: list[list[str]] = []
+
+    class FakeProc:
+        pid = 4242
+        returncode = 0
+
+        def poll(self):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        spawned.append(argv)
+        return FakeProc()
+
+    monkeypatch.setattr(fleet.subprocess, "Popen", fake_popen)
+    bundle = fleet.Bundle.create(repo / fleet.FLEETS_DIRNAME)
+    state = fleet.TaskState(task=fleet.Task(id="t1", brief="b.md", dir="."))
+    fleet._spawn(repo, bundle, state, parsed.fleet)
+
+    argv = spawned[0]
+
+    def flag(name: str) -> str:
+        assert name in argv, f"{name} never reached the child: {argv}"
+        return argv[argv.index(name) + 1]
+
+    assert flag("--max-iterations") == "2"
+    assert flag("--worker-timeout") == "7"
+    assert flag("--wall-clock") == "33"
+
+
+def test_a_child_budget_overrides_the_repos_own(repo, monkeypatch, capsys):
+    """The outer budget is the one that was reasoned about, so it wins."""
+    from wringer import cli
+
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        'version: 1\ngates:\n  - id: test\n    run: "grep -q FIXED calc.py"\n'
+        'run:\n  worker: "sleep 30"\n  max_iterations: 2\n  worker_timeout: 300\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    # the repo says 300s; the flag says 1s, and the flag is the fleet's voice
+    assert cli.main(["run", "--worker-timeout", "1"]) == cli.EXIT_GATE_FAILED
+    capsys.readouterr()
+
+    from wringer import loop as loop_mod
+
+    written = sorted((repo / loop_mod.LOOPS_DIRNAME).iterdir())[0]
+    events = [
+        json.loads(line)
+        for line in (written / loop_mod.EVENTS_FILENAME)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(e.get("timed_out") for e in events if e["type"] == "worker.finished")

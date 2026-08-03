@@ -327,13 +327,35 @@ def send(request: dict, endpoint: str, timeout: int, api_key: str | None) -> dic
             return None
 
     opener = urllib.request.build_opener(_NoRedirects)
-    try:
-        with opener.open(posted, timeout=timeout) as reply:
-            body = reply.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+
+    # `timeout=` bounds each socket OPERATION, not the exchange: an endpoint
+    # that dribbles one byte before every expiry resets it indefinitely, so
+    # `judge.timeout` bounded no total. Invariant 3 — nothing waits without a
+    # deadline — and this is the deadline.
+    import threading
+
+    result: list[str] = []
+    failure: list[Exception] = []
+
+    def exchange() -> None:
+        try:
+            with opener.open(posted, timeout=timeout) as reply:
+                result.append(reply.read().decode("utf-8", errors="replace"))
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as exc:
+            failure.append(exc)
+
+    caller = threading.Thread(target=exchange, daemon=True)
+    caller.start()
+    caller.join(timeout)
+    if caller.is_alive():
+        raise TransportFailed(
+            f"the endpoint did not finish within {timeout}s"
+        )
+    if failure:
         # A transport failure is not a verdict. The caller turns this into
         # needs_human, never fail.
-        raise TransportFailed(str(exc)) from exc
+        raise TransportFailed(str(failure[0])) from failure[0]
+    body = result[0] if result else ""
 
     try:
         return json.loads(body)
