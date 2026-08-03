@@ -56,6 +56,28 @@ Two absences carry more weight than any field:
 - **A `worker.started` with no `worker.finished`** is the same story one level
   up: the loop was interrupted while the worker was running.
 
+## What 0.2.0 freezes
+
+`wringer.evidence.v1` has been frozen since 0.1.0. **At the 0.2.0 tag these
+join it**, and become as immutable as it is:
+
+`wringer.loop.v1` · `wringer.fleet.v1` · `wringer.judge.v1` ·
+`wringer.rubric.v1` · `wringer.spec.v1` · `wringer.delivery.v1` ·
+`wringer.acquired.v1` · `wringer.digests.v1`
+
+Until that tag they are amendable in place on `main`, and every amendment is
+named in its commit message. After it, a new field costs a version.
+
+One correction is worth recording, because it is exactly what this rule
+exists to prevent. During 0.2 development `prev_hash` was added to every
+evidence event **and marked `required`** in the published schema, with the
+version string left at `wringer.evidence.v1`. Two incompatible formats then
+claimed one version, and this repo's own committed demo bundle — produced by
+0.1.0, the receipt the README points at — failed the schema the repo
+publishes. The fix was not a version bump but to stop requiring, in v1, a
+field v1 never had. A test now validates `.wringer.example/` on every run;
+its absence is why nobody noticed.
+
 ## Stability
 
 `schema_version` in `manifest.json` is `wringer.evidence.v1`. These schemas
