@@ -4,7 +4,7 @@ Notable changes, newest first. Wringer follows [semantic
 versioning](https://semver.org/); schema versions move independently of the
 package version and are listed per release.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-08-03
 
 The release that turns an evidence compiler into a supervision layer. **Ten
 new commands**, and the first release in which Wringer can write git history
