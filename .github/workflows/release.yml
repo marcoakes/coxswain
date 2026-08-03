@@ -1,0 +1,140 @@
+name: release
+
+# Publish to PyPI when a v* tag is pushed — with NO stored credential.
+#
+# PyPI Trusted Publishing exchanges GitHub's OIDC token for a short-lived
+# upload token at the moment of publish. There is no secret in this repo, none
+# in the maintainer's keychain, and none to rotate or leak. That matters more
+# here than in most projects: this is the harness whose whole pitch is that it
+# never handles a credential, and a long-lived PyPI token sitting in a repo
+# secret would be the one place it did.
+#
+# ONE-TIME SETUP, on pypi.org (Marc, once):
+#   Your projects -> wringer -> Manage -> Publishing -> Add a new publisher
+#     Owner:            marcoakes
+#     Repository:       wringer
+#     Workflow name:    release.yml
+#     Environment:      pypi
+#   Then create the `pypi` environment under this repo's Settings ->
+#   Environments. Protection rules there are worth setting: a required
+#   reviewer means a tag alone cannot publish without a human clicking.
+#
+# After that, publishing 0.2.0 is: git push origin v0.2.0 (or re-push the tag,
+# or run this workflow by hand against it).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish, e.g. v0.2.0"
+        required: true
+
+jobs:
+  # The tag is a claim about the Definition of PROVEN. Check it before
+  # publishing rather than trusting that whoever tagged had run the suite —
+  # which is the same argument this whole project makes about agents.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - name: The suite must be green at the tag
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee /tmp/pytest.log && exit 0
+          echo "::error title=pytest failed at the tag::$(
+            grep -E '^(FAILED|ERROR)' /tmp/pytest.log | head -20 |
+            tr '\n' '%' | sed 's/%/%0A/g')"
+          exit 1
+      - name: Wringer verifies Wringer
+        run: wring verify
+
+      # The tag must describe the code. A v0.2.0 tag on a tree that says it is
+      # 0.3.0 is exactly the class of mismatch this repo refuses everywhere
+      # else, so it is refused here too.
+      - name: The tag and the package version must agree
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PKG="v$(python -c 'import wringer; print(wringer.__version__)')"
+          echo "tag=$TAG package=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error title=version mismatch::tag $TAG but package $PKG"
+            exit 1
+          fi
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      # Prove the artifact before it leaves: install the built WHEEL into a
+      # clean venv and run the command. `pip install wringer` is what a
+      # stranger gets, and it is the only thing worth checking here.
+      - name: The wheel installs and runs
+        run: |
+          python -m venv /tmp/probe
+          /tmp/probe/bin/pip install --quiet dist/*.whl
+          /tmp/probe/bin/wring --version
+          for c in init verify run fleet resume judge spec plan get issue \
+                   deliver doctor explain; do
+            /tmp/probe/bin/wring "$c" --help > /dev/null || {
+              echo "::error title=missing command::$c"; exit 1; }
+          done
+          echo "all thirteen commands present in the built wheel"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # The only permission that matters: mint an OIDC token for PyPI to
+      # exchange. No secret is read, because there is none.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Draft the release from the tag and the CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          # The annotated tag's own message is the release note; CHANGELOG.md
+          # carries the long form. Neither is regenerated here — a release
+          # note written by CI is a note nobody wrote.
+          git fetch --tags --force
+          git tag -l --format='%(contents)' "$TAG" > /tmp/notes.md
+          gh release create "$TAG" dist/* \
+            --title "$TAG" --notes-file /tmp/notes.md --verify-tag
