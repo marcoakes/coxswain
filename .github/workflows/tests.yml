@@ -45,7 +45,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]'
-      - run: pytest
+      # Logs on this repo are not readable without auth (403 on the API, a
+      # login wall on the web), and a failure annotation carries only "exit
+      # code 1". So a red build cannot be READ, only reproduced — which cost
+      # three builds' worth of guessing. `::error::` messages DO surface
+      # publicly via /check-runs/<id>/annotations, so put the summary there.
+      - name: Run pytest
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee /tmp/pytest.log && exit 0
+          echo "::error title=pytest failed::$(
+            grep -E '^(FAILED|ERROR|E  )' /tmp/pytest.log | head -20 |
+            tr '\n' '%' | sed 's/%/%0A/g')"
+          exit 1
 
   # The Dockerfile's proof. Nobody on the maintainer's Mac can build it —
   # there is no container runtime there — so this job IS the verification,
