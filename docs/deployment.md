@@ -63,7 +63,8 @@ What it does **not** give you, stated plainly:
 IMAGE=ghcr.io/marcoakes/wringer:main
 ```
 
-Pin a version tag; `:latest` follows `main`, and proving a change against a
+Pin by digest for now — **`:main` is the only tag CI publishes**, and it
+moves on every commit. Version tags arrive with 0.2.0. Proving a change against a
 moving harness is not proof. A digest (`@sha256:…`) is better still. The
 published tags are whatever CI has pushed to the repository's package page —
 check there rather than trusting this line.

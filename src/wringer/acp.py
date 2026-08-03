@@ -41,6 +41,13 @@ CLIENT_CAPABILITIES = {"fs": {"readTextFile": True, "writeTextFile": True}}
 # hang for two minutes.
 REQUEST_TIMEOUT_SECONDS = 120
 
+# A ceiling on one message reaching the agent. Writing to a pipe blocks when
+# the buffer fills and the far end has stopped reading, and that block is
+# armed BEFORE any of the turn's deadlines exist — so without this, an agent
+# that hangs without draining stdin wedges the supervisor indefinitely.
+# Short, because a healthy agent drains its input immediately.
+WRITE_TIMEOUT_SECONDS = 30
+
 
 class AcpError(Exception):
     """The agent could not be spoken to. Recorded as a failed worker turn —
@@ -126,14 +133,47 @@ class Connection:
         )
 
     def _write(self, message: dict) -> None:
+        """Send one message, and **never block past the turn's deadline**.
+
+        A pipe write blocks when the buffer fills and the far end has stopped
+        reading. That is not hypothetical: an agent that hangs without draining
+        stdin used to wedge Wringer here *forever*, because both `worker_timeout`
+        and `wall_clock` are only armed once this returns. The supervisor built
+        to honour an eight-hour incident could be held open by the exact shape
+        that caused it.
+
+        So the write happens on a daemon thread and is waited on with the same
+        deadline everything else obeys. If it does not finish, the caller kills
+        the process group and the blocked thread dies with the pipe.
+        """
         stream = self._proc.stdin
         if stream is None:  # pragma: no cover
             raise AcpError("the agent has no stdin")
-        try:
-            stream.write((json.dumps(message) + "\n").encode("utf-8"))
-            stream.flush()
-        except (BrokenPipeError, OSError) as exc:
-            raise AcpError(f"the agent stopped listening: {exc}") from exc
+
+        payload = (json.dumps(message) + "\n").encode("utf-8")
+        failure: list[Exception] = []
+
+        def push() -> None:
+            try:
+                stream.write(payload)
+                stream.flush()
+            except (BrokenPipeError, OSError, ValueError) as exc:
+                failure.append(exc)
+
+        budget = WRITE_TIMEOUT_SECONDS
+        if self._deadline is not None:
+            budget = min(budget, max(0.0, self._deadline - time.monotonic()))
+
+        writer = threading.Thread(target=push, daemon=True)
+        writer.start()
+        writer.join(budget)
+        if writer.is_alive():
+            raise AcpError(
+                "the agent stopped reading its input, so the message could not "
+                f"be sent within {budget:.0f}s — abandoning the turn"
+            )
+        if failure:
+            raise AcpError(f"the agent stopped listening: {failure[0]}")
 
     def _await(self, request_id: int) -> dict:
         """Wait for one response, serving the agent's own requests meanwhile.

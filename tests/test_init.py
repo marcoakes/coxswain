@@ -37,38 +37,37 @@ def test_init_writes_detected_gates_when_it_finds_them(
     assert "lint, test" in out
 
 
-def test_init_keeps_evidence_out_of_git(tmp_path, monkeypatch, capsys):
+def test_init_keeps_evidence_out_of_git(repo, monkeypatch, capsys):
     """A bundle holds raw gate output; a repo that commits it is one push
     away from publishing whatever a gate printed."""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(repo)
 
     assert cli.main(["init"]) == cli.EXIT_OK
 
-    ignored = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    ignored = (repo / ".gitignore").read_text(encoding="utf-8")
     assert ".wringer/" in ignored
     assert ".gitignore" in capsys.readouterr().out
 
 
-def test_init_appends_to_an_existing_gitignore(tmp_path, monkeypatch, capsys):
-    (tmp_path / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
+def test_init_appends_to_an_existing_gitignore(repo, monkeypatch, capsys):
+    (repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
 
     assert cli.main(["init"]) == cli.EXIT_OK
 
-    ignored = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    ignored = (repo / ".gitignore").read_text(encoding="utf-8")
     assert "__pycache__/" in ignored  # what was there is kept
     assert ".wringer/" in ignored
 
 
-def test_init_does_not_duplicate_an_existing_ignore_rule(
-    tmp_path, monkeypatch, capsys
+def test_init_does_not_duplicate_an_existing_ignore_rule(repo, monkeypatch, capsys
 ):
-    (tmp_path / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
 
     assert cli.main(["init"]) == cli.EXIT_OK
 
-    assert (tmp_path / ".gitignore").read_text(encoding="utf-8").count(
+    assert (repo / ".gitignore").read_text(encoding="utf-8").count(
         ".wringer/"
     ) == 1
 
@@ -82,3 +81,20 @@ def test_init_refuses_to_overwrite(tmp_path, monkeypatch, capsys):
     assert "refusing to overwrite" in err
     kept = (tmp_path / config.CONFIG_FILENAME).read_text(encoding="utf-8")
     assert kept == "version: 1\n"
+
+
+def test_init_outside_a_repo_leaves_no_gitignore_and_says_so(
+    tmp_path, monkeypatch, capsys
+):
+    """`.gitignore` in a directory with no git is litter, and it implies a
+    repository that is not there. Worse, `init` used to end by recommending
+    `wring verify`, which then refused with exit 2 — the runbook dead-ended
+    two lines after the command that suggested it."""
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["init"]) == cli.EXIT_OK
+
+    assert not (tmp_path / ".gitignore").exists()
+    out = capsys.readouterr().out
+    assert "not a git repository" in out
+    assert "git init" in out

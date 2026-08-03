@@ -4,21 +4,66 @@
 > repo on 2026-07-30, captured and pasted unedited, in the order shown. The
 > single clearly-marked block at the bottom is not built yet and says so.
 >
-> Installing with `pipx install wringer` requires the PyPI release; until
-> that lands, install from git as below — both give you the same `0.1.0`.
-
 ## Install
 
-Python 3.11+, macOS or Linux.
+**Python 3.11 or newer**, macOS or Linux. Check first — stock macOS ships
+3.9, and the install fails with a bare resolver error rather than a useful
+one:
+
+```bash
+python3 --version        # must be 3.11+
+```
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install "git+https://github.com/marcoakes/wringer"
 ```
 
-That is the form verified for this page. `pipx install
-git+https://github.com/marcoakes/wringer` puts `wring` on your PATH globally
-and installs the same package.
+> **Install from git, not PyPI, for now.** `pip install wringer` gives you
+> **0.1.0**, which has `init`, `verify` and `explain` and none of the rest of
+> this page — no `run`, no `fleet`, no `judge`, no `spec`. The git install
+> gives the current `0.2.0.dev0` with all thirteen commands. PyPI catches up
+> at the 0.2.0 release.
+
+`pipx install git+https://github.com/marcoakes/wringer` puts `wring` on your
+PATH globally and installs the same package.
+
+**The first thing that usually goes wrong** is not Wringer: `wring init`
+detects the commands your project declares, so if it writes a `pytest -q`
+gate and you have not installed your own dev dependencies, `wring verify`
+reports `pytest: command not found` and a failing gate. That is Wringer
+working correctly — it ran what your repo declared. Install your project's
+dependencies into the same environment, or edit `.wringer.yaml`.
+
+## The thirteen commands
+
+This page walks the first five in order. The rest exist and are documented
+where they are used; nothing here is a preview.
+
+| command | does | proves? | network |
+|---|---|---|---|
+| `init` | write a `.wringer.yaml` from what your project already declares | — | no |
+| `verify` | run the declared gates, write an evidence bundle | **yes** | no |
+| `explain` | diagnose a finished run, without an LLM | — | no |
+| `run` | the repair loop: verify → brief → your worker → verify | **yes** | no |
+| `resume` | continue a loop that was killed mid-flight | **yes** | no |
+| `fleet` | many loops under supervision, bounded and self-healing | **yes** | no |
+| `judge` | weigh a finished bundle against a rubric | — | `--send` |
+| `spec` | draft `wringer.spec.yaml` from a PRD, for a human to approve | — | `--send` |
+| `plan` | compile an approved spec into fleet tasks, briefs and a rubric | — | no |
+| `get` | clone a repository into your workspace | — | fetches |
+| `issue` | write a forge issue to a local markdown file | — | fetches |
+| `deliver` | a verified change becomes a branch, a commit and a merge request | — | `--send` |
+| `doctor` | check this machine's preconditions; exit 1 on anything blocking | — | no |
+
+**Nothing in the "proves" column can reach a network.** That is the line
+that matters: the commands that decide whether a change is good run offline,
+and the three that can send need a flag you type and an endpoint your repo
+declared. `get` and `issue` fetch, because fetching is what they are for.
+
+The whole PM path — a PRD or an issue in, a reviewed branch out — is
+[`docs/pm-loop.md`](docs/pm-loop.md) and
+[`docs/issue-to-mr.md`](docs/issue-to-mr.md), both captured end to end.
 
 ## Declare your gates
 

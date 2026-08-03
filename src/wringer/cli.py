@@ -315,9 +315,22 @@ def cmd_init(args: argparse.Namespace) -> int:
             "template. Replace the example gates, then run: wring verify"
         )
 
-    ignored = _ignore_runs(root)
-    if ignored is not None:
-        print(f"Added {evidence.RUNS_DIRNAME.parts[0]}/ to {ignored}")
+    # Only where there is a git repo to ignore things in. Writing a
+    # .gitignore into a plain directory is litter, and it implies a repo that
+    # is not there.
+    if git.is_repo(root):
+        ignored = _ignore_runs(root)
+        if ignored is not None:
+            print(f"Added {evidence.RUNS_DIRNAME.parts[0]}/ to {ignored}")
+    else:
+        # Say it here rather than let `wring verify` refuse with exit 2 two
+        # lines after this command recommended it. The runbook dead-ended.
+        print(
+            f"\nNote: {root} is not a git repository, so `wring verify` will "
+            "refuse —\nverification records which commit and which changes "
+            "were proven. Run\n'git init' first, or run wring from inside "
+            "your repo."
+        )
     return EXIT_OK
 
 

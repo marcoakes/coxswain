@@ -195,15 +195,21 @@ both stop conditions:
 
 The image is built from this repo and published to GitHub Container Registry
 by CI. **It contains no third-party coding agent** — Wringer ships no agent
-binary, in any image, ever. It contains Wringer, a Python runtime, and the
-tools your gates need.
+binary, in any image, ever. It contains Wringer and a Python runtime, and
+**nothing else**: no `ruff`, no `pytest`, no `node`. Your gates run *your*
+repo's commands, so the tools they need come from your repo's environment,
+not from this image. Baking a toolchain in would be the opposite of being
+vendor-neutral — and it would be the wrong toolchain for most people.
 
 ```bash
 export WRINGER_IMAGE="ghcr.io/marcoakes/wringer:main"
 ```
 
-Pin `:latest` to a released tag (`:0.2.0`, say) as soon as you know which
-release you want. `:latest` moves when CI publishes.
+**`:main` is the only tag published today** — CI pushes it on every commit
+to `main`, so it moves. There is no `:latest` and no version tag yet;
+versioned tags arrive with the 0.2.0 release. Until then, pin by digest if
+you need a fixed image: `docker pull ghcr.io/marcoakes/wringer:main` then
+`docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/marcoakes/wringer:main`.
 
 Docker:
 
@@ -321,25 +327,31 @@ Print this to the human, verbatim:
 > Setup is complete. `wring doctor` passes on everything except the API key,
 > which is yours to enter — I never handle it.
 >
-> Run this yourself, in your own terminal, and type your key at the prompt:
+> Run these two yourself, in your own terminal. The first prompts for your
+> key and does not echo it; the second starts the harness with it.
 >
 > ```
-> wring start
+> read -rs -p "API key: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+> docker run --rm -it \
+>   --user "$(id -u):$(id -g)" -e HOME=/tmp \
+>   -e ANTHROPIC_API_KEY \
+>   -v "$PWD:/workspace" ghcr.io/marcoakes/wringer:main verify
 > ```
 >
 > What you type at that prompt is not visible to me, is not written into this
-> repository, and is not saved to any file I can read.
+> repository, and is not saved to any file I can read. `read -rs` keeps it out
+> of your shell history too.
 
-`wring start` is the guided launch: it prompts for the key and passes it to
-the container as an environment variable at launch — where Wringer's
-redactor already folds it into the set of values scrubbed out of every
-evidence bundle *before* anything is written to disk. See
-[SECURITY.md](SECURITY.md).
+The key reaches the container as an environment variable, where Wringer's
+redactor folds it into the set of values scrubbed out of every evidence
+bundle *before* anything is written to disk. See [SECURITY.md](SECURITY.md).
 
-If `wring start` is not listed in `wring --help` for the version you
-installed, the harness still works: the human launches the container
-themselves and puts the key into its environment in their own shell. It is
-still their command to type, not the agent's.
+> **On `wring start`.** Earlier drafts of this runbook ended by telling the
+> human to run `wring start`. That command is **not built yet** — it is P4 —
+> and typing it gets `invalid choice: 'start'`. The two commands above are
+> what the guided launch will eventually wrap. When `wring start` ships, this
+> step becomes it; until then, the key is still the human's to type and this
+> is still their command, not the agent's.
 
 ## What good looks like
 
@@ -352,11 +364,26 @@ disk.
 > verify their repo — the container bounds the damage, it does not make the
 > commands safe. See [SECURITY.md](SECURITY.md).
 
+> **The image ships Wringer, not your toolchain.** It has no `ruff`, no
+> `pytest`, no `node` — deliberately: Wringer runs *your repo's* declared
+> commands, and guessing which languages to bake in is the opposite of being
+> vendor-neutral. So a gate that needs a tool needs that tool present, which
+> for a real project means installing your dependencies into the workspace
+> first, or mounting an environment that already has them. The check below
+> uses a gate that needs nothing, so it tests the harness rather than your
+> toolchain.
+
 ```bash
-cd ~/wringer-workspace
-git clone https://github.com/marcoakes/wringer.git      # or any repo of yours
-docker run --rm -v "$HOME/wringer-workspace:/workspace" \
-  -w /workspace/wringer "$WRINGER_IMAGE" verify
+mkdir -p ~/wringer-workspace/probe && cd ~/wringer-workspace/probe
+git init -q -b main .
+git config user.email you@example.com && git config user.name "You"
+printf 'def add(a, b):\n    return a + b\n' > calc.py
+printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml
+git add -A && git commit -qm probe
+
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  -v "$HOME/wringer-workspace:/workspace" \
+  -w /workspace/probe "$WRINGER_IMAGE" verify
 ```
 
 Apple container: same arguments, `container run --rm --volume … --workdir …`.
@@ -364,15 +391,21 @@ Apple container: same arguments, `container run --rm --volume … --workdir …`
 Correct output — one line per declared gate, then a path:
 
 ```
-✓ lint passed        0.1s
-✓ test passed       17.6s
+✓ check passed       0.0s
 
 Evidence written to:
 .wringer/runs/<run_id>/
 ```
 
-Exit code `0`. Durations and the run id will differ from what is shown here;
-the shape will not.
+Exit code `0`. The duration and the run id will differ from what is shown
+here; the shape will not.
+
+**`--user` and `-e HOME` are not ceremony.** The image runs as uid 1000, a
+bind-mounted directory keeps its *host* ownership, and Wringer must write its
+evidence into that mount. Without them the workspace is read-only to the
+container and `wring doctor` correctly reports a blocking problem. Docker
+Desktop on macOS papers over this with uid mapping; Linux does not. This is
+the recipe CI exercises on every push.
 
 Then, back on the host:
 

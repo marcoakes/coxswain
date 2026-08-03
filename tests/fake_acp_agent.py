@@ -91,6 +91,14 @@ def main() -> int:
             if BEHAVIOUR == "crash":
                 return 3
             reply(request_id, {"sessionId": session_id})
+            if BEHAVIOUR == "deaf":
+                # Answer, then stop reading stdin FOREVER. The client's next
+                # write fills the pipe buffer and blocks — and that block is
+                # armed before any of the turn's deadlines exist, so without a
+                # bounded write nothing ever fires. The eight-hour incident's
+                # shape, in the seam built to honour its lessons.
+                time.sleep(3600)
+                return 0
         elif method == "session/prompt":
             if BEHAVIOUR == "hang":
                 # accept, then never answer: the client's request timeout and
