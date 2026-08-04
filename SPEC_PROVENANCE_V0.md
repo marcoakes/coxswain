@@ -53,6 +53,26 @@ Exit codes, the family's: `0` ok / attestation verifies · `1` **refused or
 failed** — the bundle cannot be attested, or the audit found a mismatch ·
 `2` config/environment · `4` interrupted.
 
+## 2a. Prerequisite recording fixes (part of this slice, before `attest`)
+
+The review that fed this spec confirmed the gaps precisely
+(`wdneldem0.output`, Q1): today **only the verify bundle has digests**.
+`attest`'s refusal rules would therefore refuse every judged clause. So
+this slice first extends the existing machinery — all sibling-file or
+code-only, no frozen schema touched:
+
+- `judge.Bundle`, `deliver.Bundle`, loop and fleet bundles gain the same
+  `write_digests()` the verify bundle has, written last.
+- The delivery's MR body currently embeds whichever verdict is *newest*,
+  never matched to the delivered run (`deliver.py:_verdict`). Match on the
+  verdict's `evidence_dir` or embed nothing — a verdict about a different
+  change is worse than none.
+- `spec_sha256` hashes the file without parsing it: an *unapproved* spec
+  hashes identically to an approved one. Attest must load the spec and
+  refuse the `authorized_by` clause when `approved` is not true.
+- Fix `_clear_previous` to clear `digests.json` in reused `--output` dirs
+  (confirmed stale-digest bug — poisonous once `audit` exists).
+
 ## 3. `wring attest`
 
 Reads the anchor bundle and follows its recorded links: a delivery names
