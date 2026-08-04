@@ -3,9 +3,24 @@
 *Written 2026-08-03. **Not posted.** Posting is Marc's, and so is the final
 wording — this is a starting point with every number checked, not a script.*
 
-**Do not post until `pip install wringer` gives 0.2.0.** The whole piece
-points at a thing people can install; if they install 0.1.0 they get three of
-thirteen commands and none of the story below.
+**✅ The precondition is met (2026-08-03).** `pip install wringer` gives
+0.2.0 with all thirteen commands — verified from the index, cache off, by
+`scripts/verify-published.sh`. Checked at the same time, because the post
+leans on all of it:
+
+| what the post points at | state |
+|---|---|
+| `pip install wringer` | **0.2.0**, PyYAML the only runtime dep |
+| GitHub release `v0.2.0` | published, wheel + sdist attached |
+| the RFC issues (the standards line) | **3 open** — #1 loop contract, #2 evidence bundle, #3 gate plugin |
+| README / QUICKSTART / SETUP / SECURITY | corrected `e087d1a`; none still says "install from git, not PyPI" |
+| the demo the README opens with | `docs/demo.svg`, real capture, regenerable |
+
+**One judgement left, and it is Marc's alone: the incident numbers.** 24
+agents, 4 results, 20 identical retries, 8 hours, 50 KB blobs. They are true
+and they are verified in the session history of 2026-07-30/31 — but **nothing
+in this repository evidences them**, so on Hacker News they stand on his word.
+That is a fine thing to post; it is not a thing to post accidentally.
 
 ---
 
