@@ -21,39 +21,75 @@ from pathlib import Path
 
 from wringer import __version__, config, evidence
 
-OK, WARN, FAIL = "ok", "warn", "fail"
+OK, WARN, FAIL, SKIP = "ok", "warn", "fail", "skip"
+
+# What a check is asking about. MACHINE checks are true of the computer and
+# are what `wring doctor` promises to answer — "machine-checkable
+# preconditions". REPO checks describe the directory you are standing in.
+#
+# The split is not cosmetic. Run from outside a repository, doctor used to
+# exit 1 on a blocking ✗ that meant only "you are not in a repo" — so a
+# setup runbook that said `mkdir workspace` and then `wring doctor` stopped
+# on a problem that did not exist. Reported by a real first run, 2026-08-04.
+MACHINE, REPO = "machine", "repo"
 
 
 @dataclass(frozen=True)
 class Check:
     """One question, its answer, and what to do about it.
 
-    `status` is `ok`, `warn` (usable but worth knowing) or `fail` (this will
-    stop you). Only `fail` changes the exit code — a warning that blocks a
-    setup script is a warning nobody keeps.
+    `status` is `ok`, `warn` (usable but worth knowing), `fail` (this will
+    stop you), or `skip` (not applicable here, and why). Only `fail` changes
+    the exit code — a warning that blocks a setup script is a warning nobody
+    keeps, and a skipped check has answered nothing to block on.
     """
 
     name: str
     status: str
     detail: str
     fix: str = ""
+    scope: str = MACHINE
 
     @property
     def passed(self) -> bool:
         return self.status != FAIL
 
 
+def in_repository(root: Path) -> bool:
+    inside = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=root, capture_output=True, text=True,
+    )
+    return inside.returncode == 0 and inside.stdout.strip() == "true"
+
+
 def run_checks(root: Path) -> list[Check]:
-    return [
-        _python(),
-        _wring(),
-        _git(),
-        _runtime(),
-        _repo(root),
-        _config(root),
-        _workspace(root),
-        _api_key(),
-    ]
+    """Every check, with the repo-scoped ones skipped outside a repository.
+
+    Skipped rather than failed: `wring doctor` in your home directory is a
+    question about the machine, and answering "this is not a repo" with a
+    blocking ✗ makes a true statement into a false problem.
+    """
+    here = in_repository(root)
+    machine = [_python(), _wring(), _git(), _runtime(), _api_key()]
+    if not here:
+        skipped = [
+            Check(name, SKIP, "not a git repository — run from your repo to check",
+                  fix="", scope=REPO)
+            for name in ("git repository", "gates", "workspace writable")
+        ]
+        return machine[:4] + skipped + machine[4:]
+    return machine[:4] + [_repo(root), _config(root), _workspace(root)] + machine[4:]
+
+
+def check_names() -> tuple[str, ...]:
+    """Every name `doctor` can print, in order. Published so documentation
+    can be tested against it — SETUP.md once illustrated checks that did not
+    exist, which is how it came to claim doctor verifies the image pull."""
+    return (
+        "python", "wring", "git", "container runtime",
+        "git repository", "gates", "workspace writable", "llm key",
+    )
 
 
 def _python() -> Check:
@@ -192,7 +228,7 @@ def _api_key() -> Check:
 
 
 def report(checks: list[Check]) -> str:
-    mark = {OK: "✓", WARN: "!", FAIL: "✗"}
+    mark = {OK: "✓", WARN: "!", FAIL: "✗", SKIP: "-"}
     lines = []
     for check in checks:
         label = f"{mark[check.status]} {check.name}"
@@ -201,11 +237,18 @@ def report(checks: list[Check]) -> str:
             lines.append(f"{'':<24}→ {check.fix}")
     failed = [c for c in checks if c.status == FAIL]
     warned = [c for c in checks if c.status == WARN]
+    skipped = [c for c in checks if c.status == SKIP]
     lines.append("")
     if failed:
         lines.append(
             f"{len(failed)} blocking problem"
             f"{'' if len(failed) == 1 else 's'} — fix the ✗ lines above."
+        )
+    elif skipped:
+        lines.append(
+            "This machine is ready. The - lines describe a repository and "
+            "were not checked here — run `wring doctor` from your repo for "
+            "those."
         )
     elif warned:
         lines.append("Ready. The ! lines are optional extras, not problems.")

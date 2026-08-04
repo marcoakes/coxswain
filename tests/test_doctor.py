@@ -30,11 +30,18 @@ def test_a_healthy_repo_passes_every_blocking_check(repo, write_config):
     assert named["workspace writable"].status == doctor.OK
 
 
-def test_outside_a_repository_is_a_blocking_failure(tmp_path):
+def test_outside_a_repository_the_repo_checks_are_skipped(tmp_path):
+    """Was: a blocking failure. A real first run showed that made the runbook
+    stop on a false problem — `wring doctor` in a workspace directory is a
+    question about the MACHINE, and "this is not a repo" does not block it."""
     checks = by_name(doctor.run_checks(tmp_path))
 
-    assert checks["git repository"].status == doctor.FAIL
-    assert "git init" in checks["git repository"].fix
+    assert checks["git repository"].status == doctor.SKIP
+    assert checks["git repository"].scope == doctor.REPO
+    assert "run from your repo" in checks["git repository"].detail
+    # and nothing about the machine was skipped along with it
+    assert checks["python"].scope == doctor.MACHINE
+    assert checks["python"].status in (doctor.OK, doctor.FAIL)
 
 
 def test_a_missing_config_is_a_warning_not_a_failure(repo):
@@ -109,9 +116,12 @@ def test_json_is_machine_readable_and_complete(repo, write_config, monkeypatch,
 def test_the_exit_code_is_what_a_setup_script_branches_on(
     tmp_path, monkeypatch, capsys
 ):
-    """Outside a repo there is a blocking problem, so doctor must say so in
-    its exit code — an agent should not have to read English to find out."""
+    """A real blocking problem must reach the exit code — an agent should not
+    have to read English to find out. Not being in a repo is not one of
+    those; a missing git binary is."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which",
+                        lambda name: None if name == "git" else "/usr/bin/x")
 
     assert cli.main(["doctor"]) == cli.EXIT_GATE_FAILED
 
@@ -144,3 +154,129 @@ def test_doctor_repairs_nothing(repo, monkeypatch, capsys):
     # the probe's parent, but nothing else may appear
     assert set(after) - set(before) <= {".wringer"}
     assert not (repo / "config.CONFIG_FILENAME").exists()
+
+
+# --- the runbook must describe the tool that exists -----------------------
+#
+# A real first run on a fresh Mac (2026-08-04) found SETUP.md illustrating
+# `wring doctor` output containing an image check and a platform check that
+# do not exist, and `✗ api key` where the real check is a `! llm key` warn.
+# The transcript had been WRITTEN rather than captured — law 8's failure mode,
+# in the one document whose whole job is to be followed literally.
+#
+# Consequence: SETUP claimed doctor "is how every later step gets checked",
+# but doctor cannot see the image pull, and exits 0 with no runtime at all.
+# These tests make the documentation testable so the class cannot recur.
+
+DOCS_WITH_DOCTOR_OUTPUT = ("SETUP.md", "QUICKSTART.md", "README.md")
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def cited_check_names(text: str) -> set[str]:
+    """Every check name a document illustrates in a doctor transcript.
+
+    Scoped to fenced blocks that actually show a `wring doctor` run, because
+    a prose bullet starting with "- " has the same shape as a skipped check
+    and markdown is full of them.
+    """
+    import re
+
+    names: set[str] = set()
+    for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.DOTALL):
+        if "wring doctor" not in block and "doctor" not in block.split("\n")[0]:
+            # a transcript of some other command
+            if not re.search(r"^[✓!]\s+(python|git|wring|container runtime)\b",
+                             block, re.MULTILINE):
+                continue
+        for line in block.splitlines():
+            m = re.match(r"^([✓!✗-])\s+([a-z][a-z ]{1,28}?)\s{2,}\S", line)
+            if m:
+                names.add(m.group(2).strip())
+    return names
+
+
+def test_every_doctor_check_a_doc_illustrates_actually_exists():
+    """The guard. If a document shows a check, `wring doctor` must have it."""
+    real = set(doctor.check_names())
+    offenders: list[str] = []
+    for name in DOCS_WITH_DOCTOR_OUTPUT:
+        path = repo_root() / name
+        if not path.is_file():
+            continue
+        for cited in cited_check_names(path.read_text(encoding="utf-8")):
+            if cited not in real:
+                offenders.append(f"{name} illustrates '{cited}'")
+    assert not offenders, (
+        "documentation shows doctor checks that do not exist: "
+        + "; ".join(sorted(offenders))
+        + f"\nreal checks: {sorted(real)}"
+    )
+
+
+def test_check_names_matches_what_run_checks_emits(repo, monkeypatch):
+    """`check_names()` is what the guard above trusts, so it must not drift
+    from the checks actually produced."""
+    monkeypatch.chdir(repo)
+    emitted = [c.name for c in doctor.run_checks(repo)]
+    assert sorted(emitted) == sorted(doctor.check_names())
+
+
+# --- doctor outside a repository ------------------------------------------
+
+
+def test_doctor_outside_a_repo_skips_repo_checks_and_exits_zero(
+    tmp_path, monkeypatch, capsys
+):
+    """The fresh-Mac failure. The runbook says to create a workspace and then
+    run doctor; doing so exited 1 on a blocking ✗ that meant only 'you are
+    not in a repo', and the runbook's own stop rule then halted setup on a
+    problem that did not exist."""
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["doctor"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    for repo_check in ("git repository", "gates", "workspace writable"):
+        assert f"- {repo_check}" in out, f"{repo_check} should be skipped, not failed"
+    assert "not a git repository — run from your repo" in out
+    assert "This machine is ready" in out
+    # the machine checks still ran and still answer
+    assert "✓ python" in out
+    assert "✗" not in out
+
+
+def test_doctor_inside_a_repo_still_runs_every_check(repo, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["doctor"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "✓ git repository" in out
+    assert "- git repository" not in out
+    assert "workspace writable" in out
+
+
+def test_a_real_machine_failure_still_blocks(tmp_path, monkeypatch, capsys):
+    """Skipping repo checks must not have made doctor unable to fail."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which",
+                        lambda name: None if name == "git" else "/usr/bin/x")
+
+    assert cli.main(["doctor"]) == cli.EXIT_GATE_FAILED
+
+    assert "✗ git" in capsys.readouterr().out
+
+
+def test_the_json_shape_carries_skip(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["doctor", "--json"]) == cli.EXIT_OK
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    statuses = {c["name"]: c["status"] for c in payload["checks"]}
+    assert statuses["git repository"] == doctor.SKIP
+    assert statuses["python"] == doctor.OK
