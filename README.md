@@ -10,10 +10,11 @@ for product managers, designers and engineers.**
 
 [![tests](https://github.com/marcoakes/wringer/actions/workflows/tests.yml/badge.svg)](https://github.com/marcoakes/wringer/actions/workflows/tests.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![v0.1.0: Sep 30, 2026](https://img.shields.io/badge/v0.1.0-Sep%2030%2C%202026-orange.svg)](ROADMAP.md)
+[![PyPI](https://img.shields.io/pypi/v/wringer.svg)](https://pypi.org/project/wringer/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://pypi.org/project/wringer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Quickstart](QUICKSTART.md) · [v0 spec](SPEC_VERIFY_V0.md) · [90-day roadmap](ROADMAP.md) · [Security](SECURITY.md) · [vs LangGraph](docs/wringer-vs-langgraph.md) · [Build plan](wringer-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/wringer/issues?q=is%3Aissue+RFC)
+[Quickstart](QUICKSTART.md) · [Changelog](CHANGELOG.md) · [v0 spec](SPEC_VERIFY_V0.md) · [90-day roadmap](ROADMAP.md) · [Security](SECURITY.md) · [vs LangGraph](docs/wringer-vs-langgraph.md) · [Build plan](wringer-ai-dlc-harness-plan.md) · [RFCs](https://github.com/marcoakes/wringer/issues?q=is%3Aissue+RFC)
 
 </div>
 
@@ -45,7 +46,8 @@ green — and a bundle on disk to check the claim against. Regenerate it with
 
 ## What ships first
 
-**Proof beats orchestration.** v0.1.0 is a standalone evidence compiler — one command:
+**Proof beats orchestration.** `pip install wringer` — **0.2.0, thirteen commands, out now.**
+It began as one command, and that command is still the core of it:
 
 > *One command that proves whether this change is mergeable, and leaves behind evidence a human or agent can inspect.*
 
@@ -75,11 +77,11 @@ Next:
 
 Exit code `1`, and a bundle on disk that a human or an agent can read: `summary.md` for the person reviewing, timestamped `evidence.jsonl` for the machine, `diff.patch` and `status.txt` for what was being verified, per-gate logs for what happened. `wring explain` replays the diagnosis without an LLM; `wring verify --json` emits one object for an agent to act on. The full transcript — and what is still unbuilt — is in the [quickstart](QUICKSTART.md).
 
-It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM and no network in any command that **proves** anything — `verify`, `run`, `resume`, `fleet` and `plan` cannot reach one. Nothing leaves your machine without a flag you type: `wring judge --send`, `wring spec --send` and `wring deliver --send` are the three that send, each writes the exact bytes to disk first, and each needs an endpoint your repo declared. Two commands fetch, because fetching is what they are for: `wring get` clones, `wring issue` reads one issue. Every socket in the program lives in two functions you can find with one grep. After an AI coding session, `wring verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)** — including the release bar: *Wringer verifies Wringer, in CI, with the demo bundle committed, before v0.1.0 tags.*
+It runs your project's declared gates (build · test · lint) in order and writes a portable evidence bundle — `manifest.json`, `evidence.jsonl`, `summary.md`, `diff.patch`, `status.txt`, and per-gate stdout/stderr/`result.json` — around **any** session: Claude Code, Codex CLI, Gemini CLI, or a human. No LLM and no network in any command that **proves** anything — `verify`, `run`, `resume`, `fleet` and `plan` cannot reach one. Nothing leaves your machine without a flag you type: `wring judge --send`, `wring spec --send` and `wring deliver --send` are the three that send, each writes the exact bytes to disk first, and each needs an endpoint your repo declared. Two commands fetch, because fetching is what they are for: `wring get` clones, `wring issue` reads one issue. Every socket in the program lives in two functions you can find with one grep. After an AI coding session, `wring verify` leaves a cleaner, more reviewable truth trail than the agent's own summary. The binding implementation contract is **[SPEC_VERIFY_V0.md](SPEC_VERIFY_V0.md)** — including the release bar it had to clear before tagging: *Wringer verifies Wringer, in CI, with the demo bundle committed.* It did, and still does on every push.
 
 > ⚠️ **`.wringer.yaml` is code.** `wring verify` runs the commands a repository declares, through a shell, with your privileges — the same trust you extend to its `Makefile`. Read a stranger's `.wringer.yaml` before running `wring verify` in their repo. Gates are not sandboxed in v0.1; see [SECURITY.md](SECURITY.md), which also explains why an evidence bundle should be read before you share it.
 
-Then the loop closes: `wring run` is just a loop that keeps calling `wring verify` until the evidence says stop — worker (your existing coding agent; Wringer never ships its own) → gates → isolated rubric judge → iterate or exit → MR with the receipts attached. **`v0.1.0` no later than September 30, 2026** — see the [90-day roadmap](ROADMAP.md) and the [quickstart](QUICKSTART.md).
+Then the loop closes: `wring run` is just a loop that keeps calling `wring verify` until the evidence says stop — worker (your existing coding agent; Wringer never ships its own) → gates → isolated rubric judge → iterate or exit → MR with the receipts attached. All of that ships today: `run`, `resume`, `fleet`, `judge`, `spec`, `plan`, `get`, `issue`, `deliver` — see the [changelog](CHANGELOG.md) and the [quickstart](QUICKSTART.md).
 
 ## Wringer verifies Wringer
 

@@ -15,18 +15,23 @@ python3 --version        # must be 3.11+
 ```
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install "git+https://github.com/marcoakes/wringer"
+pipx install wringer     # or: pip install wringer
 ```
 
-> **Install from git, not PyPI, for now.** `pip install wringer` gives you
-> **0.1.0**, which has `init`, `verify` and `explain` and none of the rest of
-> this page — no `run`, no `fleet`, no `judge`, no `spec`. The git install
-> gives the current `0.2.0.dev0` with all thirteen commands. PyPI catches up
-> at the 0.2.0 release.
+That is **0.2.0**, all thirteen commands, and its only runtime dependency is
+PyYAML. `pipx` puts `wring` on your PATH globally and keeps it out of your
+system Python; `pip install wringer` into a venv works identically.
 
-`pipx install git+https://github.com/marcoakes/wringer` puts `wring` on your
-PATH globally and installs the same package.
+Verify it:
+
+```bash
+wring --version          # wring 0.2.0
+```
+
+> **Installing from git** — `pip install "git+https://github.com/marcoakes/wringer"`
+> — gets you whatever is on `main`, which is ahead of the release and
+> occasionally mid-slice. Use it to try something unreleased; use PyPI
+> otherwise.
 
 **The first thing that usually goes wrong** is not Wringer: `wring init`
 detects the commands your project declares, so if it writes a `pytest -q`
@@ -390,11 +395,10 @@ wring verify --changed-only  # gate only what changed
 
 It is deliberately unbuilt: the spec names the flag but never defines what
 "changed" should mean, and a flag that half-works is worse than a missing
-one when agents consume the CLI. `pipx install wringer` from PyPI is the
-other outstanding item — install from git until then. The release bar is
-the spec's
+one when agents consume the CLI. The release bar is the spec's
 [Definition of PROVEN](SPEC_VERIFY_V0.md#definition-of-proven--the-repo-must-show-its-own-receipts),
-and every line except the PyPI publish is now ticked.
+and every line of it is ticked — including the PyPI publish, which landed
+with 0.2.0 on 2026-08-03.
 
 ## Secrets
 

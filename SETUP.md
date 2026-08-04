@@ -98,11 +98,18 @@ fallback.
 ## Step 3 — Install `wring` on the host
 
 The host copy is what runs `wring doctor`, which is how every later step gets
-checked. Install from **this clone**, not from PyPI — PyPI still carries
-`0.1.0`, which has no `doctor`.
+checked.
 
 With pipx (preferred — puts `wring` on your PATH and keeps it out of the
 system Python):
+
+```bash
+pipx install wringer
+```
+
+That is 0.2.0 from PyPI, and it has `doctor`. **Install from this clone
+instead** — `pipx install --force .` — only if you are setting up against
+unreleased work on `main`:
 
 ```bash
 pipx install --force .

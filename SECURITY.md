@@ -116,10 +116,17 @@ turn them into text.
 
 ## Supported versions
 
-Pre-1.0, only the tip of `main` is supported. There are no released
-versions yet, so there is nothing to backport to; fixes land on `main`.
+Pre-1.0, **only the newest release and the tip of `main` are supported.**
+Fixes land on `main` and reach you in the next release; nothing is
+backported to an older one.
 
 | Version | Supported |
 |---|---|
 | `main` | ✅ |
-| `0.1.0.dev*` (git installs) | reinstall from `main` |
+| `0.2.0` (PyPI, current) | ✅ |
+| `0.1.0` (PyPI) | upgrade — `pip install -U wringer` |
+| `*.dev*` (git installs) | reinstall from `main` or PyPI |
+
+Upgrading from 0.1.0 needs nothing: `wring verify` behaves as it did, its
+bundles stay readable, and every command added since is opt-in. See
+[CHANGELOG.md](CHANGELOG.md).
