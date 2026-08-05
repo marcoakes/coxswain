@@ -28,12 +28,13 @@ Two runtimes are covered, and one image serves both:
 
 - **Docker** — Linux, macOS, and Windows under WSL2. This is the path
   exercised in CI.
-- **Apple `container`** (v1.0+) — **macOS 26 on Apple silicon only.**
-  **This path is not exercised in CI.** GitHub's macOS runners have no
-  nested virtualization, so nothing automated ever runs it. It is verified
-  by `wring doctor` and by the manual check in step 7 — that is the whole
-  of its coverage. If it breaks for you, that is a real bug worth
-  reporting, not something you did wrong.
+- **Apple `container`** (1.2.0; the commands here were verified against
+  1.2.0) — **macOS 26 on Apple silicon only.** **This path is not exercised
+  in CI.** GitHub's macOS runners have no nested virtualization, so nothing
+  automated ever runs it. It is verified by `wring doctor`, by the manual
+  check in step 7, and by one field run on macOS 26.5.2 / arm64 on
+  2026-08-05 — that is the whole of its coverage. If it breaks for you, that
+  is a real bug worth reporting, not something you did wrong.
 
 The same OCI image also runs under Kubernetes. That is a deployment concern
 and is out of scope here.
@@ -190,10 +191,29 @@ Do exactly one of 4A and 4B.
 container --version
 ```
 
-Correct output: a version line, `1.0.0` or later. `command not found` is a
-**stop condition**: Apple publishes `container` as a signed package at
-<https://github.com/apple/container/releases>. Tell the human; let them
-install it. Do not download or run an installer on their behalf.
+Correct output: a version line, `1.2.0` or later — e.g.
+`container CLI version 1.2.0 (build: release, commit: unspeci)`. The
+truncated `unspeci` is Apple's own output, not damage.
+
+`command not found` is **not** a dead end, but installing it is the
+human's call. Two routes, and the first is much lighter:
+
+- **Homebrew (preferred)** — a bottled `homebrew-core` formula, no admin
+  password, installs into Homebrew's own prefix. It is a *formula*, not a
+  cask:
+
+  ```bash
+  brew install container
+  ```
+
+  `container` then resolves if `/opt/homebrew/bin` is on your `PATH`;
+  otherwise it is at `/opt/homebrew/opt/container/bin/container`.
+
+- **Signed package from Apple** — 95.9 MB, needs your admin password:
+  <https://github.com/apple/container/releases>.
+
+Either way the install is **the human's to run**. Do not download or run
+an installer on their behalf.
 
 Start the service (idempotent — starting a started service is a no-op):
 
@@ -201,15 +221,32 @@ Start the service (idempotent — starting a started service is a no-op):
 container system start
 ```
 
+The formula also offers `brew services start container`, which
+additionally restarts it at login. Either is fine; pick one.
+
 Verify:
 
 ```bash
 container system status
 ```
 
-Correct output: a status line reporting the service is running. If it
-reports stopped, run `container system start` once more and read its output.
-Do not loop.
+Correct output is a **table**, not a single line. The row that matters is
+`status  running`:
+
+```
+FIELD              VALUE
+status             running
+appRoot            /Users/you/Library/Application Support/com.apple.container/
+installRoot        /opt/homebrew/Cellar/container/1.2.0/
+logRoot
+apiserver.version  container-apiserver version 1.2.0 (build: release, commit: unspeci)
+apiserver.commit   unspecified
+apiserver.build    release
+apiserver.appName  container-apiserver
+```
+
+A blank `logRoot` is normal. If `status` reports stopped, run
+`container system start` once more and read its output. Do not loop.
 
 ### Step 4B — Docker
 
@@ -260,12 +297,6 @@ Docker:
 docker pull ghcr.io/marcoakes/wringer:main
 ```
 
-Apple container:
-
-```bash
-container image pull ghcr.io/marcoakes/wringer:main
-```
-
 Pulling an image you already have is a no-op.
 
 Verify — Docker:
@@ -274,16 +305,37 @@ Verify — Docker:
 docker image inspect ghcr.io/marcoakes/wringer:main --format '{{.Id}}'
 ```
 
-Apple container:
+Correct output: an image id. "No such image" means the pull did not
+succeed — read the pull command's own output rather than retrying. A
+`401`/`403` from ghcr means the package is private or the tag does not
+exist; that is a report, not a retry.
+
+Apple container — note the subcommand is `image`, **singular**:
+
+```bash
+container image pull ghcr.io/marcoakes/wringer:main
+```
+
+Pulling an image you already have is a no-op. Apple `container` unpacks
+**every** architecture in the index, so this 160 MB pull lands as roughly
+470 MB on disk (amd64 and arm64 both); Docker unpacks only the platform it
+needs.
+
+Verify — Apple container:
 
 ```bash
 container image list | grep wringer
 ```
 
-Correct output: an image id, or a row naming the image. "No such image"
-means the pull did not succeed — read the pull command's own output rather
-than retrying. A `401`/`403` from ghcr means the package is private or the
-tag does not exist; that is a report, not a retry.
+Correct output: one row naming the image, e.g.
+`ghcr.io/marcoakes/wringer  main  2a9dd63bd91b`.
+
+> **`container images` does not exist.** With the plural you get
+> `Error: Plugin 'container-images' not found.` and exit 64 on the pull,
+> and *silence* on the list — the error goes to stderr, so `| grep` yields
+> nothing and looks like a failed pull. The error also tells you to go
+> hunting for a missing plugin; ignore that, it is the wrong diagnosis.
+> The subcommand is `image` (alias `i`).
 
 ## Step 6 — Create the workspace
 
@@ -318,9 +370,28 @@ container run --rm --volume "$HOME/wringer-workspace:/workspace" --workdir /work
 ```
 
 Correct output: the same `wring 0.2…` line step 3 printed, this time from
-inside the container. No key is involved and no network call is made —
-this proves the box starts and the mount resolves, and nothing more than
-that.
+inside the container.
+
+**The first `container run` on a machine does extra setup work** — it
+fetches a kernel and a ~66 MB init image, behind a six-stage progress
+ladder. This is expected, happens once, and takes about ten seconds:
+
+```
+[0/6] [0s]
+[1/6] Fetching image [0s]
+[2/6] Unpacking image [0s]
+[3/6] Fetching kernel [0s]
+[4/6] Fetching init image [0s]
+[4/6] Fetching init image 66% (3 of 4 blobs, 43.5/65.8 MB, 42.0 MB/s) [8s]
+[5/6] Unpacking init image [8s]
+[5/6] Unpacking init image for platform linux/arm64/v8 [8s]
+[6/6] Starting container [9s]
+wring 0.2.0
+```
+
+Later runs skip stages 3 to 5 and start in under a second. No key is
+involved and no network call is made by `wring` itself — this proves the
+box starts and the mount resolves, and nothing more than that.
 
 ## Step 7H — No runtime? Prove it on the host instead
 
