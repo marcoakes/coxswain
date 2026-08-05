@@ -1,8 +1,8 @@
 # SPEC — vacuity detection (P5, part 2)
 
-*Drafted 2026-08-03 by the planning window. **Ruling 1 decided by Marc
-2026-08-05 (§3a, §5). DRAFT on rulings 2 and 3; not binding until he says
-so.** His remaining open rulings are marked ⚖.*
+*Drafted 2026-08-03 by the planning window. **Rulings 1 and 2 decided by
+Marc 2026-08-05 (§3a, §3b, §5). DRAFT on ruling 3; not binding until he
+says so.** His one remaining open ruling is marked ⚖.*
 
 ## Positioning
 
@@ -60,7 +60,7 @@ test extends.
   a converged-but-vacuous iteration does not converge; the worker gets a
   brief that says *"write a test that fails without your change"* and the
   loop continues. The plateau fingerprint already prevents thrash.
-- `wring deliver` — ⚖ ruling 2.
+- **`wring deliver` refuses a `gates_vacuous` bundle** — see §3b.
 
 ## 3a. How it is switched on — BINDING (ruling 1)
 
@@ -102,6 +102,55 @@ the user fixes it; this one would never disappear unless they accept
 doubled gate time, so it would be permanent noise — and a warning nobody
 can act on is one everybody learns to skip.
 
+## 3b. `wring deliver` refuses a vacuous run — BINDING (ruling 2)
+
+A bundle whose `vacuity.json` reads `gates_vacuous` is not deliverable.
+`Refused`, exit 1 — the same family as *"its gates did not pass"*, sitting
+directly beside it in `deliver.py`, because it is the same statement: this
+bundle is not evidence that the change is mergeable.
+
+**There is no `--allow-vacuous`, and that is not an oversight.** Ruling 1
+established that flags may tighten and never loosen; a flag that waves this
+refusal through would be the first counter-example, in the same spec, one
+section later. `wring deliver` has never had an `--ignore-failures` for a
+failed gate either. The escape from this refusal is the same as the escape
+from that one: **make the evidence better, not the check weaker.** Write a
+test that fails without the change, verify again, deliver.
+
+### The trap, and why this framing defuses it
+
+The honest objection to this ruling is that turning on `--prove` to *learn*
+something also, implicitly, blocks your delivery path — a strictness the
+repo never explicitly chose.
+
+The framing that resolves it: **the refusal attaches to the bundle, not to
+the user or the flag.** A run without `--prove` writes no `vacuity.json`,
+so `wring deliver` behaves exactly as it does today — unchanged, for every
+repo that has not opted in. The strictness applies only to runs that
+actually measured, and only when the measurement came back saying nothing
+was proven. Nobody is blocked for asking the question; they are blocked by
+the answer, which is the correct thing to be blocked by.
+
+### The refusal must be actionable
+
+A refusal that only says *no* converts this feature into something people
+turn off. It names, in the message: the verdict, **which gates were
+insensitive**, the one-line fix (*"write a test that fails without your
+change"*), and the path to `vacuity/` so the reader can see both trees'
+output. Same standard as the failing-gate refusal, which already names the
+gate rather than saying "a gate failed".
+
+### Known limit, recorded rather than closed
+
+In a repo that declared `run.prove: true`, a plain `wring verify` bundle
+carries no vacuity verdict at all, so it delivers. The declaration binds
+the loop; it does not retroactively bind every other way of producing a
+bundle. Closing that would mean `deliver` refusing any bundle **lacking** a
+verdict whenever the repo declared one — strictly more than ruling 2
+approved, and a change that would make `wring verify` alone unable to
+produce a deliverable bundle in such a repo. It is written down here as an
+open question rather than smuggled in.
+
 ## 4. Cost, stated plainly
 
 `--prove` roughly doubles gate time and is **opt-in** everywhere: a flag
@@ -118,10 +167,17 @@ in one sentence: *a green tick that cannot fail is worth nothing.*
    interlock so that *flags may tighten, never loosen* is one rule instead
    of two precedents.
 
-2. ⚖ **Should `wring deliver` refuse a vacuous run?** Recommended: yes, same
-   exit-1 family as "gates did not pass" — but it makes `--prove` + deliver
-   strictly stricter, which is a behaviour change a repo chose only
-   implicitly.
+2. **Should `wring deliver` refuse a vacuous run? — DECIDED 2026-08-05:
+   yes.** Design in §3b. `Refused`, exit 1, beside "its gates did not
+   pass", because it is the same statement. No `--allow-vacuous`: ruling 1
+   banned loosening flags and this would be the first counter-example, one
+   section later in the same spec.
+
+   The acknowledged catch — that opting into `--prove` implicitly tightens
+   delivery — is answered by scope rather than by an escape hatch. The
+   refusal attaches to the *bundle*: a run without `--prove` writes no
+   verdict and delivers exactly as it does today. Nobody is blocked for
+   asking the question, only by the answer.
 3. ⚖ **Worktree cost guard:** repos with huge working trees pay a checkout
    per `--prove`. Accept (it's opt-in), or add a declared ceiling?
 
@@ -148,6 +204,11 @@ outcomes) · any LLM involvement — this is deterministic or it is nothing.
 - [ ] **§3a** — `wring init`'s template names `run.prove` in a commented
       block, and `wring verify` prints no warning when vacuity was not
       checked
+- [ ] **§3b** — a `gates_vacuous` bundle is refused by `wring deliver` with
+      exit 1, and the message names the insensitive gates and the fix; a
+      bundle with **no** `vacuity.json` delivers exactly as it does today,
+      so no repo that has not opted in changes behaviour; and `--allow-
+      vacuous` is not a flag
 - [ ] the scratch worktree is gone afterwards, pass or fail or Ctrl-C
 - [ ] `digests.json` covers `vacuity.json` and the `vacuity/` logs
 - [ ] attest refuses `gates_vacuous` with a test
