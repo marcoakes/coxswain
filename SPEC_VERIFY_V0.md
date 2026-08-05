@@ -110,9 +110,18 @@ Code, Codex CLI, Gemini CLI — they need structure, not prose):
   "status": "failed",
   "failed_gate": "test",
   "rerun": "wring verify --gate test",
-  "evidence_dir": ".wringer/runs/20260730-070601-a13f"
+  "evidence_dir": ".wringer/runs/20260730-070601-a13f",
+  "template_only": false
 }
 ```
+
+`template_only` (amended 2026-08-05) is `true` while every required gate is
+still the placeholder `wring init` writes. An agent is the reader most
+likely to act on a bare `"status": "passed"`, and it is the one reader the
+terminal's `!` line cannot reach — so the fact that a run proved nothing has
+to be in the object too. Present even when `false`: a consumer should never
+have to distinguish "not a template" from "the tool forgot to tell me".
+This is CLI surface, not `wringer.evidence.v1` — no frozen schema moves.
 
 ### `wring explain`
 

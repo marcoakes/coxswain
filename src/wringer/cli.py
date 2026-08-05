@@ -419,7 +419,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return EXIT_CONFIG
 
     if args.json:
-        _report_json(outcome.bundle, root, outcome.failed_gate, outcome.status)
+        _report_json(
+            outcome.bundle,
+            root,
+            outcome.failed_gate,
+            outcome.status,
+            template_only=outcome.template_only,
+        )
     else:
         _report_run(
             outcome.bundle,
@@ -1700,6 +1706,19 @@ def _explain(
         # An interrupted run has no failing gate, but "nothing to diagnose"
         # would be a lie: gates after the interruption never ran at all.
         _explain_interruption(run_dir, recorded)
+    elif _bundle_was_template_only(run_dir):
+        # "Every required gate passed" is true and, on its own, misleading:
+        # the only gate was the placeholder `wring init` writes, so nothing
+        # about this code was proven. `wring verify` says so at the time and
+        # `summary.md` carries it, but `explain` is what someone reads AFTER
+        # the terminal is gone — and it printed an unqualified green verdict
+        # over a bundle whose own summary said otherwise.
+        #
+        # Read from the bundle's summary rather than recomputed from config:
+        # `explain` may be pointed at a bundle from another repo, or one
+        # whose `.wringer.yaml` has since been fixed, and the bundle is the
+        # thing being explained.
+        print(f"\n! {detect.TEMPLATE_WARNING}")
     else:
         print("\nEvery required gate passed — nothing to diagnose.")
 
@@ -1717,6 +1736,21 @@ def _explain(
         # The whole run, not one gate: an interrupt leaves everything from
         # the stopped gate onwards unproven.
         print("\nRerun:\n  wring verify")
+
+
+def _bundle_was_template_only(run_dir: Path) -> bool:
+    """Whether this bundle recorded that it proved nothing.
+
+    The fact lives in `summary.md`, not in the manifest: `wringer.evidence.v1`
+    is frozen and cannot grow a key for it, so the bundle's prose is where it
+    was written. Reading it back means `explain` agrees with the file it is
+    explaining, even for a bundle produced by another repo or another version.
+    """
+    report = run_dir / summary.SUMMARY_FILENAME
+    try:
+        return detect.TEMPLATE_WARNING in report.read_text(encoding="utf-8")
+    except OSError:
+        return False
 
 
 def _explain_repo_line(started: dict, repo: dict, manifest: dict) -> str:
@@ -1875,6 +1909,7 @@ def _report_json(
     root: Path,
     failed_gate: str | None,
     status: str = "passed",
+    template_only: bool = False,
 ) -> None:
     """One object on stdout and nothing else (spec §CLI surface).
 
@@ -1893,6 +1928,12 @@ def _report_json(
                     else None
                 ),
                 "evidence_dir": _bundle_path(bundle, root),
+                # An agent is the reader most likely to over-read a bare
+                # `"status": "passed"`, and it is exactly the reader the
+                # terminal warning cannot reach. Without this key, the one
+                # consumer that cannot see the `!` line is the one acting on
+                # the result.
+                "template_only": template_only,
             }
         )
     )

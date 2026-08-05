@@ -189,3 +189,79 @@ def test_init_outside_a_repo_leaves_no_gitignore_and_says_so(
     out = capsys.readouterr().out
     assert "not a git repository" in out
     assert "git init" in out
+
+
+def test_explain_does_not_call_a_template_run_proven(repo, monkeypatch, capsys):
+    """`wring explain` is what someone reads after the terminal is gone.
+
+    It printed "Every required gate passed — nothing to diagnose." over a
+    bundle whose own summary.md said the run proved nothing — the two
+    surfaces disagreeing about the same bundle, with the reassuring one
+    winning by being the one a human runs later.
+    """
+    monkeypatch.chdir(repo)
+    assert cli.main(["init"]) == cli.EXIT_OK
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["explain"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "still a template" in out
+    assert "proved nothing" in out
+    assert "nothing to diagnose" not in out
+
+
+def test_explain_stays_quiet_for_a_repo_with_real_gates(
+    repo, monkeypatch, capsys, write_config
+):
+    write_config(
+        repo,
+        'version: 1\ngates:\n  - id: check\n'
+        '    run: "grep -q version .wringer.yaml"\n',
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["explain"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "still a template" not in out
+    assert "nothing to diagnose" in out
+
+
+def test_verify_json_tells_an_agent_the_run_proved_nothing(
+    repo, monkeypatch, capsys
+):
+    """The reader most likely to over-read `"status": "passed"` is the one
+    the terminal warning cannot reach."""
+    import json as _json
+
+    monkeypatch.chdir(repo)
+    assert cli.main(["init"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["verify", "--json"]) == cli.EXIT_OK
+
+    reported = _json.loads(capsys.readouterr().out)
+    assert reported["status"] == "passed"
+    assert reported["template_only"] is True
+
+
+def test_verify_json_says_false_when_the_repo_is_configured(
+    repo, monkeypatch, capsys, write_config
+):
+    """Present even when false: a consumer must never have to distinguish
+    "not a template" from "the tool forgot to tell me"."""
+    import json as _json
+
+    write_config(
+        repo,
+        'version: 1\ngates:\n  - id: check\n'
+        '    run: "grep -q version .wringer.yaml"\n',
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify", "--json"]) == cli.EXIT_OK
+
+    reported = _json.loads(capsys.readouterr().out)
+    assert reported["template_only"] is False
