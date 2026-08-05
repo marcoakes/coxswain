@@ -1,10 +1,16 @@
 #!/bin/sh
-# The 0.2.0 release bar, checked rather than asserted.
+# The release bar, checked rather than asserted.
 #
-# Builds from a CLEAN CLONE of origin/main into a throwaway venv and exercises
-# the installed package — not the working tree, not an editable install. That
-# distinction is the whole point: `pip install wringer` is what a stranger
-# gets, and it is the only thing this script trusts.
+# Builds from a CLEAN CLONE OF THIS REPOSITORY'S COMMITTED STATE — `git clone`
+# of the local repo, so it gets local HEAD, not origin/main. That is the
+# useful semantics (it isolates from a dirty working tree, which is the bug
+# class this catches) but it is NOT the same as checking what is pushed, and
+# the header used to claim origin/main. Push first if that is what you mean.
+# The built sha is printed below so every run says which tree it judged.
+#
+# It exercises the INSTALLED package — not the working tree, not an editable
+# install. That distinction is the whole point: `pip install wringer` is what
+# a stranger gets, and it is the only thing this script trusts.
 #
 # Every check prints its own true exit code. A wrapper's exit code can lie
 # about which half failed; law 1 says never claim a check ran unless it ran.
@@ -34,7 +40,13 @@ rm -rf "$WORK"
 mkdir -p "$WORK"
 git clone -q "$ROOT" "$WORK/src" || exit 2
 cd "$WORK/src" || exit 2
-echo "HEAD: $(git log --oneline -1)"
+# Say which tree is being judged. A clone of the local repo gets local HEAD,
+# which is not origin/main unless you have pushed — printing it is how a
+# reader tells the difference without reading this script.
+echo "judging: $(git log --oneline -1)"
+if [ -n "$(git -C "$ROOT" log --oneline "origin/main..HEAD" 2>/dev/null)" ]; then
+    echo "NOTE: local HEAD is ahead of origin/main — this is NOT what CI will run"
+fi
 echo
 
 echo "== build and install, clean room =="
@@ -86,9 +98,18 @@ cd "$WORK/src" || exit 2
 test -f CHANGELOG.md && \
     { echo "  ok    CHANGELOG.md exists"; PASS=$((PASS + 1)); } || \
     { echo "  FAIL  no CHANGELOG.md"; FAIL=$((FAIL + 1)); }
-grep -q "0.2.0" CHANGELOG.md && \
-    { echo "  ok    CHANGELOG names 0.2.0"; PASS=$((PASS + 1)); } || \
-    { echo "  FAIL  CHANGELOG does not name 0.2.0"; FAIL=$((FAIL + 1)); }
+# The version being BUILT, not a literal. `grep -q "0.2.0"` passed forever
+# once 0.2.0 was in the file, so at 0.3.0 it would have silently checked the
+# previous release's entry and reported ok.
+VERSION=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$WORK/src/src/wringer/__init__.py")
+if [ -z "$VERSION" ]; then
+    echo "  FAIL  could not read the version from src/wringer/__init__.py"
+    FAIL=$((FAIL + 1))
+elif grep -q "$VERSION" CHANGELOG.md; then
+    echo "  ok    CHANGELOG names $VERSION"; PASS=$((PASS + 1))
+else
+    echo "  FAIL  CHANGELOG does not name $VERSION"; FAIL=$((FAIL + 1))
+fi
 # the committed demo bundle must validate against the published schemas —
 # it is the receipt the README points at
 # The runtime install above proved `pip install wringer` gives a working CLI

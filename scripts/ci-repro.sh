@@ -1,6 +1,11 @@
 #!/bin/sh
-# Reproduce CI locally: a FRESH CLONE of origin/main into a scratch dir, a
-# fresh venv, and the suite run there.
+# Reproduce CI locally: a FRESH CLONE of this repository's COMMITTED state
+# into a scratch dir, a fresh venv, and the suite run there.
+#
+# `git clone` of the local repo, so it gets local HEAD — not origin/main,
+# which the header used to claim. Isolating from the dirty working tree is
+# the point and that still holds; being identical to what CI will run does
+# NOT, unless you have pushed. The cloned sha is printed at the end.
 #
 # Catches the class of bug that "works on my machine" always means — a test
 # that passes only because of untracked state in the working tree, or a file
@@ -40,5 +45,5 @@ GIT_CONFIG_VALUE_0=true \
     .venv/bin/pytest -q
 CODE=$?
 echo "---"
-echo "pytest exit $CODE (fresh clone, no ambient git identity — as CI runs it)"
+echo "pytest exit $CODE (clone of local HEAD $(git -C "$WORK/wringer" rev-parse --short HEAD), no ambient git identity)"
 exit $CODE

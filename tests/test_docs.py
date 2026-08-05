@@ -267,3 +267,39 @@ def test_step_7h_and_its_selftest_agree():
         "setup-selftest.sh's 7H copy is back to `git add -A`, so it would "
         f"pass while the runbook it stands for is broken: {offenders}"
     )
+
+
+# --- a script may not name a version it is not checking ---------------------
+#
+# Two of these rotted the same way: a literal `0.2.0` baked into a check that
+# would keep passing after 0.3.0 shipped, silently blessing the PREVIOUS
+# release. `verify-published.sh` installed `wringer==0.2.0` by default;
+# `release-check.sh` grepped CHANGELOG for the literal string, which stays
+# true forever once the entry exists.
+#
+# The rule is not "never write a version" — it is that a script's DEFAULT must
+# come from src/wringer/__init__.py, the single source of truth pyproject
+# already points at.
+
+_VERSION_LITERAL = re.compile(r"\b0\.\d+\.\d+\b")
+
+
+@pytest.mark.parametrize(
+    "name", ["verify-published.sh", "release-check.sh", "ci-repro.sh"]
+)
+def test_no_release_script_hardcodes_a_version_it_checks(name: str):
+    path = repo_root() / "scripts" / name
+    if not path.is_file():
+        pytest.skip(f"{name} is not in this repo")
+    offenders = [
+        f"{number}: {line.strip()}"
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if _VERSION_LITERAL.search(line) and not line.lstrip().startswith("#")
+    ]
+    assert not offenders, (
+        f"{name} names a version literal in an executable line. A default "
+        "that does not come from src/wringer/__init__.py green-lights the "
+        f"previous release once the next one ships. Offenders: {offenders}"
+    )

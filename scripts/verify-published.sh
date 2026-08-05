@@ -10,7 +10,14 @@ set -u
 . "$(dirname "$0")/scratch.sh"
 W=$(scratch_dir "${1:-}" pypi-check) || exit 2
 UV="$HOME/.local/bin/uv"
-WANT=${2:-0.2.0}
+# The version to check, defaulting to the one this working tree declares
+# rather than to a literal. A hardcoded default rots into a script that
+# green-lights the PREVIOUS release forever: at 0.3.0 a bare run would have
+# installed and blessed 0.2.0 while reporting success.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+WANT=${2:-$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$ROOT/src/wringer/__init__.py")}
+[ -n "$WANT" ] || { echo "FATAL: could not read the version from src/wringer/__init__.py" >&2; exit 2; }
+echo "checking wringer==$WANT (source of truth: src/wringer/__init__.py)"
 
 if [ -d "$W" ]; then find "$W" -mindepth 1 -delete 2>/dev/null; fi
 mkdir -p "$W" || exit 2
@@ -45,6 +52,18 @@ git add -A && git commit -qm probe
 "$WRING" verify
 CODE=$?
 echo "verify exit $CODE"
+DIGESTS=0
 ls .wringer/runs/*/digests.json >/dev/null 2>&1 \
-    && echo "digests.json written" || echo "NO digests.json"
-exit $CODE
+    && echo "digests.json written" || { echo "NO digests.json"; DIGESTS=1; }
+
+# Every failure reaches the exit code. `MISSING` used to be printed and then
+# dropped on the floor — the script exited with `verify`'s code alone, so it
+# could report "MISSING judge" and still exit 0, which is a green light for a
+# release that is missing a command.
+echo
+if [ "$CODE" -eq 0 ] && [ "$MISSING" -eq 0 ] && [ "$DIGESTS" -eq 0 ]; then
+    echo "PASS: wringer==$WANT installs from the index and works"
+    exit 0
+fi
+echo "FAIL: wringer==$WANT (verify exit $CODE, missing commands $MISSING, digests $DIGESTS)"
+exit 1
