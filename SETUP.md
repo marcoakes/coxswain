@@ -263,7 +263,7 @@ docker pull ghcr.io/marcoakes/wringer:main
 Apple container:
 
 ```bash
-container images pull ghcr.io/marcoakes/wringer:main
+container image pull ghcr.io/marcoakes/wringer:main
 ```
 
 Pulling an image you already have is a no-op.
@@ -277,7 +277,7 @@ docker image inspect ghcr.io/marcoakes/wringer:main --format '{{.Id}}'
 Apple container:
 
 ```bash
-container images list | grep wringer
+container image list | grep wringer
 ```
 
 Correct output: an image id, or a row naming the image. "No such image"
