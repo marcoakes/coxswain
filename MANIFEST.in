@@ -1,0 +1,20 @@
+# What the sdist carries beyond the package itself.
+#
+# setuptools' default sdist packs files matching `test*.py` and nothing else
+# from tests/, which quietly shipped 23 test modules WITHOUT conftest.py or
+# fake_acp_agent.py. Measured on the 0.2.0 sdist: `pytest -q tests/` gave
+# 12 failed, 259 passed, 276 errors, almost all of them `fixture 'repo' not
+# found`. A suite that cannot run is worse than an absent one — it invites a
+# packager to conclude the package is broken.
+#
+# Ship a runnable suite or ship none. This ships one, and release.yml gates
+# on conftest.py actually being in the tarball.
+graft tests
+include conftest.py
+include SPEC_*.md
+include CHANGELOG.md
+include SECURITY.md
+graft schema
+prune tests/__pycache__
+global-exclude *.pyc
+global-exclude .DS_Store

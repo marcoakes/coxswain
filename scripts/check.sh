@@ -17,7 +17,7 @@ export PATH
 
 mkdir -p "$ROOT/.wringer/last"
 
-ruff check src tests examples
+ruff check src tests examples scripts
 LINT=$?
 echo "$LINT" > "$ROOT/.wringer/last/lint.exit"
 

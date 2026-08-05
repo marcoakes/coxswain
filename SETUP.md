@@ -311,9 +311,17 @@ echo "ghcr.io/marcoakes/wringer:main"
 ```
 
 **`:main` is the only tag published today** — CI pushes it on every commit
-to `main`, so it moves. There is no `:latest` and no version tag yet;
-versioned tags arrive with the 0.2.0 release. Until then, pin by digest if
-you need a fixed image: `docker pull ghcr.io/marcoakes/wringer:main` then
+to `main`, so it moves. There is no `:latest` and there never will be: a
+tag that silently follows the newest release is the opposite of a pinned
+one, and this image exists to be pinned.
+
+**Versioned tags — `:v0.3.0` and onward — are published by the release
+workflow from the next release.** They do not exist retroactively: 0.2.0
+shipped before that workflow did, so there is no `:v0.2.0` and asking for
+one gets a manifest error rather than an old image.
+
+Until a versioned tag exists for the release you want, pin by digest:
+`docker pull ghcr.io/marcoakes/wringer:main` then
 `docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/marcoakes/wringer:main`.
 
 Docker:

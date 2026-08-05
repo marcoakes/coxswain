@@ -60,8 +60,14 @@ jobs:
       # 0.3.0 is exactly the class of mismatch this repo refuses everywhere
       # else, so it is refused here too.
       - name: The tag and the package version must agree
+        # Through `env:`, not interpolated into the script. A workflow_dispatch
+        # input is attacker-influenced text and GitHub substitutes it BEFORE
+        # the shell parses the line, so a refname containing a quote would
+        # have been executed rather than compared. The other steps in this
+        # file already do it this way; this one was the exception.
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           PKG="v$(python -c 'import wringer; print(wringer.__version__)')"
           echo "tag=$TAG package=$PKG"
           if [ "$TAG" != "$PKG" ]; then
@@ -94,6 +100,18 @@ jobs:
             /tmp/probe/bin/wring "$c" --help > /dev/null || {
               echo "::error title=missing command::$c"; exit 1; }
           done
+
+      # The sdist shipped 23 test modules without conftest.py, so its suite
+      # could not run at all: 276 errors, almost every one "fixture 'repo'
+      # not found". Ship a runnable suite or ship none — MANIFEST.in now
+      # grafts tests/, and this refuses to publish if that stops being true.
+      - name: The sdist carries a suite that can actually run
+        run: |
+          for required in tests/conftest.py tests/fake_acp_agent.py; do
+            tar -tzf dist/*.tar.gz | grep -q "/$required$" || {
+              echo "::error title=sdist is missing $required::its test suite cannot run"
+              exit 1; }
+          done
           echo "all thirteen commands present in the built wheel"
       - uses: actions/upload-artifact@v4
         with:
@@ -113,7 +131,50 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # Pinned to a commit, not to a branch. `@release/v1` is a MUTABLE ref,
+      # and this job holds `id-token: write` — whoever can move that branch
+      # can mint a PyPI token in this repository's name. The version comment
+      # is for humans; the sha is what runs.
+      - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc  # v1.12.4
+        with:
+          # A re-run after a half-failed release must not die here. Identical
+          # files are skipped; different bytes at the same version are still
+          # rejected by PyPI itself, so the loud failure that matters survives.
+          skip-existing: true
+
+  # The versioned OCI tag. SETUP.md promised these "with the 0.2.0 release"
+  # and nothing published one — only tests.yml pushes an image, and only the
+  # moving `:main`. That made the runbook's promise false rather than pending,
+  # which is the claim-without-a-gate class this repo keeps finding. A test
+  # now couples the two, so the doc and this job cannot drift apart again.
+  #
+  # Deliberately no moving convenience tag. README and SETUP both say one does
+  # not exist, and a tag that quietly appeared would make them wrong in the
+  # other direction. This image exists to be pinned.
+  image:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the versioned image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag || github.ref_name }}
+          cache-from: type=gha
 
   github-release:
     needs: publish
@@ -136,5 +197,15 @@ jobs:
           # note written by CI is a note nobody wrote.
           git fetch --tags --force
           git tag -l --format='%(contents)' "$TAG" > /tmp/notes.md
-          gh release create "$TAG" dist/* \
-            --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+          # Idempotent, so a re-run heals a half-finished release. Without
+          # this, a failure here after PyPI had accepted the upload left the
+          # index ahead of GitHub with no path back: re-running the workflow
+          # re-ran `publish`, which failed on the duplicate upload, which
+          # blocked this job again. `skip-existing` above is the other half.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — uploading any missing files"
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "$TAG" --notes-file /tmp/notes.md --verify-tag
+          fi

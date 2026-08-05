@@ -29,6 +29,14 @@ import pytest
 
 SCRATCH = Path(__file__).resolve().parent.parent / "scripts" / "scratch.sh"
 
+# These guard the repository's own shell scripts, which the sdist does not
+# ship — a packager running the packed suite must not fail over a developer
+# tool that was never in their tarball. In a checkout the file is always
+# there, so the guard never silently disappears where it matters.
+pytestmark = pytest.mark.skipif(
+    not SCRATCH.is_file(), reason="scripts/ is not part of the distribution"
+)
+
 
 def scratch_dir(base: str, name: str = "probe", env: dict | None = None):
     """Call the real shell function. Returns (exit_code, stdout)."""

@@ -30,6 +30,19 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def require_checkout(*needed: str) -> None:
+    """Skip when a repo-only artifact is absent.
+
+    The sdist ships the package and its suite, not the repository's scripts,
+    workflows or runbooks. Guards over those are meaningful in a checkout and
+    meaningless in a tarball, and failing there would tell a packager their
+    download is broken when it is not.
+    """
+    for relative in needed:
+        if not (repo_root() / relative).exists():
+            pytest.skip(f"{relative} is not part of the distribution")
+
+
 RUNBOOKS = ("SETUP.md", "QUICKSTART.md", "README.md")
 
 
@@ -192,12 +205,21 @@ def script_files() -> list[Path]:
 
 
 def test_scripts_exist_to_be_guarded():
-    """A guard over an empty glob passes and means nothing."""
+    """A guard over an empty glob passes and means nothing.
+
+    Skipped rather than failed when scripts/ is absent entirely: the sdist
+    does not ship the repository's shell scripts, and a packager running the
+    packed suite must not fail over a developer tool that was never in their
+    tarball. In a checkout the directory is always there.
+    """
+    if not (repo_root() / "scripts").is_dir():
+        pytest.skip("scripts/ is not part of the distribution")
     assert script_files(), "no scripts/*.sh found — this guard is not guarding"
 
 
 @pytest.mark.parametrize("pattern", _DEVELOPER_PATHS, ids=lambda p: p.pattern)
 def test_no_script_hardcodes_one_developers_machine(pattern: re.Pattern[str]):
+    require_checkout("scripts")
     """`/Users/you/` is allowed: it is the documentation placeholder, and it
     is obviously not a real path. Any other home directory is a real one."""
     offenders = [
@@ -242,6 +264,7 @@ REQUIRED_7H_TOKENS = (
 
 
 def test_step_7h_and_its_selftest_agree():
+    require_checkout("SETUP.md", "scripts/setup-selftest.sh")
     setup = step_7h_block((repo_root() / "SETUP.md").read_text(encoding="utf-8"))
     selftest = (repo_root() / "scripts" / "setup-selftest.sh").read_text(
         encoding="utf-8"
@@ -288,6 +311,7 @@ _VERSION_LITERAL = re.compile(r"\b0\.\d+\.\d+\b")
     "name", ["verify-published.sh", "release-check.sh", "ci-repro.sh"]
 )
 def test_no_release_script_hardcodes_a_version_it_checks(name: str):
+    require_checkout("scripts")
     path = repo_root() / "scripts" / name
     if not path.is_file():
         pytest.skip(f"{name} is not in this repo")
@@ -302,4 +326,56 @@ def test_no_release_script_hardcodes_a_version_it_checks(name: str):
         f"{name} names a version literal in an executable line. A default "
         "that does not come from src/wringer/__init__.py green-lights the "
         f"previous release once the next one ships. Offenders: {offenders}"
+    )
+
+
+# --- a promised image tag must have a workflow that publishes it -----------
+#
+# SETUP.md promised versioned OCI tags "with the 0.2.0 release". 0.2.0 shipped
+# on 2026-08-03 and no workflow published one — only tests.yml pushed an
+# image, and only the moving `:main`. The promise was not pending, it was
+# false, and nothing in the repo could tell: the doc and the workflow had no
+# relationship a test could check.
+#
+# This is the same coupling the step-7H guard makes between SETUP.md and
+# setup-selftest.sh. A claim about CI behaviour is only as good as the CI.
+
+
+def workflow_text(name: str) -> str:
+    path = repo_root() / ".github" / "workflows" / name
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def test_versioned_image_tags_are_promised_and_published_together():
+    require_checkout("SETUP.md", ".github/workflows/release.yml")
+    setup = runbook_text("SETUP.md")
+    if setup is None:
+        pytest.skip("SETUP.md is not in this repo")
+    promises = "Versioned tags" in setup or ":v0." in setup
+    release = workflow_text("release.yml")
+    publishes = "ghcr.io" in release and "push: true" in release
+    assert promises == publishes, (
+        "SETUP.md and release.yml disagree about versioned image tags — "
+        f"SETUP promises={promises}, release.yml publishes={publishes}. "
+        "Either publish them or stop promising them; a runbook claim the CI "
+        "does not keep is the class of defect two field reports found."
+    )
+
+
+def test_nothing_promises_a_latest_image_tag():
+    require_checkout(".github/workflows/release.yml")
+    """`:latest` is deliberately absent — a tag that follows the newest
+    release is the opposite of a pinned one. If it ever starts being
+    published, the docs saying it does not exist become the lie."""
+    # Only image-tag lines. `runs-on: ubuntu-latest` is not an image tag, and
+    # a guard that cannot tell the difference is one somebody deletes.
+    offenders = [
+        line.strip()
+        for name in ("release.yml", "tests.yml")
+        for line in workflow_text(name).splitlines()
+        if "ghcr.io" in line and line.strip().rstrip().endswith(":latest")
+    ]
+    assert not offenders, (
+        "a workflow publishes a :latest image tag, which README and SETUP.md "
+        f"both say does not exist: {offenders}"
     )
