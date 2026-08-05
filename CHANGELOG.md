@@ -6,6 +6,83 @@ package version and are listed per release.
 
 ## Unreleased
 
+Fifteen findings from the second field run — and the first execution of the
+Apple `container` path by anyone, on a clean MDM-managed macOS 26 Apple
+silicon host. CI structurally cannot run that path (GitHub's macOS runners
+have no nested virtualization), so every `AC-*` finding below is information
+no test, review or amount of reading could have produced. The full transcript
+is preserved verbatim at `docs/field-report-2026-08-05.md`.
+
+The through-line, for the second report running: **most of these were steps
+whose gate had never been executed.** So the test coverage is the deliverable
+here, not the fixes.
+
+### Added
+
+- **`docs/MANUAL_CHECKS.md`** — a dated record of the checks CI structurally
+  cannot run: the Apple `container` sequence, the Docker-stub check, and a
+  "last passed" table naming host, OS, runtime version, date and commit. It
+  carries an explicit **unclaimed** row for Docker Desktop on macOS, which
+  nobody has ever tested and which `AC-02` showed matters more than it looked.
+- **Guards against every regression below**, in `tests/test_docs.py`,
+  `tests/test_detect.py`, `tests/test_init.py`, `tests/test_evidence.py` and
+  `scripts/setup-selftest.sh`.
+- **`scripts/scratch.sh`** — one place deciding where a script may create and
+  destroy a scratch tree, defaulting to `$TMPDIR` and refusing `/`, `$HOME`
+  and relative paths.
+
+### Fixed
+
+- **`SETUP.md`: `container image`, not `container images`** (BLOCKER). Apple
+  `container` 1.2.0 spells the subcommand singular. The plural exits 64 on a
+  pull with a misleading "missing plugin" diagnosis, and fails *silently*
+  through a pipe on a list — so an agent cannot tell "not pulled" from "wrong
+  command", and the runbook's own stop condition never fires.
+- **`SETUP.md`: the Apple path, rewritten.** `brew install container` (a
+  formula, no admin password) offered alongside the 95.9 MB signed `.pkg`;
+  `container system status`'s real nine-row table instead of "a status line";
+  the first `container run`'s six-stage kernel-and-init-image setup
+  documented so a healthy run stops being a false stop; the ~470 MB on-disk
+  cost of a 160 MB pull; and the version corrected from "v1.0+" to 1.2.0.
+- **`SETUP.md`: `--user`/`-e HOME` are a Linux requirement, not a universal
+  one.** The runbook claimed that without them the workspace is read-only and
+  `wring doctor` reports a blocking problem. Measured false on Apple
+  `container`, which translates uids across the mount: a flagless run exits 0
+  and the bundle lands owned by the host user. The flags stay in every
+  recipe; only the false claim about their absence changed.
+- **`wring init` says what it found**, instead of asserting that all three
+  build-config files are absent. Pointed at a real Python project it reported
+  "no pyproject.toml" while the developer was looking at theirs. The
+  *detection* was correct and is unchanged — the repo declares no ruff, mypy
+  or pytest, so there was genuinely nothing to gate, and refusing to invent
+  `pytest -q` is the documented rule holding under first contact.
+- **`wring init && wring verify` exits 0 in an unconfigured repo.** The
+  template's three example gates were all `make` targets, so the first run
+  after `init` went red and exited 1 on a healthy tree. It now ships a
+  passing `placeholder` gate — and says, on the terminal and in `summary.md`,
+  that the run proved nothing until you replace it. A green exit that
+  quietly means nothing would be the vacuous evidence this project exists to
+  prevent.
+- **Scripts no longer default to one developer's sandbox.** Five of them
+  pointed `rm -rf` or `find -delete` at a hardcoded path named after one
+  machine's uid and one user's home. `setup-selftest.sh` additionally
+  prepended a `.venv` the current install path never creates, so it silently
+  tested whatever `wring` was on `PATH` — or nothing. It now names the binary
+  under test and exits 2 when there is none.
+- **`SETUP.md`: the probe repo no longer commits its own evidence.** Step 7H
+  hand-writes its config and never calls `wring init`, so it got no
+  `.gitignore` and its `git add -A` staged the previous run's `.wringer/` —
+  measured at two runs, two commits, nine tracked evidence files. On a real
+  repository that pattern commits raw gate output into the user's history.
+- **`SETUP.md`: step 8 now shows what a skip looks like.** It documented three
+  `-` lines outside a repository and then gave a command run *from* the
+  clone, where those three never skip. A captured contrasting transcript was
+  added, and `setup-selftest.sh` asserts three `-` lines and three
+  `"status": "skip"`.
+- **`SETUP.md`: the Docker-stub check uses `ls -ld`.** It named `ls -la`,
+  which the stub's own stripped permissions defeat — a diagnostic that fails
+  in exactly the case it diagnoses.
+
 ### Changed
 
 - **BREAKING — `run_id` is stamped in UTC**, not in the host's local time.
