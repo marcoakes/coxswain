@@ -129,16 +129,24 @@ def test_no_runbook_inspects_docker_app_with_ls_la(name: str):
     text = runbook_text(name)
     if text is None:
         pytest.skip(f"{name} is not in this repo")
-    offenders = [
-        line.strip()
-        for block in bash_blocks(text)
-        for line in block.splitlines()
-        if re.search(r"ls\s+-[a-zA-Z]*a[a-zA-Z]*\s+/Applications/Docker\.app", line)
-    ]
+    # Any `ls` at all on that path, then judged on its flags — rather than
+    # matching the literal `-la`, which `ls -l -a` and `ls -al` both escape.
+    # `-d` is what makes the listing work; an `a` is what makes it fail.
+    offenders = []
+    for block in bash_blocks(text):
+        for line in block.splitlines():
+            match = re.search(
+                r"\bls\s+((?:-\S+\s+)*)/Applications/Docker\.app", line
+            )
+            if match is None:
+                continue
+            flags = match.group(1)
+            if "a" in flags or "d" not in flags:
+                offenders.append(line.strip())
     assert not offenders, (
-        f"{name} inspects the Docker.app stub with `ls -la`, which the stub's "
-        "own stripped permissions defeat (field report 2026-08-05, R2-02). "
-        f"Use `ls -ld`. Offending lines: {offenders}"
+        f"{name} inspects the Docker.app stub with a listing its own stripped "
+        "permissions defeat (field report 2026-08-05, R2-02). Only `ls -ld` "
+        f"can show it. Offending lines: {offenders}"
     )
 
 

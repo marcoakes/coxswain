@@ -83,6 +83,28 @@ here, not the fixes.
   which the stub's own stripped permissions defeat — a diagnostic that fails
   in exactly the case it diagnoses.
 
+### Known gaps
+
+Written down rather than dropped. All three were found by an adversarial
+audit of this cycle's own work, and all three are outside what the field
+report and its remediation plan covered.
+
+- **The template warning reaches `wring verify` and `summary.md`, and no
+  further.** `wring explain` re-reads that same bundle and prints an
+  unqualified green verdict, and `wring verify --json` reports
+  `"status": "passed"` with nothing to distinguish an unconfigured repo from
+  a proven one. The ruling for this cycle named the terminal and
+  `summary.md`, and the condition is deliberately not recorded in the bundle
+  (`wringer.evidence.v1` is frozen), so `explain` has nothing to read. Doing
+  this properly means deciding where a "this proved nothing" fact lives
+  without moving a frozen schema — a design question, not a fix.
+- **Docker Desktop on macOS remains untested by anyone.** Now stated as
+  unmeasured everywhere it is claimed, and tracked in
+  `docs/MANUAL_CHECKS.md`, but still the project's largest untested surface.
+- **The rewritten Apple `container` path has not been re-run on an Apple
+  host.** It is transcribed from a captured field run, not re-verified.
+  `docs/MANUAL_CHECKS.md` says so and names what the next run must do.
+
 ### Changed
 
 - **BREAKING — `run_id` is stamped in UTC**, not in the host's local time.
@@ -104,11 +126,14 @@ here, not the fixes.
   Taken now because the format only gets more expensive to change: 0.2.0 is
   two days old and run directories are local artefacts nobody has archived.
 
-  Belt and braces, in the same change: Wringer no longer orders runs by
-  directory name anywhere. `wring explain` and `wring resume` pick the
-  latest run by the manifest's `started_at`, falling back to the id and then
-  to mtime. The id becoming unambiguous is the fix; not depending on it is
-  what makes the next timezone a non-event.
+  Belt and braces, in the same change: run ordering now prefers a run's own
+  record of when it began — `started_at` from `manifest.json` or, for
+  `wring judge`, from `verdict.json` — over its directory name, falling back
+  to the id (read as UTC) and then to mtime. The id becoming unambiguous is
+  the fix; not depending on it is what makes the next timezone a non-event.
+  This matters most where there is no record to read: a loop killed
+  mid-flight never writes its manifest, and killed loops are the only thing
+  `wring resume` exists for.
 
 ## 0.2.0 — 2026-08-03
 
