@@ -1,8 +1,7 @@
 # SPEC — vacuity detection (P5, part 2)
 
-*Drafted 2026-08-03 by the planning window. **Rulings 1 and 2 decided by
-Marc 2026-08-05 (§3a, §3b, §5). DRAFT on ruling 3; not binding until he
-says so.** His one remaining open ruling is marked ⚖.*
+*Drafted 2026-08-03 by the planning window. **APPROVED by Marc 2026-08-05 —
+all three rulings decided (§5). Binding.***
 
 ## Positioning
 
@@ -157,6 +156,64 @@ open question rather than smuggled in.
 on `verify`, a config key for the loop. The docs say why you would pay it
 in one sentence: *a green tick that cannot fail is worth nothing.*
 
+### 4a. No ceiling — BINDING (ruling 3)
+
+Repos with huge trees pay a checkout per `--prove`. **Accept it. There is
+no configurable ceiling**, because the question a ceiling must answer is
+*what happens when you hit it*, and all three answers are worse than the
+cost:
+
+- **Skip the prove pass** — the run then reads `proven` while nothing was
+  checked. That is the vacuity failure reintroduced *by the vacuity
+  feature*, and it is the single worst outcome available in this spec.
+- **Refuse the run** — a slow feature turned into a broken one; a
+  worse-timed version of simply not enabling it.
+- **Warn and continue** — the ceiling did nothing.
+
+The cost needs no ceiling because it is already opt-in, self-announcing
+(a doubling is not subtle), and bounded by gates the repo wrote itself.
+
+**Measure it instead.** `vacuity.json` records `worktree_ms` and
+`prove_ms` beside the per-gate rows, so a repo decides with numbers rather
+than guessing a threshold — and a slow prove pass becomes the same problem
+as slow gates, which people already know how to think about.
+
+## 4b. The worktree's real risk is a false `proven` — BINDING (ruling 3)
+
+Cost was the question asked; this is the one the worktree actually poses,
+and it is a correctness bug rather than a performance one.
+
+`fleet.make_worktree` runs `git worktree add --detach <path> HEAD`, so the
+scratch tree holds **tracked files and nothing else** — no `.venv`, no
+`node_modules`, no build cache, because those are gitignored. A gate of
+`pytest -q` therefore runs where the project is not installed, and fails.
+§1's table reads *pass on changed, fail on pre-change* and concludes **the
+gate tests this change**.
+
+That is a false `proven`, and it would fire on **every** run in any repo
+whose dependencies are not committed, however tautological the tests. The
+feature built to catch reward-hacking would certify it. Two changes close
+it, and the build must not ship without both:
+
+**`run.prove_setup`** *(optional)* — a command run in the scratch worktree
+before the pre-change gates: `uv sync --frozen`, `npm ci`. Every repo
+already knows this command, because it is in their CI. Repos with
+committed dependencies leave it unset and lose nothing. If it fails, the
+verdict is `inconclusive` — never `proven`, and never silently dropped.
+
+**A `sensitive` gate must cite the failure it rests on.** The pre-change
+logs already land under `vacuity/`; the first line of *why* each
+pre-change gate failed is carried into `vacuity.json` and into the summary
+row. `ModuleNotFoundError: No module named 'yourproject'` is then
+instantly legible as a broken environment rather than a caught regression.
+Do **not** try to auto-classify the failure — make it visible. A verdict
+that shows its working is the product; one that hides it is the thing this
+spec exists to prevent.
+
+*(Recorded as design analysis from reading `make_worktree`, not as a
+measured bug — the feature does not exist yet. The mechanism is plain
+enough to fix in the spec rather than discover in a third field report.)*
+
 ## 5. Rulings
 
 1. **Loop opt-in shape — DECIDED 2026-08-05: config declares, flags may
@@ -178,8 +235,20 @@ in one sentence: *a green tick that cannot fail is worth nothing.*
    refusal attaches to the *bundle*: a run without `--prove` writes no
    verdict and delivers exactly as it does today. Nobody is blocked for
    asking the question, only by the answer.
-3. ⚖ **Worktree cost guard:** repos with huge working trees pay a checkout
-   per `--prove`. Accept (it's opt-in), or add a declared ceiling?
+3. **Worktree cost guard — DECIDED 2026-08-05: accept the cost, no
+   ceiling; spend the budget on correctness instead.** Design in §4a/§4b.
+
+   No ceiling, because every answer to "what happens when you hit it" is
+   worse than the cost — skipping re-introduces vacuity, refusing is a
+   worse-timed block, warning does nothing. The cost is opt-in,
+   self-announcing and repo-controlled; `vacuity.json` records
+   `worktree_ms` and `prove_ms` so the decision is made with numbers.
+
+   The ruling gained a second half during review. The worktree's real risk
+   is not cost but a **false `proven`**: a detached worktree carries
+   tracked files only, so an uninstalled project makes every pre-change
+   gate fail, which §1's table reads as proof. Closed by `run.prove_setup`
+   and by requiring a `sensitive` verdict to cite the failure it rests on.
 
 ## 6. Non-goals (binding once approved)
 
@@ -209,6 +278,14 @@ outcomes) · any LLM involvement — this is deterministic or it is nothing.
       bundle with **no** `vacuity.json` delivers exactly as it does today,
       so no repo that has not opted in changes behaviour; and `--allow-
       vacuous` is not a flag
+- [ ] **§4a** — `vacuity.json` carries `worktree_ms` and `prove_ms`; no
+      ceiling key exists in the config schema
+- [ ] **§4b** — the false-`proven` case is the money test: a repo whose
+      dependencies are gitignored, with a tautological test, must NOT
+      report `proven`. With `run.prove_setup` unset and the pre-change
+      gates failing on a missing environment, every `sensitive` row cites
+      the failure line that produced it, and a failing `run.prove_setup`
+      yields `inconclusive` — never `proven`
 - [ ] the scratch worktree is gone afterwards, pass or fail or Ctrl-C
 - [ ] `digests.json` covers `vacuity.json` and the `vacuity/` logs
 - [ ] attest refuses `gates_vacuous` with a test
