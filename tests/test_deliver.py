@@ -1170,3 +1170,61 @@ def test_untracked_json_is_covered_by_the_digests(
         (run_dir / evidence.DIGESTS_FILENAME).read_text(encoding="utf-8")
     )
     assert evidence.UNTRACKED_FILENAME in digests["files"]
+
+
+def test_an_unreachable_remote_refuses_rather_than_assuming_no_branch(
+    delivery_repo, monkeypatch, capsys
+):
+    """`ls-remote` failing is not "the branch does not exist".
+
+    Both were folded into `False`, so an unreachable remote silently
+    satisfied condition 1 — Wringer only ever commits to a branch it
+    created — and delivery planned a branch that might already be someone
+    else's history.
+    """
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    # a remote that is syntactically fine and cannot be reached
+    git(delivery_repo, "remote", "set-url", "origin",
+        f"file://{delivery_repo.parent}/does-not-exist.git")
+    # and no remote-tracking ref to answer from cache
+    subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"],
+                   cwd=delivery_repo, capture_output=True)
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "unreachable")
+    assert "cannot" in str(refusal.value).lower()
+
+
+def test_base_does_not_smuggle_past_the_default_branch_check(
+    repo, monkeypatch, capsys, git_run
+):
+    """`deliver.base` says which branch the MR targets. It has never meant
+    "skip condition 2", and an unresolvable default used to make it do
+    exactly that: the None short-circuited plan's guard and delivery would
+    plan to create and push the remote's own default branch.
+    """
+    upstream = repo.parent / f"{repo.name}-c2-upstream.git"
+    git_run(repo, "init", "--bare", "-b", "trunk", str(upstream))
+    git_run(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(
+        'version: 1\ngates:\n  - id: check\n    run: "true"\n'
+        'deliver:\n  branch: "trunk"\n  base: develop\n  remote: origin\n',
+        encoding="utf-8",
+    )
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-m", "config")
+    (repo / "feature.py").write_text("def added():\n    return 1\n", "utf-8")
+
+    verified(repo, monkeypatch, capsys)
+    run_dir = sorted((repo / ".wringer" / "runs").iterdir())[-1]
+    # never fetched, so there is no refs/remotes/origin/HEAD to resolve from
+    git_run(repo, "remote", "set-url", "origin",
+            f"file://{repo.parent}/nowhere.git")
+
+    cfg = config.load(repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(repo, cfg, run_dir, "smuggled")
+    assert "default branch" in str(refusal.value)

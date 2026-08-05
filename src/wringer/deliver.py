@@ -158,10 +158,28 @@ def branch_exists(root: Path, name: str, remote: str | None = None) -> bool:
             return True
     if remote:
         # A remote ref we have never fetched is still a branch that exists.
+        #
+        # And a remote we could not REACH is not an answer at all. This used
+        # to fall through to `return False`, folding "the branch does not
+        # exist" and "I could not find out" into the same value — so an
+        # unreachable remote silently satisfied condition 1 and delivery
+        # planned a branch that might already be someone else's. Refusing is
+        # the only honest option: the whole point of the check is that
+        # Wringer commits only to a branch it created, and that cannot be
+        # asserted from a failed lookup.
         code, out = _git(
             root, ["ls-remote", "--heads", remote, f"refs/heads/{name}"], check=False
         )
-        if code == 0 and out.strip():
+        if code != 0:
+            raise Refused(
+                f"cannot reach '{remote}' to check whether the branch "
+                f"'{name}' already exists, so Wringer cannot promise it is "
+                "creating a branch of its own rather than writing into "
+                f"someone else's. Fix the remote (try 'git ls-remote {remote}') "
+                "and run this again",
+                3,
+            )
+        if out.strip():
             return True
     return False
 
@@ -311,14 +329,24 @@ def resolve_base(root: Path, settings: config.Deliver) -> tuple[str, str | None]
     from wringer import acquire
 
     default = acquire.default_branch(root, settings.remote)
-    if settings.base:
-        return settings.base, default
+    # Resolved FIRST, and refused on before `base` is consulted. The early
+    # return used to sit above this check, so a configured `deliver.base`
+    # carried an unresolvable `None` default straight through to `plan`,
+    # whose condition-2 guard reads `if default and branch == default` — a
+    # None short-circuits it, and delivery would happily plan to create and
+    # push the remote's actual default branch. Setting `base` says which
+    # branch the MR targets; it has never said "skip the safety check", and
+    # this function's own docstring already promised it did not.
     if not default:
         raise Refused(
             "the remote's default branch could not be determined, so Wringer "
-            "cannot be sure it is avoiding it. Set 'deliver.base' explicitly",
+            "cannot be sure it is avoiding it. Fetch the remote (try "
+            f"'git remote set-head {settings.remote} -a') or set the branch "
+            "name to something that is plainly not the default",
             3,
         )
+    if settings.base:
+        return settings.base, default
     return default, default
 
 
