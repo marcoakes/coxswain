@@ -39,8 +39,20 @@ def runbook_text(name: str) -> str | None:
 
 
 def code_blocks(text: str) -> list[str]:
-    """Every fenced block — the parts a reader is meant to run."""
+    """Every fenced block, whatever its language tag."""
     return re.findall(r"```[^\n]*\n(.*?)```", text, re.DOTALL)
+
+
+def bash_blocks(text: str) -> list[str]:
+    """Only the ```bash blocks — the lines a reader is told to type.
+
+    These runbooks use the tag deliberately: a ```bash fence is an
+    instruction, and an untagged fence is a transcript of what happened when
+    someone ran one. The distinction matters to these guards, because
+    documenting a command that fails means *showing* it failing, and a guard
+    that cannot tell the two apart forbids explaining the bug it enforces.
+    """
+    return re.findall(r"```bash\s*\n(.*?)```", text, re.DOTALL)
 
 
 # --- AC-01: `container images` is not a subcommand ------------------------
@@ -96,6 +108,52 @@ def test_no_runbook_spells_the_two_measured_failures_anywhere(name: str):
             "`container` 1.2.0 (field report 2026-08-05, AC-01). The "
             "subcommand is `image`, singular."
         )
+
+
+# --- R2-02: `ls -la` cannot show the thing it was sent to look at ---------
+#
+# SETUP.md told the reader to check for a stripped Docker.app stub with
+# `ls -la`. On the machine that has the stub, that is precisely the command
+# the stub defeats:
+#
+#   $ ls -la /Applications/Docker.app  →  ls: Permission denied
+#   $ ls -ld /Applications/Docker.app  →  d---------  2 root  admin  64 ...
+#
+# A diagnostic that fails in exactly the case it diagnoses is worse than no
+# diagnostic: the reader concludes something is wrong with their permissions
+# rather than reading the answer, which is right there under -d.
+
+
+@pytest.mark.parametrize("name", RUNBOOKS)
+def test_no_runbook_inspects_docker_app_with_ls_la(name: str):
+    text = runbook_text(name)
+    if text is None:
+        pytest.skip(f"{name} is not in this repo")
+    offenders = [
+        line.strip()
+        for block in bash_blocks(text)
+        for line in block.splitlines()
+        if re.search(r"ls\s+-[a-zA-Z]*a[a-zA-Z]*\s+/Applications/Docker\.app", line)
+    ]
+    assert not offenders, (
+        f"{name} inspects the Docker.app stub with `ls -la`, which the stub's "
+        "own stripped permissions defeat (field report 2026-08-05, R2-02). "
+        f"Use `ls -ld`. Offending lines: {offenders}"
+    )
+
+
+@pytest.mark.parametrize("name", RUNBOOKS)
+def test_a_runbook_that_mentions_the_docker_stub_shows_how_to_see_it(name: str):
+    """The positive half. Forbidding `ls -la` is only half a fix if the
+    replacement quietly disappears in a later edit."""
+    text = runbook_text(name)
+    if text is None or "/Applications/Docker.app" not in text:
+        pytest.skip(f"{name} does not discuss the Docker.app stub")
+    assert "ls -ld /Applications/Docker.app" in text, (
+        f"{name} discusses the Docker.app stub but never shows `ls -ld "
+        "/Applications/Docker.app`, the only listing the stub's stripped "
+        "permissions do not defeat."
+    )
 
 
 # --- R2-05: no script may be addressed to one developer's machine ---------

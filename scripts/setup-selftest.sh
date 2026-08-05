@@ -141,10 +141,29 @@ echo "== step 8 — doctor from the clone, and from outside one =="
 cd "$ROOT" || exit 2
 wring doctor >/dev/null 2>&1 && ok "doctor exits 0 from the clone" \
     || bad "doctor is not clean in its own repo"
+
+# Outside a repo, the three repository-scoped checks must SKIP — not fail,
+# not silently pass. SETUP.md step 8 documents that state but its own
+# command (`cd ~/wringer && wring doctor`) cannot produce it, because from
+# the clone those three never skip (R2-01). Nothing executed the documented
+# state until this. The runbook now carries the contrasting transcript, and
+# these two checks are what stop that transcript rotting.
 cd "$WORK" || exit 2
 wring doctor >/dev/null 2>&1 \
     && ok "doctor exits 0 outside a repo (repo checks skipped)" \
     || bad "doctor still blocks outside a repo — finding D regressed"
+
+SKIPS=$(wring doctor 2>/dev/null | grep -c '^- ')
+[ "$SKIPS" -eq 3 ] \
+    && ok "doctor prints three '-' lines outside a repo" \
+    || bad "doctor printed $SKIPS '-' lines outside a repo, expected 3 (R2-01)"
+
+# `grep -o | wc -l`, not `grep -c`: --json prints ONE line, so grep -c
+# counts matching lines and answers 1 no matter how many skips there are.
+JSON_SKIPS=$(wring doctor --json 2>/dev/null | grep -o '"status": "skip"' | wc -l | tr -d " ")
+[ "$JSON_SKIPS" -eq 3 ] \
+    && ok "doctor --json reports three \"status\": \"skip\" entries" \
+    || bad "doctor --json reported $JSON_SKIPS skips, expected 3 (R2-01)"
 
 echo
 echo "-------------------------------------------"

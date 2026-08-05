@@ -264,12 +264,31 @@ Correct output: a single version string, e.g. `27.5.1`. Two failure modes,
 both stop conditions:
 
 - `command not found` → Docker is not installed. Report it; the human
-  installs it. **Check for a stub first:** if `/Applications/Docker.app`
-  exists but `ls -la` shows an empty, root-owned directory with its
-  permissions stripped, that is a leftover from a removal (commonly MDM on a
-  managed Mac), not an install. It will make a reinstall fail or demand
-  `sudo`. Clearing it needs privileges — report it and let the human or
-  their IT handle it.
+  installs it. **Check for a stub first:**
+
+  ```bash
+  ls -ld /Applications/Docker.app
+  ```
+
+  `ls -ld`, not `ls -la`: the stripped permissions are exactly what stops
+  `ls -la` reading the directory, so the command that would show you the
+  problem is the one the problem blocks —
+
+  ```
+  $ ls -la /Applications/Docker.app
+  ls: /Applications/Docker.app: Permission denied
+
+  $ ls -ld /Applications/Docker.app
+  d---------  2 root  admin  64 ... /Applications/Docker.app
+  ```
+
+  That shape — no permission bits at all, owned by `root`, a link count of
+  2 and 64 bytes, meaning empty — is a leftover from a removal (commonly MDM
+  on a managed Mac), not an install. There is no binary inside and no
+  socket. It will make a reinstall fail or demand `sudo`. Clearing it needs
+  privileges: report it and let the human or their IT handle it. If the
+  directory does not exist at all, `ls -ld` says `No such file or
+  directory`, and that is the ordinary "Docker was never installed" case.
 - `Cannot connect to the Docker daemon` → Docker is installed but not
   running. Ask the human to start Docker Desktop, or on Linux to run
   `sudo systemctl start docker` — a privileged command, so theirs to type,
@@ -474,6 +493,36 @@ doctor exit: 0
 Paths and versions will differ; the check *names* will not — a test in this
 repository fails if this transcript names a check `wring doctor` does not
 have.
+
+**And what "reported as skipped" actually looks like.** The paragraph above
+tells you the three repository checks skip outside a repo, but the command
+above cannot show you that — run from the clone, they never skip. So here is
+the contrasting run, captured in an empty directory that is not a git
+repository:
+
+```bash
+cd /tmp && mkdir -p not-a-repo && cd not-a-repo && wring doctor; echo "doctor exit: $?"
+```
+
+```
+✓ python                Python 3.12.13
+✓ wring                 wring 0.2.0 at /Users/you/.local/bin/wring
+✓ git                   git version 2.50.1 (Apple Git-155)
+! container runtime     no container runtime found (Apple silicon detected)
+                        → Install apple/container (needs macOS 26) or Docker Desktop — or skip the container and run wring directly
+- git repository        not a git repository — run from your repo to check
+- gates                 not a git repository — run from your repo to check
+- workspace writable    not a git repository — run from your repo to check
+! llm key               no LLM API key in the environment
+                        → Only needed for `wring judge --send`. Provide it when you launch, and never paste it to an agent
+
+This machine is ready. The - lines describe a repository and were not checked here — run `wring doctor` from your repo for those.
+doctor exit: 0
+```
+
+**Three `-` lines, and the exit code is still `0`.** A skip is not a
+failure: those three checks had nothing to look at, and the closing line
+says so rather than implying the machine is short of something.
 
 **Read the marks, not the vibes:**
 
