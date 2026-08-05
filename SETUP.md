@@ -93,6 +93,12 @@ Everything else here is safe to run unattended. **Every step is idempotent**
 — re-running it is harmless. If you do not know whether a step already ran,
 run its verify command first; if it passes, skip the step.
 
+Idempotent does not mean silent. A second run of a step that creates
+something may say so — most of these are `git` telling you a repository
+already exists. That is a note, not the "output does not match" stop
+condition above: the stop condition is about a *verify* command disagreeing
+with this file, not about a setup command being chattier the second time.
+
 ---
 
 ## Step 1 — Confirm you are in the Wringer repo
@@ -399,7 +405,7 @@ Only if step 4 found no container runtime. Same probe, same expected shape —
 what you lose is isolation, not function.
 
 ```bash
-mkdir -p ~/wringer-workspace/probe && cd ~/wringer-workspace/probe && git init -q -b main . && git config user.email you@example.com && git config user.name "You" && printf 'def add(a, b):\n    return a + b\n' > calc.py && printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml && git add -A && git commit -qm probe && wring verify
+mkdir -p ~/wringer-workspace/probe && cd ~/wringer-workspace/probe && { [ -d .git ] || git init -q -b main .; } && git config user.email you@example.com && git config user.name "You" && printf 'def add(a, b):\n    return a + b\n' > calc.py && printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml && printf '.wringer/\n' > .gitignore && git add calc.py .wringer.yaml .gitignore && { git diff --cached --quiet || git commit -qm probe; } && wring verify
 ```
 
 Correct output — identical to step 7's, because it is the same harness:
@@ -414,6 +420,27 @@ Evidence written to:
 Exit `0`, and a bundle on disk. **Say so in your hand-back:** the gates ran
 on the host, unisolated, because no runtime was available. That is a true
 and useful setup; it is not the same claim as step 7.
+
+**Why the `.gitignore` and the named `git add`.** A bundle holds raw gate
+output, so a repository that commits it is one push away from publishing
+whatever a gate printed. `wring init` writes that ignore rule for you; this
+probe hand-writes its `.wringer.yaml` and never calls `wring init`, so it
+has to do the same job itself. With a bare `git add -A` a second run of this
+block stages the *first* run's `.wringer/` and commits it — measured: two
+runs, two commits, nine tracked evidence files. On a real repository that
+pattern commits evidence into the user's history.
+
+The `[ -d .git ] ||` guard is the other half. Re-running `git init` in an
+existing repo prints `warning: re-init: ignored --initial-branch=main`,
+which is harmless and is still unexplained output in a runbook that tells
+you to stop on unexplained output.
+
+`git diff --cached --quiet || git commit` is the third. Once the three
+named files are committed, a second run stages nothing and a plain `git
+commit` exits 1 — which would break the `&&` chain and skip `wring verify`,
+the one command this step exists to run. The old `git add -A` hid that,
+because there was always a fresh `.wringer/` to stage. Committing only when
+something is actually staged fixes both halves at once.
 
 ## Step 8 — Run `wring doctor`, **from your clone**
 
@@ -534,11 +561,13 @@ disk.
 
 ```bash
 mkdir -p ~/wringer-workspace/probe && cd ~/wringer-workspace/probe
-git init -q -b main .
+[ -d .git ] || git init -q -b main .
 git config user.email you@example.com && git config user.name "You"
 printf 'def add(a, b):\n    return a + b\n' > calc.py
 printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml
-git add -A && git commit -qm probe
+printf '.wringer/\n' > .gitignore
+git add calc.py .wringer.yaml .gitignore
+git diff --cached --quiet || git commit -qm probe
 
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v "$HOME/wringer-workspace:/workspace" \

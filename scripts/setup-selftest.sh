@@ -78,15 +78,54 @@ touch "$WORK/wringer-workspace/.wringer-write-test" \
     && ok "workspace writable" || bad "workspace not writable"
 
 echo
-echo "== step 7H — the host branch =="
-mkdir -p "$WORK/wringer-workspace/probe" && cd "$WORK/wringer-workspace/probe" || exit 2
-git init -q -b main .
-git config user.email you@example.com
-git config user.name "You"
-printf 'def add(a, b):\n    return a + b\n' > calc.py
-printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml
-git add -A && git commit -qm probe >/dev/null
-if wring verify; then ok "wring verify exits 0"; else bad "wring verify failed"; fi
+echo "== step 7H — the host branch, run TWICE =="
+# Twice on purpose. The runbook promises every step is idempotent, and the
+# first version of this block broke that promise two ways at once: a bare
+# `git add -A` staged the previous run's `.wringer/` — two runs, two
+# commits, nine tracked evidence files — and a second `git init` printed a
+# re-init warning into a runbook that says to stop on unexplained output
+# (R2-03, R2-04). Running it once could never have found either.
+#
+# Kept verbatim from SETUP.md step 7H apart from the path. If the runbook's
+# block changes, change this one to match, or this stops testing the runbook
+# and starts testing a paraphrase of it.
+probe_7h() {
+    mkdir -p "$WORK/wringer-workspace/probe" && cd "$WORK/wringer-workspace/probe" || exit 2
+    { [ -d .git ] || git init -q -b main .; }
+    git config user.email you@example.com
+    git config user.name "You"
+    printf 'def add(a, b):\n    return a + b\n' > calc.py
+    printf 'version: 1\ngates:\n  - id: check\n    run: "grep -q return calc.py"\n' > .wringer.yaml
+    printf '.wringer/\n' > .gitignore
+    git add calc.py .wringer.yaml .gitignore
+    git diff --cached --quiet || git commit -qm probe >/dev/null 2>&1
+    wring verify
+}
+
+if probe_7h; then ok "wring verify exits 0"; else bad "wring verify failed"; fi
+
+SECOND=$(probe_7h 2>&1)
+if [ $? -eq 0 ]; then ok "7H is idempotent — a second run also exits 0"
+else bad "7H failed on its second run"; fi
+
+case "$SECOND" in
+    *"re-init"*) bad "7H's second run prints a git re-init warning (R2-04)" ;;
+    *)           ok "7H's second run prints no re-init warning" ;;
+esac
+
+COMMITS=$(git rev-list --count HEAD)
+[ "$COMMITS" -eq 1 ] \
+    && ok "two 7H runs leave exactly one commit" \
+    || bad "two 7H runs left $COMMITS commits — the second staged the first's evidence"
+
+TRACKED=$(git ls-files .wringer | wc -l | tr -d " ")
+[ "$TRACKED" -eq 0 ] \
+    && ok "no evidence bundle is tracked by git (R2-03)" \
+    || bad "$TRACKED evidence file(s) committed into the probe repo (R2-03)"
+
+git check-ignore -q .wringer \
+    && ok "the probe ignores .wringer/" \
+    || bad "the probe has no .gitignore rule for .wringer/"
 
 echo
 echo "== step 7's documented bundle contents =="
