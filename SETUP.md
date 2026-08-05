@@ -545,7 +545,17 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -w /workspace/probe ghcr.io/marcoakes/wringer:main verify
 ```
 
-Apple container: same arguments, `container run --rm --volume … --workdir …`.
+Apple container — same arguments, with Apple's flag spellings. `--user`,
+`-e`, `--volume` and `--workdir` all exist on `container run`:
+
+```bash
+container run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+  --volume "$HOME/wringer-workspace:/workspace" \
+  --workdir /workspace/probe ghcr.io/marcoakes/wringer:main verify
+```
+
+Verified on Apple `container` 1.2.0: exits 0, and every file in the bundle
+lands owned by the invoking host user.
 
 Correct output — one line per declared gate, then a path:
 
@@ -559,12 +569,20 @@ Evidence written to:
 Exit code `0`. The duration and the run id will differ from what is shown
 here; the shape will not.
 
-**`--user` and `-e HOME` are not ceremony.** The image runs as uid 1000, a
-bind-mounted directory keeps its *host* ownership, and Wringer must write its
-evidence into that mount. Without them the workspace is read-only to the
-container and `wring doctor` correctly reports a blocking problem. Docker
-Desktop on macOS papers over this with uid mapping; Linux does not. This is
-the recipe CI exercises on every push.
+**`--user` and `-e HOME` are required on Linux, and harmless elsewhere.** The
+image runs as uid 1000, a bind-mounted directory keeps its host ownership,
+and Wringer must write its evidence into that mount. On **Linux** that fails
+without these flags, which is why CI passes them on every push. **Docker
+Desktop on macOS** and **Apple `container`** both translate uids across the
+mount, so the flags change nothing there — measured on Apple `container`
+1.2.0: a flagless run exits 0 and the bundle lands owned by the host user.
+Pass them anyway; one recipe that is correct everywhere beats three that are
+each correct somewhere.
+
+One cosmetic surprise: `--user 502:20` reports `gid=20(dialout)` inside the
+container. Group 20 is `staff` on macOS and `dialout` on Linux, and the
+container resolves the number against its own group file. Harmless — but
+confusing in a log, so it is written down here rather than discovered twice.
 
 Then, back on the host:
 
