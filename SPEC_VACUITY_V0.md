@@ -1,7 +1,8 @@
 # SPEC — vacuity detection (P5, part 2)
 
-*Drafted 2026-08-03 by the planning window. **DRAFT — awaiting Marc's
-approval; not binding until he says so.** His open rulings are marked ⚖.*
+*Drafted 2026-08-03 by the planning window. **Ruling 1 decided by Marc
+2026-08-05 (§3a, §5). DRAFT on rulings 2 and 3; not binding until he says
+so.** His remaining open rulings are marked ⚖.*
 
 ## Positioning
 
@@ -55,11 +56,51 @@ test extends.
   refusal): no attestation for gates that proved nothing. This is the
   rubric line "a new behaviour needs a test that fails without it" turned
   from a judge's opinion into a machine check.
-- **The loop, when the repo opts in** (`run.prove: true` — ⚖ see rulings):
+- **The loop, when the repo opts in** (`run.prove: true` — see ruling 1):
   a converged-but-vacuous iteration does not converge; the worker gets a
   brief that says *"write a test that fails without your change"* and the
   loop continues. The plateau fingerprint already prevents thrash.
 - `wring deliver` — ⚖ ruling 2.
+
+## 3a. How it is switched on — BINDING (ruling 1)
+
+**The config declares the policy. A flag may only tighten it.**
+
+| | effect |
+|---|---|
+| `run.prove: true` in `.wringer.yaml` | every `wring run` in this repo proves |
+| `--prove` on `wring verify` or `wring run` | proves this once, whatever the config says |
+| `--no-prove` | **does not exist, deliberately** |
+
+The convenience reading of this ruling — "repos opt in once" — is not the
+reason. The reason is **authority over the supervised party**.
+
+`wring run` drives an agent that writes code, and `--prove` exists
+precisely to catch that agent writing tautological tests. If switching it
+on were a flag, then whoever invokes `wring run` decides whether the check
+happens — and that invoker is increasingly the agent itself, or a script
+the agent wrote. **The audited party does not get to choose whether the
+audit runs.** `.wringer.yaml` is committed and reviewed like code; what
+counts as *proven* for a repository belongs there.
+
+The flag remains, in the tightening direction only, so someone can try
+`--prove` on one run without editing config or making a commit. Nothing
+can turn off what the repo declared.
+
+This is the same shape as `approved: false` in SPEC_INTENT_V0 — *"an
+interlock no flag, environment variable or model reply may flip, and there
+is deliberately no `--yes`"* — and matching it is the point. Two features
+ruling the same way makes **flags may tighten, never loosen** a rule people
+learn once, rather than a per-feature surprise.
+
+**Discoverability, decided with it.** A config-only setting nobody knows
+about is a setting nobody uses, so `wring init`'s template names
+`run.prove` in a commented block, the way it already teaches with commented
+example gates. `wring verify` does **not** warn when vacuity was not
+checked. The placeholder warning is tolerable because it disappears when
+the user fixes it; this one would never disappear unless they accept
+doubled gate time, so it would be permanent noise — and a warning nobody
+can act on is one everybody learns to skip.
 
 ## 4. Cost, stated plainly
 
@@ -67,15 +108,21 @@ test extends.
 on `verify`, a config key for the loop. The docs say why you would pay it
 in one sentence: *a green tick that cannot fail is worth nothing.*
 
-## 5. ⚖ Marc's rulings, needed at approval
+## 5. Rulings
 
-1. **Loop opt-in shape:** `run.prove: true` in config (recommended —
-   repos opt in once) vs `--prove` on `wring run` only.
-2. **Should `wring deliver` refuse a vacuous run?** Recommended: yes, same
+1. **Loop opt-in shape — DECIDED 2026-08-05: config declares, flags may
+   only tighten.** Full design and reasoning in §3a. `run.prove: true` in
+   `.wringer.yaml`; `--prove` turns it on for one run; there is no
+   `--no-prove`. Chosen for authority over the supervised party rather than
+   for convenience, and matched deliberately to the `approved: false`
+   interlock so that *flags may tighten, never loosen* is one rule instead
+   of two precedents.
+
+2. ⚖ **Should `wring deliver` refuse a vacuous run?** Recommended: yes, same
    exit-1 family as "gates did not pass" — but it makes `--prove` + deliver
    strictly stricter, which is a behaviour change a repo chose only
    implicitly.
-3. **Worktree cost guard:** repos with huge working trees pay a checkout
+3. ⚖ **Worktree cost guard:** repos with huge working trees pay a checkout
    per `--prove`. Accept (it's opt-in), or add a declared ceiling?
 
 ## 6. Non-goals (binding once approved)
@@ -92,6 +139,15 @@ outcomes) · any LLM involvement — this is deterministic or it is nothing.
 - [ ] a mixed set (sensitive test gate + insensitive lint gate) reports
       per-gate sensitivity and whole-set `proven`
 - [ ] a failed normal run never triggers the prove pass
+- [ ] **§3a** — `run.prove: true` makes every `wring run` prove; `--prove`
+      proves once against a config that says nothing; `--no-prove` is not a
+      flag and `wring run --no-prove` exits 2 rather than silently ignoring
+      it; and **no flag or environment variable can turn off `run.prove:
+      true`** — the test that matters, mirroring the one that guards
+      `approved: false`
+- [ ] **§3a** — `wring init`'s template names `run.prove` in a commented
+      block, and `wring verify` prints no warning when vacuity was not
+      checked
 - [ ] the scratch worktree is gone afterwards, pass or fail or Ctrl-C
 - [ ] `digests.json` covers `vacuity.json` and the `vacuity/` logs
 - [ ] attest refuses `gates_vacuous` with a test
