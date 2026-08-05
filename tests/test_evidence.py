@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,34 @@ def stamp(path: Path, when: datetime) -> None:
 def test_run_id_has_the_spec_shape():
     run_id = evidence.new_run_id(NOW)
     assert RUN_ID.match(run_id), run_id
-    assert run_id.startswith("20260730-080601-")
+    # 08:06:01+01:00 is 07:06:01 UTC, and the id is stamped in UTC — see the
+    # timezone-invariance test below for why.
+    assert run_id.startswith("20260730-070601-")
+
+
+def test_run_ids_are_the_same_wherever_the_clock_is_set():
+    """The AC-03 assertion, verbatim from the field report.
+
+    A container has no reason to share its host's timezone; this project's
+    own image resolves to Etc/UTC. On 2026-08-05 a container run that
+    happened twenty minutes AFTER a host run of the same repository got an id
+    sorting forty minutes BEFORE it, because both were stamped in local time:
+
+        host       20260805-102717-3470   started_at +01:00   (10:27 wall)
+        container  20260805-094741-56d0   started_at +00:00   (10:47 wall)
+
+    `run_id` is the directory name, so anything ordering runs lexically
+    disagreed with `ls -t`. The id must name one instant, not one instant as
+    seen from wherever the process happened to be standing.
+    """
+    instant = datetime(2026, 8, 5, 9, 47, 41, tzinfo=UTC)
+
+    in_bst = evidence.new_run_id(instant.astimezone(timezone(timedelta(hours=1))))
+    in_utc = evidence.new_run_id(instant.astimezone(UTC))
+    in_tokyo = evidence.new_run_id(instant.astimezone(timezone(timedelta(hours=9))))
+
+    stamps = {run_id.rsplit("-", 1)[0] for run_id in (in_bst, in_utc, in_tokyo)}
+    assert stamps == {"20260805-094741"}
 
 
 def test_run_ids_differ_within_the_same_second():
@@ -124,6 +151,50 @@ def test_latest_run_still_picks_a_manual_run_when_it_is_the_newest(tmp_path: Pat
     stamp(manual, datetime(2026, 7, 30, 20, 19, 40))
 
     assert evidence.latest_run(runs) == manual
+
+
+def test_latest_run_believes_the_manifest_over_the_directory_name(
+    tmp_path: Path,
+):
+    """Belt and braces for AC-03. Stamping ids in UTC is the fix; not
+    ordering on the id at all is what makes the fix unnecessary next time.
+
+    Here the names say one thing and the runs' own records say the opposite —
+    which is exactly the shape of a directory holding one bundle written
+    before the UTC change and one written after. `started_at` carries an
+    offset, so it can be believed; a name cannot.
+    """
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    looks_newer = runs / "20260805-102717-3470"  # name sorts last
+    really_newer = runs / "20260805-094741-56d0"  # ran 20 minutes later
+    for directory, started in (
+        (looks_newer, "2026-08-05T10:27:17+01:00"),  # 09:27 UTC
+        (really_newer, "2026-08-05T09:47:41+00:00"),  # 09:47 UTC
+    ):
+        directory.mkdir()
+        (directory / evidence.MANIFEST_FILENAME).write_text(
+            json.dumps({"started_at": started}), encoding="utf-8"
+        )
+    # mtimes deliberately agree with the names, not the truth, so only the
+    # manifest can get this right.
+    os.utime(really_newer, (1, 1))
+    os.utime(looks_newer, (2, 2))
+
+    assert evidence.latest_run(runs) == really_newer
+
+
+def test_latest_run_survives_a_manifest_it_cannot_read(tmp_path: Path):
+    """An ordering key must be total. A bundle too damaged to parse still
+    has an mtime, and refusing to list runs because one is corrupt would be
+    the wrong trade for `wring explain`."""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    broken = runs / "20260805-094741-56d0"
+    broken.mkdir()
+    (broken / evidence.MANIFEST_FILENAME).write_text("{not json", encoding="utf-8")
+
+    assert evidence.latest_run(runs) == broken
 
 
 def test_latest_run_with_no_runs_is_none(tmp_path: Path):

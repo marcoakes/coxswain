@@ -17,7 +17,7 @@ import json
 import secrets
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +48,7 @@ SUMMARY_FILENAME = "summary.md"
 GATES_DIRNAME = "gates"
 RUNS_DIRNAME = Path(".wringer") / "runs"
 
-# The id's timestamp prefix: `20260730-080601` of `20260730-080601-a13f`.
+# The id's timestamp prefix: `20260730-070601` of `20260730-070601-a13f`.
 _RUN_ID_TIME_FORMAT = "%Y%m%d-%H%M%S"
 _RUN_ID_TIME_LENGTH = 15
 
@@ -69,28 +69,67 @@ def latest_run(runs_root: Path) -> Path | None:
     return max(runs, key=_started_at)
 
 
-def _started_at(run_dir: Path) -> tuple[datetime, float]:
-    """When a run began, for ordering — read from its id, or its mtime.
+def _started_at(run_dir: Path) -> tuple[float, float]:
+    """When a run began, for ordering — from its manifest, its id, or mtime.
 
-    A run id starts with a sortable timestamp, but `--output` lets a caller
-    name a directory anything, and comparing those names as *text* let one
-    letter outrank every real run forever: `manual-001` beats `20260730-…`
-    because "m" > "2", so `wring explain` would keep diagnosing the manual
-    run no matter how many newer ones landed. A directory whose name is not
-    a run id is dated by its mtime instead.
+    Epoch seconds, so the three sources are actually comparable.
 
-    Within one second the id ends in a *random* suffix, not a counter, so
+    **The manifest wins**, because `started_at` carries a UTC offset and is
+    therefore unambiguous. A run id is a *name*, and this project has already
+    had names be wrong about time: ids were stamped in local time until
+    2026-08-05, so a container writing UTC and a host writing BST produced
+    ids that sorted forty minutes away from the truth. Stamping ids in UTC
+    fixed that. Not depending on the id for ordering is what stops the next
+    timezone from mattering at all — the id being unambiguous is the fix, and
+    this is the thing that makes the fix unnecessary.
+
+    Two fallbacks, for directories that cannot answer. A run killed before it
+    wrote a manifest is dated by the timestamp in its id, read as local time
+    — which is what an id meant when this fallback was written, and its mtime
+    breaks the tie either way. A directory whose name is not a run id at all
+    is dated by mtime alone: `--output` lets a caller name a directory
+    anything and QUICKSTART teaches exactly that, so compared as *text* one
+    letter outranks every real run forever — `manual-001` beats `20260730-…`
+    because "m" > "2", and `wring explain` would keep diagnosing the manual
+    run however many newer ones landed.
+
+    Within one second an id ends in a *random* suffix, not a counter, so
     mtime breaks that tie too. Two runs landing in the same second is not a
     corner case: it is what a verify-fix-verify loop does all day.
     """
     mtime = run_dir.stat().st_mtime
+    recorded = _manifest_started_at(run_dir)
+    if recorded is not None:
+        return recorded.timestamp(), mtime
     try:
-        started = datetime.strptime(
+        named = datetime.strptime(
             run_dir.name[:_RUN_ID_TIME_LENGTH], _RUN_ID_TIME_FORMAT
         )
     except ValueError:  # not a run id — a caller-named --output directory
-        started = datetime.fromtimestamp(mtime)
-    return started, mtime
+        return mtime, mtime
+    return named.timestamp(), mtime
+
+
+def _manifest_started_at(run_dir: Path) -> datetime | None:
+    """A run's own record of when it began, or None if it never wrote one.
+
+    Deliberately total: this is an ordering key, and a bundle too damaged to
+    read its own manifest still has an mtime. Refusing to list runs because
+    one of them is corrupt would be the wrong trade for `wring explain`.
+    """
+    try:
+        raw = json.loads((run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("started_at")
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def read_manifest(run_dir: Path) -> dict[str, Any]:
@@ -217,12 +256,28 @@ def timestamp() -> str:
 
 
 def new_run_id(now: datetime) -> str:
-    """`YYYYMMDD-HHMMSS-<4 hex>` in local time, e.g. `20260730-080601-a13f`.
+    """`YYYYMMDD-HHMMSS-<4 hex>` in UTC, e.g. `20260730-070601-a13f`.
+
+    UTC, not local time, because a run id is a directory NAME and names get
+    sorted. A container has no reason to share its host's timezone — this
+    project's own image resolves to `Etc/UTC` — so a local-time id makes host
+    and container runs of the same repository sort against each other
+    wrongly. Measured on 2026-08-05: a container run that happened twenty
+    minutes AFTER a host run carried an id sorting forty minutes BEFORE it,
+    so `ls` and `ls -t` disagreed about which run was newest. For a tool
+    whose whole premise is auditable evidence, an ambiguous ordering key is a
+    defect rather than a preference.
+
+    `started_at` in the manifest stays local-with-offset. That is the field a
+    human reads, and the offset is the part they want.
+
+    Callers pass an aware datetime, so this is a conversion and not a
+    reinterpretation.
 
     The random suffix — not a counter — keeps two runs in the same second
     from colliding without either one having to read the other's state.
     """
-    return f"{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+    return f"{now.astimezone(UTC):%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
 
 
 @dataclass(frozen=True)

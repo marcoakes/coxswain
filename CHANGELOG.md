@@ -4,6 +4,35 @@ Notable changes, newest first. Wringer follows [semantic
 versioning](https://semver.org/); schema versions move independently of the
 package version and are listed per release.
 
+## Unreleased
+
+### Changed
+
+- **BREAKING — `run_id` is stamped in UTC**, not in the host's local time.
+  A run id is a directory *name*, and names get sorted; a container has no
+  reason to share its host's timezone, and this project's own image resolves
+  to `Etc/UTC`. A field run on 2026-08-05 measured a container run that
+  happened twenty minutes *after* a host run of the same repository carrying
+  an id that sorted forty minutes *before* it, so `ls` and `ls -t` disagreed
+  about which run was newest. For a tool whose premise is auditable evidence
+  that is a defect, not a preference.
+
+  **Existing run directories are unaffected** — nothing is renamed, nothing
+  is migrated, every bundle already on disk stays exactly as it is. Only
+  newly created ids shift, by your UTC offset. `started_at` in the manifest
+  is unchanged and stays local-with-offset: it is the field humans read.
+  `wringer.evidence.v1` is untouched, and its own description of `run_id`
+  already told readers not to parse it for a timestamp.
+
+  Taken now because the format only gets more expensive to change: 0.2.0 is
+  two days old and run directories are local artefacts nobody has archived.
+
+  Belt and braces, in the same change: Wringer no longer orders runs by
+  directory name anywhere. `wring explain` and `wring resume` pick the
+  latest run by the manifest's `started_at`, falling back to the id and then
+  to mtime. The id becoming unambiguous is the fix; not depending on it is
+  what makes the next timezone a non-event.
+
 ## 0.2.0 — 2026-08-03
 
 The release that turns an evidence compiler into a supervision layer. **Ten

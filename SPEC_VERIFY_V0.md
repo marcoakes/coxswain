@@ -87,7 +87,7 @@ Code, Codex CLI, Gemini CLI — they need structure, not prose):
   "status": "failed",
   "failed_gate": "test",
   "rerun": "wring verify --gate test",
-  "evidence_dir": ".wringer/runs/20260730-080601-a13f"
+  "evidence_dir": ".wringer/runs/20260730-070601-a13f"
 }
 ```
 
@@ -99,7 +99,7 @@ lines, changed files, and the exact rerun command.
 
 ```bash
 wring explain
-wring explain .wringer/runs/2026-07-30T080601Z
+wring explain .wringer/runs/2026-07-30T070601Z
 ```
 
 ## The evidence bundle (this is the product)
@@ -108,7 +108,7 @@ Boring, stable, grep-friendly. This format is the interface future
 agents and judges consume — see [RFC #2](https://github.com/marcoakes/wringer/issues/2).
 
 ```
-.wringer/runs/20260730-080601-a13f/
+.wringer/runs/20260730-070601-a13f/
   manifest.json
   evidence.jsonl
   summary.md
@@ -125,12 +125,21 @@ agents and judges consume — see [RFC #2](https://github.com/marcoakes/wringer/
       result.json
 ```
 
+The run directory's name is stamped in **UTC** (amended 2026-08-05: a
+field run measured host and container runs of one repository sorting
+against each other, because both ids were local and the container was not
+in the host's timezone). `ts` and `started_at` stay local-with-offset —
+they are what a human reads, and the offset is the part they want. The id
+is what gets *sorted*, so it names one instant from everywhere. Readers
+should still order runs by `started_at` rather than by the name; `--output`
+lets a caller name a directory anything.
+
 `evidence.jsonl` — append-only, one JSON object per line. Every event
 carries `type` and a millisecond-precision local `ts` (amended
 2026-07-30, Bolt 3: an audit trail needs to be placeable in time):
 
 ```json
-{"type":"run.started","ts":"2026-07-30T08:06:01.004+01:00","run_id":"20260730-080601-a13f","wringer_version":"0.1.0","repo":"wringer","sha":"abc123"}
+{"type":"run.started","ts":"2026-07-30T08:06:01.004+01:00","run_id":"20260730-070601-a13f","wringer_version":"0.1.0","repo":"wringer","sha":"abc123"}
 {"type":"git.status","ts":"2026-07-30T08:06:01.031+01:00","dirty":true,"changed_files":["src/foo.py","tests/test_foo.py"]}
 {"type":"gate.started","ts":"2026-07-30T08:06:01.033+01:00","gate_id":"lint","command":"make lint"}
 {"type":"gate.finished","ts":"2026-07-30T08:06:02.875+01:00","gate_id":"lint","exit_code":0,"duration_ms":1842}
@@ -144,7 +153,7 @@ carries `type` and a millisecond-precision local `ts` (amended
 ```json
 {
   "schema_version": "wringer.evidence.v1",
-  "run_id": "20260730-080601-a13f",
+  "run_id": "20260730-070601-a13f",
   "started_at": "2026-07-30T08:06:01+01:00",
   "repo": {
     "root": ".",
@@ -268,10 +277,10 @@ $ wring verify
 ✗ test failed        9.2s
 
 Evidence written to:
-.wringer/runs/20260730-080601-a13f/
+.wringer/runs/20260730-070601-a13f/
 
 Next:
-  open .wringer/runs/20260730-080601-a13f/summary.md
+  open .wringer/runs/20260730-070601-a13f/summary.md
   rerun wring verify --gate test
 ```
 
