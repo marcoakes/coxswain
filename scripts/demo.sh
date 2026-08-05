@@ -11,8 +11,24 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$(dirname "$0")/scratch.sh"
 SCRATCH=$(scratch_dir "${1:-}" demo) || exit 2
-PY="$ROOT/.venv/bin/python"
-WRING="$ROOT/.venv/bin/wring"
+# Prefer the repo venv (a developer regenerating the demo has one), then the
+# uv-tool install SETUP.md step 3 creates, then PATH. The venv was hardcoded,
+# which made this script one machine's — and "reproducible by anyone" was
+# printed a few lines above the assumption.
+for candidate in "$ROOT/.venv/bin" "$HOME/.local/bin"; do
+    if [ -x "$candidate/wring" ] && [ -x "$candidate/python" ]; then
+        PY="$candidate/python"; WRING="$candidate/wring"; break
+    fi
+done
+PY=${PY:-$(command -v python3 || true)}
+WRING=${WRING:-$(command -v wring || true)}
+if [ -z "$PY" ] || [ -z "$WRING" ]; then
+    echo "FATAL: need both python and wring — looked in $ROOT/.venv/bin," >&2
+    echo "  \$HOME/.local/bin, then \$PATH. Install with:" >&2
+    echo "  uv tool install --force --python 3.12 $ROOT" >&2
+    exit 2
+fi
+echo "recording with $WRING ($("$WRING" --version))"
 
 if [ -d "$SCRATCH" ]; then find "$SCRATCH" -mindepth 1 -delete 2>/dev/null; fi
 mkdir -p "$SCRATCH"
@@ -41,8 +57,12 @@ EOF
 #   worker: claude -p "$(cat {brief})"
 # or an acp: mapping; here it is a shell one-liner so the demo is honest
 # about running no agent and reproducible by anyone.
+# `sed -i ''` is BSD-only and this script claims to be reproducible by
+# anyone; GNU sed reads the '' as a filename and fails. Writing beside the
+# file and moving it works on both, and needs no feature detection.
 cat > fix.sh <<'EOF'
-sed -i '' 's/return a + b + 1/return a + b/' calc.py
+sed 's/return a + b + 1/return a + b/' calc.py > calc.py.tmp
+mv calc.py.tmp calc.py
 EOF
 
 cat > .wringer.yaml <<'EOF'

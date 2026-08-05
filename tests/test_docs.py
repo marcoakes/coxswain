@@ -379,3 +379,91 @@ def test_nothing_promises_a_latest_image_tag():
         "a workflow publishes a :latest image tag, which README and SETUP.md "
         f"both say does not exist: {offenders}"
     )
+
+
+# --- the demo must show the command it ran ---------------------------------
+#
+# The cast displayed `ls .wringer/runs/<id>/` while what actually ran was
+# `ls -1 .wringer/runs/$(ls -1 .wringer/runs | tail -1)`. A viewer typing what
+# they saw got columnated output, not the one-per-line listing the recording
+# shows — a transcript of a command nobody ran. A review flagged it on
+# 2026-08-03 and it was still there two days later, because nothing tested it.
+
+
+def demo_record_module():
+    import importlib.util
+
+    path = repo_root() / "scripts" / "demo_record.py"
+    spec = importlib.util.spec_from_file_location("demo_record", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_demos_listing_step_displays_exactly_what_it_executes(tmp_path):
+    require_checkout("scripts/demo_record.py")
+    runs = tmp_path / ".wringer" / "runs" / "20260805-120000-abcd"
+    runs.mkdir(parents=True)
+
+    prompt, command = demo_record_module()._listing_step("wring", tmp_path)
+
+    assert command[:2] == ["sh", "-c"]
+    assert command[2] == prompt, (
+        "the demo shows one command and runs another — law 8, in the artifact "
+        "the README puts at the top of the page"
+    )
+    assert "<id>" not in prompt, "a placeholder is not a runnable command"
+    assert "20260805-120000-abcd" in prompt
+
+
+def test_the_committed_cast_shows_no_placeholder_command():
+    require_checkout("docs/demo.cast.json")
+    import json as _json
+
+    cast = _json.loads(
+        (repo_root() / "docs" / "demo.cast.json").read_text(encoding="utf-8")
+    )
+    prompts = [f["text"] for f in cast if f.get("prompt")]
+    assert prompts, "the cast has no prompt lines — it is not a demo"
+    for prompt in prompts:
+        assert "<" not in prompt, (
+            f"the committed cast shows a placeholder rather than a real "
+            f"command: {prompt!r}"
+        )
+
+
+def test_the_committed_cast_timings_are_quantized():
+    """Pacing is presentation and snaps to a grid; captured text is evidence
+    and does not. Without this every regeneration rewrote 19 of 20 floats and
+    every derived SVG keyframe, so a diff could not be read for whether the
+    DEMO had changed."""
+    require_checkout("docs/demo.cast.json")
+    import json as _json
+
+    module = demo_record_module()
+    cast = _json.loads(
+        (repo_root() / "docs" / "demo.cast.json").read_text(encoding="utf-8")
+    )
+    quantum = module.TIMING_QUANTUM
+    off_grid = [
+        f["at"]
+        for f in cast
+        if abs(f["at"] / quantum - round(f["at"] / quantum)) > 1e-9
+    ]
+    assert not off_grid, f"cast timings are not on the {quantum}s grid: {off_grid}"
+
+
+def test_quantize_never_touches_the_captured_text():
+    """The whole safety argument for quantizing: law 8 is about what the
+    commands PRINTED, and this function may not edit a character of it."""
+    module = demo_record_module()
+    original = [
+        {"at": 0.0, "text": "$ wring run", "prompt": True},
+        {"at": 1.2345, "text": "✓ test passed       0.17s"},
+        {"at": 2.9876, "text": ""},
+    ]
+    snapped = module.quantize(original)
+
+    assert [f["text"] for f in snapped] == [f["text"] for f in original]
+    assert [f.get("prompt") for f in snapped] == [f.get("prompt") for f in original]
+    assert [f["at"] for f in snapped] == [0.0, 1.2, 3.0]
