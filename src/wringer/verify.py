@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from wringer import __version__, config, evidence, gates, git, redact, summary
+from wringer import __version__, config, detect, evidence, gates, git, redact, summary
 
 # Called as each gate finishes, so a console can report a long run as it
 # happens rather than after it. None for callers that want no output.
@@ -35,6 +35,11 @@ class Outcome:
     interrupted: summary.Interrupted | None
     failed_gate: str | None
     status: str
+    # Every required gate is still the placeholder `wring init` writes, so
+    # this run's `passed` is about the harness and not about the code. The
+    # caller has to be able to say so; a green exit that quietly means
+    # nothing is the failure mode this whole tool argues against.
+    template_only: bool = False
 
     @property
     def passed(self) -> bool:
@@ -173,6 +178,10 @@ def run(
         status=status,
         **({"failed_gate": failed_gate} if failed_gate is not None else {}),
     )
+    # Read from the config rather than recorded in the manifest:
+    # `wringer.evidence.v1` is frozen and cannot grow a field for this.
+    template_only = detect.is_untouched_template(cfg.gates)
+
     bundle.write_manifest(state=state, status=status, failed_gate=failed_gate)
     summary.write(
         bundle,
@@ -182,6 +191,7 @@ def run(
         failed_gate=failed_gate,
         status=status,
         interrupted=interrupted,
+        template_only=template_only,
     )
     # LAST, so it covers everything else the run wrote. `digests.json` is what
     # lets a later `wring attest` say "and none of it has been altered since"
@@ -195,6 +205,7 @@ def run(
         interrupted=interrupted,
         failed_gate=failed_gate,
         status=status,
+        template_only=template_only,
     )
 
 

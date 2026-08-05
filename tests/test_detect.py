@@ -172,5 +172,94 @@ def test_the_blank_template_also_parses(tmp_path: Path):
     written.write_text(detect.template(None), encoding="utf-8")
 
     cfg = config.load(written)
-    assert [gate.id for gate in cfg.gates] == ["format", "lint", "test"]
-    assert cfg.gates[0].optional is True
+    assert [gate.id for gate in cfg.gates] == [detect.PLACEHOLDER_GATE_ID]
+    assert cfg.gates[0].run == detect.PLACEHOLDER_GATE_RUN
+    assert cfg.gates[0].optional is False
+
+
+# --- the blank template must describe the repo it was written into --------
+#
+# A field run pointed `wring init` at a real Python project — pyproject.toml,
+# uv.lock, a .venv — and got back "no pyproject.toml" (field report
+# 2026-08-05, R2-07). The refusal to invent gates was RIGHT: that project
+# declares no ruff, mypy or pytest anywhere, so there is nothing to gate, and
+# guessing `pytest -q` is the cleverness detect.py exists not to do. The
+# sentence was what was wrong, and it turned a correct refusal into what
+# looked like a broken detector.
+#
+# These two cases are the fix's whole contract, and they are worth a test
+# rather than a proofread because the old message was a module-level
+# constant: nothing about it could be true of a repository it had never seen.
+
+
+def test_the_blank_template_names_what_it_found(tmp_path: Path):
+    """A pyproject with nothing gateable in it. Detection still declines —
+    and now says why, in terms of the file the reader is looking at."""
+    write(tmp_path, "pyproject.toml", '[project]\nname = "x"\n')
+
+    detection = detect.detect(tmp_path)
+    assert detection.found is False
+    assert detection.seen == ("pyproject.toml",)
+
+    rendered = detect.template(detection)
+    assert "Found pyproject.toml" in rendered
+    assert "No pyproject.toml" not in rendered
+
+
+def test_the_blank_template_still_reports_a_genuinely_empty_directory(
+    tmp_path: Path,
+):
+    detection = detect.detect(tmp_path)
+    assert detection.seen == ()
+
+    rendered = detect.template(detection)
+    assert "No pyproject.toml" in rendered
+    assert "Found pyproject.toml" not in rendered
+
+
+def test_a_makefile_is_named_once_not_twice(tmp_path: Path):
+    """macOS's filesystem is case-insensitive by default, so both spellings
+    stat the same file. "Found Makefile, makefile" reads like a bug."""
+    write(tmp_path, "Makefile", "help:\n\techo hi\n")
+
+    seen = detect.detect(tmp_path).seen
+    assert len(seen) == 1
+    assert seen[0].lower() == "makefile"
+
+
+# --- recognising the untouched template -----------------------------------
+
+
+def test_the_shipped_placeholder_is_recognised_as_untouched(tmp_path: Path):
+    written = tmp_path / config.CONFIG_FILENAME
+    written.write_text(detect.template(None), encoding="utf-8")
+
+    assert detect.is_untouched_template(config.load(written).gates) is True
+
+
+def test_a_real_gate_is_never_mistaken_for_the_placeholder(tmp_path: Path):
+    written = tmp_path / config.CONFIG_FILENAME
+    written.write_text(
+        'version: 1\ngates:\n  - id: lint\n    run: "ruff check ."\n',
+        encoding="utf-8",
+    )
+
+    assert detect.is_untouched_template(config.load(written).gates) is False
+
+
+def test_the_placeholder_left_behind_as_optional_is_not_untouched(
+    tmp_path: Path,
+):
+    """Someone who added real gates and kept the placeholder as an optional
+    curiosity has configured this repo. Only the required gates decide."""
+    written = tmp_path / config.CONFIG_FILENAME
+    written.write_text(
+        "version: 1\ngates:\n"
+        f'  - id: {detect.PLACEHOLDER_GATE_ID}\n'
+        f'    run: "{detect.PLACEHOLDER_GATE_RUN}"\n'
+        "    optional: true\n"
+        '  - id: lint\n    run: "ruff check ."\n',
+        encoding="utf-8",
+    )
+
+    assert detect.is_untouched_template(config.load(written).gates) is False

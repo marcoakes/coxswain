@@ -321,10 +321,27 @@ def cmd_init(args: argparse.Namespace) -> int:
             f"gates: {gates}"
         )
         print("Check they are the commands you want proven, then: wring verify")
+    elif detection.seen:
+        # Name what is on disk. Saying "nothing to detect here" to someone
+        # looking at their own pyproject.toml reads as a broken detector
+        # rather than as a deliberate refusal to guess (R2-07).
+        print(
+            f"Wrote {target.name} — found {', '.join(detection.seen)}, but "
+            "nothing in it declares a command Wringer recognises, so it is a "
+            "template rather than a guess."
+        )
+        print(
+            "Replace the placeholder gate with the commands that prove your "
+            "change is mergeable, then run: wring verify"
+        )
     else:
         print(
-            f"Wrote {target.name} — nothing to detect here, so it is a "
-            "template. Replace the example gates, then run: wring verify"
+            f"Wrote {target.name} — nothing here to read commands from, so it "
+            "is a template rather than a guess."
+        )
+        print(
+            "Replace the placeholder gate with the commands that prove your "
+            "change is mergeable, then run: wring verify"
         )
 
     # Only where there is a git repo to ignore things in. Writing a
@@ -405,7 +422,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
         _report_json(outcome.bundle, root, outcome.failed_gate, outcome.status)
     else:
         _report_run(
-            outcome.bundle, root, outcome.results, outcome.failed_gate, outcome.status
+            outcome.bundle,
+            root,
+            outcome.results,
+            outcome.failed_gate,
+            outcome.status,
+            template_only=outcome.template_only,
         )
 
     if outcome.interrupted is not None:
@@ -1882,6 +1904,7 @@ def _report_run(
     results: list[gates.GateResult],
     failed_gate: str | None,
     status: str = "passed",
+    template_only: bool = False,
 ) -> None:
     if status == "interrupted":
         print("\n✗ interrupted — the run stopped before every gate finished")
@@ -1889,6 +1912,16 @@ def _report_run(
         failure = next(r for r in results if r.gate.id == failed_gate)
         for path in (failure.stdout_path, failure.stderr_path):
             _print_tail(path, bundle.relative(path))
+    if template_only:
+        # A `!`, deliberately — the same mark `wring doctor` uses for "worth
+        # knowing, not a problem". This run did not fail and must not look
+        # like it did; it just did not prove anything either.
+        print(
+            "\n! This config is still a template: the only gate is the"
+            "\n  placeholder, so this run proved nothing about your code."
+            "\n  Replace it with the commands that prove your change is"
+            "\n  mergeable."
+        )
 
     shown = _bundle_path(bundle, root)
     print(f"\nEvidence written to:\n{shown}/")

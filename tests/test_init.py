@@ -1,6 +1,6 @@
 """`wring init` behavior."""
 
-from wringer import cli, config
+from wringer import cli, config, detect
 
 
 def test_init_writes_template_that_parses(tmp_path, monkeypatch, capsys):
@@ -13,9 +13,66 @@ def test_init_writes_template_that_parses(tmp_path, monkeypatch, capsys):
 
     # The template must be loadable by our own strict parser.
     cfg = config.load(written)
-    assert [g.id for g in cfg.gates] == ["format", "lint", "test"]
-    assert cfg.gates[0].optional is True
-    assert cfg.gates[1].optional is False
+    assert [g.id for g in cfg.gates] == [detect.PLACEHOLDER_GATE_ID]
+    assert cfg.gates[0].run == detect.PLACEHOLDER_GATE_RUN
+    assert cfg.gates[0].optional is False
+
+
+def test_a_fresh_init_then_verify_exits_zero_and_says_it_proved_nothing(
+    repo, monkeypatch, capsys
+):
+    """The first thing a new user does, end to end.
+
+    Before this, the template's three example gates were all `make` targets,
+    so in any repo without a Makefile `wring init && wring verify` went red
+    and exited 1 on a perfectly healthy tree (field report 2026-08-05,
+    R2-08). "The tool is broken" is the wrong first impression when the true
+    one is "you have not configured it yet".
+
+    The green exit is bought with a sentence, not with silence. A gate that
+    always passes proves nothing, and a bundle that says `passed` because of
+    it is precisely the vacuous evidence this project exists to prevent — so
+    the run says so, in the terminal and in the bundle, until the placeholder
+    is replaced.
+    """
+    monkeypatch.chdir(repo)
+    assert cli.main(["init"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "still a template" in out
+    assert "proved nothing" in out
+    assert "✗" not in out  # a warning, not a failure
+
+    runs = sorted((repo / ".wringer" / "runs").iterdir())
+    assert len(runs) == 1
+    written = (runs[0] / "summary.md").read_text(encoding="utf-8")
+    assert "still a template" in written
+    assert "proved nothing" in written
+
+
+def test_the_warning_goes_away_once_the_placeholder_is_replaced(
+    repo, monkeypatch, capsys, write_config
+):
+    """The other half of the acceptance test. A repo with real gates must
+    not be nagged, or the warning becomes noise and stops being read."""
+    write_config(
+        repo,
+        'version: 1\ngates:\n  - id: check\n'
+        '    run: "grep -q version .wringer.yaml"\n',
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "still a template" not in out
+    runs = sorted((repo / ".wringer" / "runs").iterdir())
+    assert "still a template" not in (runs[0] / "summary.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_init_writes_detected_gates_when_it_finds_them(

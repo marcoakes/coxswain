@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from wringer import evidence
+from wringer import detect, evidence
 from wringer.config import Gate
 from wringer.evidence import Bundle
 from wringer.gates import GateResult
@@ -44,6 +44,7 @@ def write(
     failed_gate: str | None,
     status: str = "passed",
     interrupted: Interrupted | None = None,
+    template_only: bool = False,
 ) -> Path:
     """Write `summary.md` into the bundle and return its path."""
     lines = [
@@ -56,6 +57,13 @@ def write(
     changes = _changes_line(state)
     if changes is not None:
         lines.append(changes)
+    # Before the table, because the table is the part that looks like proof.
+    # A bundle whose result says `passed` must not be readable as "verified"
+    # when the only gate that ran was the placeholder — the terminal saying
+    # so is not enough, since the bundle is what outlives the terminal and
+    # what a reviewer is handed.
+    if template_only:
+        lines += ["", f"> ⚠ **{detect.TEMPLATE_WARNING}**"]
     lines += [
         "",
         "| gate | status | duration | logs |",

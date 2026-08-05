@@ -15,10 +15,36 @@ from __future__ import annotations
 import json
 import re
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # only for a type; detect stays free of runtime coupling
+    from wringer.config import Gate
 
 CONFIG_FILENAME = ".wringer.yaml"
+
+# The gate the blank template ships, and the two values `wring verify` reads
+# to recognise it. It passes, so `wring init && wring verify` exits 0 in a
+# repo nobody has configured yet — a red first run reads as "this tool is
+# broken" rather than "you have not configured it yet".
+#
+# But a gate that always passes proves nothing, and a bundle whose status is
+# `passed` because of it is exactly the vacuous evidence this project exists
+# to make impossible (SPEC_VACUITY_V0.md). So the green exit is bought back
+# with a sentence: `wring verify` says so on the terminal and in `summary.md`
+# for as long as the placeholder is all there is. Detecting that by comparing
+# against these constants — rather than by a flag written into the bundle —
+# is deliberate: `wringer.evidence.v1` is frozen and cannot grow a field.
+PLACEHOLDER_GATE_ID = "placeholder"
+PLACEHOLDER_GATE_RUN = "true"
+
+TEMPLATE_WARNING = (
+    "This config is still a template: the only gate is the placeholder, so "
+    "this run proved nothing about your code. Replace it with the commands "
+    "that prove your change is mergeable."
+)
 
 # Gates are declared cheapest first (spec §Config design, rule 1), so the
 # feedback a developer waits for arrives in the order they can act on.
@@ -63,6 +89,11 @@ class Candidate:
 class Detection:
     candidates: tuple[Candidate, ...] = ()
     sources: tuple[str, ...] = ()
+    # What was on disk, whether or not it yielded a gate. Detection does not
+    # use this — the message does. Telling a Python developer "no
+    # pyproject.toml" while they are looking at theirs is how a correct
+    # refusal to guess gets read as a broken detector.
+    seen: tuple[str, ...] = ()
 
     @property
     def found(self) -> bool:
@@ -81,14 +112,48 @@ def detect(root: Path) -> Detection:
             sources.append(source)
 
     return Detection(
-        candidates=tuple(_ordered(_deduplicated(found))), sources=tuple(sources)
+        candidates=tuple(_ordered(_deduplicated(found))),
+        sources=tuple(sources),
+        seen=_seen(root),
+    )
+
+
+def _seen(root: Path) -> tuple[str, ...]:
+    """The build-config files that are actually here.
+
+    `Makefile` and `makefile` count once, not twice: on a case-insensitive
+    filesystem — the macOS default — both spellings stat the same file, and
+    "Found Makefile, makefile" reads like a bug in the thing reporting it.
+    """
+    seen = [
+        name for name in ("pyproject.toml", "package.json") if (root / name).is_file()
+    ]
+    makefile = next(
+        (name for name in ("Makefile", "makefile") if (root / name).is_file()), None
+    )
+    if makefile is not None:
+        seen.append(makefile)
+    return tuple(seen)
+
+
+def is_untouched_template(gates: Iterable[Gate]) -> bool:
+    """Whether these gates are still nothing but the shipped placeholder.
+
+    Required gates only. Someone who has added their real gates and left the
+    placeholder behind as `optional: true` has configured the repo; someone
+    whose only required gate is `true` has not, whatever the run says.
+    """
+    required = [gate for gate in gates if not gate.optional]
+    return bool(required) and all(
+        gate.id == PLACEHOLDER_GATE_ID and gate.run.strip() == PLACEHOLDER_GATE_RUN
+        for gate in required
     )
 
 
 def template(detection: Detection | None = None) -> str:
     """Render the `.wringer.yaml` to write."""
     if detection is None or not detection.found:
-        return BLANK_TEMPLATE
+        return _blank_template(detection)
 
     lines = [
         f"# {CONFIG_FILENAME} — the gates Wringer runs to prove a change is"
@@ -267,14 +332,13 @@ def _detect_make(root: Path) -> tuple[list[Candidate], str]:
     return candidates, "Makefile" if candidates else ""
 
 
-BLANK_TEMPLATE = f"""\
+_BLANK_HEAD = f"""\
 # {CONFIG_FILENAME} — the gates Wringer runs to prove a change is mergeable.
 # Spec: https://github.com/marcoakes/wringer/blob/main/SPEC_VERIFY_V0.md
 #
-# Nothing was detected here — no pyproject.toml, package.json or Makefile
-# declaring commands — so this is a template, not a guess. Replace the
-# examples with the commands that prove YOUR change is mergeable, then run:
-# wring verify
+"""
+
+_BLANK_TAIL = f"""\
 #
 # Rules: gates run in order, cheapest first. A failing required gate fails
 # the run (exit 1). Mark a gate `optional: true` to record its failure
@@ -282,15 +346,24 @@ BLANK_TEMPLATE = f"""\
 version: 1
 
 gates:
-  - id: format
-    run: make format-check
-    optional: true
+  # A gate that passes, so the harness works the moment `wring init` has run.
+  # It proves NOTHING about your code, and `wring verify` says so on every
+  # run until you replace it.
+  - id: {PLACEHOLDER_GATE_ID}
+    run: "{PLACEHOLDER_GATE_RUN}"
 
-  - id: lint
-    run: make lint
-
-  - id: test
-    run: make test
+# Examples. Uncomment what fits, edit it, and delete the placeholder above.
+# These are the shapes, not a guess about this repository:
+#
+#  - id: format
+#    run: make format-check
+#    optional: true
+#
+#  - id: lint
+#    run: make lint
+#
+#  - id: test
+#    run: make test
 
 evidence:
   include:
@@ -299,3 +372,32 @@ evidence:
     - env
     - logs
 """
+
+
+def _blank_template(detection: Detection | None = None) -> str:
+    """The template written when nothing was detected — and why.
+
+    The "why" cannot be a constant. A module-level string can only assert
+    that all three build-config files are absent, and a field run pointed
+    `wring init` at a real Python project with a `pyproject.toml`, a
+    `uv.lock` and a `.venv` and got back "no pyproject.toml" (field report
+    2026-08-05, R2-07). The *refusal* was right — that project declares no
+    ruff, mypy or pytest anywhere, so there is genuinely nothing to gate, and
+    inventing `pytest -q` for it is the cleverness this module exists not to
+    do. The *sentence* was wrong, and it made a correct refusal look like a
+    broken detector.
+    """
+    seen = detection.seen if detection is not None else ()
+    if seen:
+        why = (
+            f"# Found {', '.join(seen)}, but nothing in it declares a lint, "
+            "typecheck or\n# test command Wringer recognises — so this is a "
+            "template, not a\n# guess. Wringer reports commands your repo "
+            "already writes down;\n# it never invents one.\n"
+        )
+    else:
+        why = (
+            "# No pyproject.toml, package.json or Makefile here, so there was\n"
+            "# nothing to read commands from — this is a template, not a guess.\n"
+        )
+    return _BLANK_HEAD + why + _BLANK_TAIL
