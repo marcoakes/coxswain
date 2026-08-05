@@ -597,11 +597,26 @@ def send(
     # Paths arrive NUL-separated on stdin rather than as argv: they come from
     # the repository, so there is no length and no character this has to hope
     # about. `--all` still applies to them, so a deletion stages as one.
-    _run(
-        root,
-        ["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"],
-        stdin="\0".join(planned.changed_files),
-    )
+    #
+    # Only the paths `git add` can actually match are passed to it. A rename's
+    # source is a change (the file was deleted) and belongs in the commit, but
+    # `git mv` has already removed it from BOTH the worktree and the index, so
+    # `git add` answers "pathspec did not match any files" and exits 128 —
+    # taking the whole delivery down. Nothing needs adding for those: the
+    # deletion is staged already, and `commit --only` below names them anyway,
+    # which is what records it (verified: the commit lands as `R100 src -> dst`).
+    #
+    # A deletion the user made WITHOUT git — plain `rm` — is different: the
+    # path is still in the index, so it matches, and `--all` stages it. That
+    # case must keep working, which is why this filters on matchability rather
+    # than on "the file exists".
+    addable = _matchable(root, planned.changed_files)
+    if addable:
+        _run(
+            root,
+            ["add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            stdin="\0".join(addable),
+        )
     # `--only` commits the named paths and NOTHING else. Staging the right
     # paths was not enough: `git commit` commits the whole index, so anything
     # the user had already staged — a `.wringer/` bundle, an unrelated
@@ -632,6 +647,19 @@ def send(
         bundle.event("push.done", remote=planned.remote, branch=planned.branch)
 
     return done
+
+
+def _matchable(root: Path, paths: tuple[str, ...]) -> list[str]:
+    """The subset of `paths` that `git add` can resolve to something.
+
+    `git add` matches against the worktree and the index. A path in neither —
+    a rename source, already removed from both by `git mv` — makes it exit
+    128 for the whole pathspec list, so those are filtered out here rather
+    than allowed to abort a delivery that is otherwise correct.
+    """
+    code, listed = _git(root, ["ls-files", "-z", "--", *paths])
+    indexed = set(listed.split("\0")) if code == 0 else set()
+    return [path for path in paths if path in indexed or (root / path).exists()]
 
 
 def _run(root: Path, args: list[str], stdin: str | None = None) -> None:

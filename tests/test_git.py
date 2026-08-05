@@ -66,7 +66,15 @@ def test_changed_and_untracked_are_recorded_separately(repo: Path, git_run):
     assert state.dirty is True
 
 
-def test_a_rename_records_the_path_that_exists_now(repo: Path, git_run):
+def test_a_rename_records_both_the_new_path_and_the_deleted_one(
+    repo: Path, git_run
+):
+    """This test used to assert `changed_files == ("new.py",)` — it encoded
+    the bug rather than the contract. A rename is two changes: a file
+    appeared and a file was deleted. Recording only the arrival made
+    `wring deliver` commit only the arrival, so the delivered branch kept a
+    file the verified tree had removed.
+    """
     (repo / "old.py").write_text("x\n", encoding="utf-8")
     git_run(repo, "add", "old.py")
     git_run(repo, "commit", "-q", "-m", "add old")
@@ -74,7 +82,7 @@ def test_a_rename_records_the_path_that_exists_now(repo: Path, git_run):
 
     state = git.inspect(repo)
 
-    assert state.changed_files == ("new.py",)
+    assert sorted(state.changed_files) == ["new.py", "old.py"]
     assert state.untracked == ()
 
 
@@ -246,3 +254,49 @@ def test_inspect_outside_a_repo_records_nulls(tmp_path: Path):
     assert state.head_sha is None
     assert state.branch is None
     assert state.dirty is False
+
+
+# --- a rename's source is evidence -----------------------------------------
+#
+# `_parse_status` used to skip the source path of an R/C porcelain entry, on
+# the reasoning that "the new path is the one that exists now, so the source
+# is not evidence". That is true of the source as a FILE and false of the
+# source as a CHANGE: `git mv src.py dst.py` deletes src.py, and a bundle
+# that does not record the deletion describes a tree that is not the one
+# verified.
+#
+# It was not a cosmetic gap. `wring deliver` builds its commit pathspec from
+# exactly this list (deliver.py), so with the source missing the deletion was
+# never committed: the delivered branch carried BOTH files while the run's
+# own diff.patch recorded a rename. Reproduced end to end before this fix —
+# see tests/test_deliver.py's rename test.
+
+
+def test_a_staged_rename_records_both_paths(repo: Path, git_run):
+    (repo / "src.py").write_text("def original():\n    return 1\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-qm", "add source")
+    git_run(repo, "mv", "src.py", "dst.py")
+
+    state = git.inspect(repo)
+
+    assert "dst.py" in state.changed_files, state.changed_files
+    assert "src.py" in state.changed_files, (
+        "the rename's source is deleted, and a bundle that omits the deletion "
+        "describes a tree that was never verified"
+    )
+
+
+def test_a_rename_source_is_not_confused_with_an_untracked_file(repo: Path, git_run):
+    """The two paths of an R entry are both *changed*; neither is untracked,
+    and the entry after it must not be parsed as a status line."""
+    (repo / "src.py").write_text("x = 1\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-qm", "add source")
+    git_run(repo, "mv", "src.py", "dst.py")
+    (repo / "loose.txt").write_text("untracked\n", encoding="utf-8")
+
+    state = git.inspect(repo)
+
+    assert set(state.changed_files) == {"src.py", "dst.py"}, state.changed_files
+    assert state.untracked == ("loose.txt",), state.untracked

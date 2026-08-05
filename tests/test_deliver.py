@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from wringer import acquire, cli, deliver, forge
+from wringer import acquire, cli, config, deliver, forge
 
 CONFIG = """\
 version: 1
@@ -944,3 +944,126 @@ def test_a_delivery_with_no_spec_says_so_rather_than_guessing(
         (written / deliver.MANIFEST_FILENAME).read_text(encoding="utf-8")
     )
     assert manifest["spec_sha256"] is None
+
+
+# --- the delivered tree must BE the verified tree ---------------------------
+#
+# Three holes, each confirmed by reproduction on 2026-08-05 before being
+# fixed, all with the same consequence: `wring deliver` published a branch
+# whose tree differed from the one the gates ran against. That is law 1 and
+# law 2 broken by the one command that speaks to the outside world — the
+# same class as the 2026-08-02 finding where an MR body reported a gate table
+# for a tree it had never seen.
+
+
+def test_a_renamed_file_is_not_resurrected_on_the_delivered_branch(
+    delivery_repo, monkeypatch, capsys
+):
+    """A staged rename deletes the source. The delivered branch must not
+    carry it.
+
+    Before the fix: `git mv src dst` -> verify -> deliver produced
+    changed_files == ("dst.py",), so deliver's commit pathspec omitted the
+    deletion entirely. The branch shipped BOTH files while the run's own
+    diff.patch recorded `rename from src.py / rename to dst.py` — the merge
+    request attesting a rename its own branch did not contain.
+    """
+    (delivery_repo / "feature.py").unlink()  # start from the fixture's clean base
+    (delivery_repo / "src.py").write_text("def original():\n    return 1\n", "utf-8")
+    git(delivery_repo, "add", "-A")
+    git(delivery_repo, "commit", "-m", "add source")
+    git(delivery_repo, "mv", "src.py", "dst.py")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "rename")
+    bundle = deliver.Bundle.create(delivery_repo / deliver.DELIVERIES_DIRNAME)
+    bundle.write_plan(planned)
+    deliver.send(delivery_repo, bundle, planned, push=False)
+
+    shipped = set(
+        git(delivery_repo, "ls-tree", "-r", "--name-only", "wringer/rename").split()
+    )
+    assert "dst.py" in shipped
+    assert "src.py" not in shipped, (
+        "the delivered branch resurrected a file the verified tree deleted"
+    )
+    # and nothing is left stranded in the index afterwards
+    assert "src.py" not in git(delivery_repo, "status", "--porcelain")
+
+
+def test_a_file_added_inside_an_untracked_directory_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """`git status --porcelain` collapses an untracked directory to ONE
+    entry, so a set-compare of names cannot see a file appearing inside it.
+
+    Before the fix this shipped: a file created AFTER the gates ran was
+    pushed on the delivery branch, at arbitrary nesting depth, while the
+    patch shown to the approving human was zero bytes — because the
+    untracked *directory* was skipped by the diff too.
+    """
+    (delivery_repo / "feature.py").unlink()
+    newdir = delivery_repo / "newdir"
+    newdir.mkdir()
+    (newdir / "a.txt").write_text("first\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    (newdir / "b.txt").write_text("SMUGGLED AFTER VERIFY\n", encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "smuggle")
+    assert "b.txt" in str(refusal.value), str(refusal.value)
+
+
+def test_the_smuggle_is_caught_at_any_nesting_depth(
+    delivery_repo, monkeypatch, capsys
+):
+    """The checker who re-reproduced this found it reached arbitrary depth,
+    not just direct children — so the guard is asserted at depth too."""
+    (delivery_repo / "feature.py").unlink()
+    deep = delivery_repo / "newdir" / "deep" / "deeper"
+    deep.mkdir(parents=True)
+    (delivery_repo / "newdir" / "a.txt").write_text("first\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    (deep / "evil.txt").write_text("SMUGGLED\n", encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "deep")
+    assert "evil.txt" in str(refusal.value), str(refusal.value)
+
+
+def test_untracked_content_that_did_not_change_still_delivers(
+    delivery_repo, monkeypatch, capsys
+):
+    """The control. Enumerating untracked files per-file must not make an
+    honest delivery refuse — only a changed one."""
+    (delivery_repo / "feature.py").unlink()
+    newdir = delivery_repo / "newdir"
+    newdir.mkdir()
+    (newdir / "a.txt").write_text("first\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "honest")
+    bundle = deliver.Bundle.create(delivery_repo / deliver.DELIVERIES_DIRNAME)
+    bundle.write_plan(planned)
+    deliver.send(delivery_repo, bundle, planned, push=False)
+
+    shipped = set(
+        git(delivery_repo, "ls-tree", "-r", "--name-only", "wringer/honest").split()
+    )
+    assert "newdir/a.txt" in shipped
+    # and the human was shown a real patch, not an empty one
+    patch = (bundle.directory / deliver.PATCH_FILENAME).read_text(encoding="utf-8")
+    assert "newdir/a.txt" in patch, "the approving human was shown an empty patch"

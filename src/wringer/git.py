@@ -57,7 +57,27 @@ def inspect(root: Path) -> RepoState:
     """Snapshot `root`'s git state. Call before writing the bundle, so the
     bundle's own directory is not what makes the tree look dirty."""
     branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
-    porcelain = _git(["status", "--porcelain", "-z"], cwd=root, strip=False)
+    # `-uall`, not git's default `-unormal`, and not the repo's preference.
+    #
+    # By default git collapses an untracked DIRECTORY into a single entry —
+    # `newdir/` rather than `newdir/a.txt`, `newdir/b.txt`. A bundle recording
+    # the collapsed form describes the tree with a name that stays identical
+    # however the directory's contents change, so `wring deliver`'s comparison
+    # of the verified file set against the current one could not see a file
+    # appear inside it. Reproduced 2026-08-05: a file created AFTER the gates
+    # ran was committed and pushed on the delivery branch, at any nesting
+    # depth, while the patch shown to the approving human was zero bytes —
+    # because `diff_untracked` skips a directory too.
+    #
+    # Passing the flag explicitly also stops the repo's own
+    # `status.showUntrackedFiles` setting from deciding what a bundle records:
+    # a machine configured with `all` was accidentally immune to that hole,
+    # which is no way to own a safety property.
+    porcelain = _git(
+        ["status", "--porcelain", "-z", "--untracked-files=all"],
+        cwd=root,
+        strip=False,
+    )
     changed, untracked = _parse_status(porcelain)
     return RepoState(
         root=root,
@@ -172,9 +192,29 @@ def _parse_status(porcelain: str | None) -> tuple[tuple[str, ...], tuple[str, ..
         code, path = entry[:2], entry[3:]  # "XY path"
         index += 1
         if code[:1] in ("R", "C"):
-            # A rename or copy is followed by its source path; the new path
-            # is the one that exists now, so the source is not evidence.
-            index += 1
+            # A rename or copy is followed by its source path in the NEXT
+            # NUL-separated entry. Both paths are changes.
+            #
+            # This used to skip the source, reasoning that the new path is
+            # the one that exists now. True of the source as a *file*, false
+            # of it as a *change*: `git mv src dst` deletes src, and a bundle
+            # that omits the deletion describes a tree nobody verified.
+            #
+            # The cost was not cosmetic. `wring deliver` builds its commit
+            # pathspec from this list, so an unrecorded deletion was never
+            # committed: the delivered branch carried BOTH files while the
+            # run's own diff.patch recorded a rename — the merge request
+            # attesting a rename its branch did not contain.
+            #
+            # A copy's source is not deleted, so recording it is redundant
+            # rather than wrong; git only emits `C` with -C/--find-copies
+            # enabled, which this call does not pass, so the branch is
+            # effectively rename-only. Kept together because the porcelain
+            # two-entry shape is identical and splitting them would invite
+            # the next reader to "simplify" one of them away.
+            if index < len(entries):
+                changed.append(entries[index])
+                index += 1
         if code == "??":
             untracked.append(path)
         else:
