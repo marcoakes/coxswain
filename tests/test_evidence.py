@@ -19,8 +19,14 @@ NOW = datetime(2026, 7, 30, 8, 6, 1, 123456, tzinfo=timezone(timedelta(hours=1))
 
 
 def stamp(path: Path, when: datetime) -> None:
-    """Give a run directory a real mtime — local, like the ids it competes
-    against, so the two are actually comparable."""
+    """Give a run directory a real mtime.
+
+    Pass an AWARE datetime. Run ids are UTC and every ordering source is
+    reduced to epoch seconds, so a naive datetime here would silently mean
+    "local" and make these tests pass or fail depending on the machine's
+    timezone — which is the exact bug (AC-03) they exist to pin down.
+    """
+    assert when.tzinfo is not None, "stamp() needs an aware datetime"
     epoch = when.timestamp()
     os.utime(path, (epoch, epoch))
 
@@ -132,8 +138,8 @@ def test_latest_run_is_not_hijacked_by_a_manual_name(tmp_path: Path):
     manual.mkdir()
     later.mkdir()
     # the manual run happened first, six seconds before the real one
-    stamp(manual, datetime(2026, 7, 30, 20, 19, 30))
-    stamp(later, datetime(2026, 7, 30, 20, 19, 36))
+    stamp(manual, datetime(2026, 7, 30, 20, 19, 30, tzinfo=UTC))
+    stamp(later, datetime(2026, 7, 30, 20, 19, 36, tzinfo=UTC))
 
     assert evidence.latest_run(runs) == later
 
@@ -147,8 +153,8 @@ def test_latest_run_still_picks_a_manual_run_when_it_is_the_newest(tmp_path: Pat
     manual = runs / "manual-001"
     earlier.mkdir()
     manual.mkdir()
-    stamp(earlier, datetime(2026, 7, 30, 20, 19, 36))
-    stamp(manual, datetime(2026, 7, 30, 20, 19, 40))
+    stamp(earlier, datetime(2026, 7, 30, 20, 19, 36, tzinfo=UTC))
+    stamp(manual, datetime(2026, 7, 30, 20, 19, 40, tzinfo=UTC))
 
     assert evidence.latest_run(runs) == manual
 
@@ -182,6 +188,66 @@ def test_latest_run_believes_the_manifest_over_the_directory_name(
     os.utime(looks_newer, (2, 2))
 
     assert evidence.latest_run(runs) == really_newer
+
+
+def test_a_run_with_no_record_is_still_dated_in_utc(tmp_path: Path):
+    """The case the first attempt at this got wrong, in both directions.
+
+    A directory with no record falls back to the timestamp in its id. Ids are
+    UTC, so the fallback must read UTC — the first version kept the old local
+    parse "to preserve behaviour" and thereby misdated every record-less
+    directory by the host's offset. East of UTC that hides a newer run;
+    west of UTC an abandoned one outranks its successors.
+
+    Not a corner case. A loop KILLED mid-flight never reaches
+    `loop.write_manifest`, and killed loops are the only thing `wring resume`
+    exists for.
+    """
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    # 09:47:41 UTC — no manifest, so the id is all there is.
+    crashed = runs / "20260805-094741-56d0"
+    crashed.mkdir()
+    os.utime(crashed, (1, 1))  # a useless mtime, like a killed process leaves
+
+    # A complete run one minute later, by its own record.
+    finished = runs / "20260805-094841-0000"
+    finished.mkdir()
+    (finished / evidence.MANIFEST_FILENAME).write_text(
+        json.dumps({"started_at": "2026-08-05T10:48:41+01:00"}), encoding="utf-8"
+    )
+    os.utime(finished, (2, 2))
+
+    assert evidence.latest_run(runs) == finished
+
+    # And the other way round: the record-less one really is newer.
+    later_crash = runs / "20260805-095000-abcd"
+    later_crash.mkdir()
+    os.utime(later_crash, (3, 3))
+    assert evidence.latest_run(runs) == later_crash
+
+
+def test_latest_run_reads_a_judge_verdicts_own_record(tmp_path: Path):
+    """`wring judge` writes `verdict.json`, not `manifest.json`, and `wring
+    deliver` orders those directories with this same function. Looking only
+    for a manifest meant every verdict fell through to the id — 100% of the
+    time, for a whole command."""
+    verdicts = tmp_path / "verdicts"
+    verdicts.mkdir()
+    looks_newer = verdicts / "20260805-102717-3470"
+    really_newer = verdicts / "20260805-094741-56d0"
+    for directory, started in (
+        (looks_newer, "2026-08-05T10:27:17+01:00"),  # 09:27 UTC
+        (really_newer, "2026-08-05T09:47:41+00:00"),  # 09:47 UTC
+    ):
+        directory.mkdir()
+        (directory / "verdict.json").write_text(
+            json.dumps({"started_at": started}), encoding="utf-8"
+        )
+    os.utime(really_newer, (1, 1))
+    os.utime(looks_newer, (2, 2))
+
+    assert evidence.latest_run(verdicts) == really_newer
 
 
 def test_latest_run_survives_a_manifest_it_cannot_read(tmp_path: Path):

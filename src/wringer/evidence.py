@@ -54,6 +54,13 @@ _RUN_ID_TIME_LENGTH = 15
 
 _RUN_ID_ATTEMPTS = 64
 
+# Files a run directory may use to record when it began, in the order they
+# are looked for. `verdict.json` is `judge.VERDICT_FILENAME`, spelled out
+# rather than imported because judge.py imports this module; both files carry
+# `started_at` as local-time-with-offset, which is the whole point of
+# preferring them to a directory name.
+_STARTED_AT_RECORDS = (MANIFEST_FILENAME, "verdict.json")
+
 
 class EvidenceError(Exception):
     """The bundle could not be written (CLI exit code 2)."""
@@ -70,66 +77,81 @@ def latest_run(runs_root: Path) -> Path | None:
 
 
 def _started_at(run_dir: Path) -> tuple[float, float]:
-    """When a run began, for ordering — from its manifest, its id, or mtime.
+    """When a run began, for ordering — from its own record, its id, or mtime.
 
     Epoch seconds, so the three sources are actually comparable.
 
-    **The manifest wins**, because `started_at` carries a UTC offset and is
-    therefore unambiguous. A run id is a *name*, and this project has already
-    had names be wrong about time: ids were stamped in local time until
-    2026-08-05, so a container writing UTC and a host writing BST produced
-    ids that sorted forty minutes away from the truth. Stamping ids in UTC
-    fixed that. Not depending on the id for ordering is what stops the next
-    timezone from mattering at all — the id being unambiguous is the fix, and
-    this is the thing that makes the fix unnecessary.
+    **The record wins.** `started_at` carries a UTC offset, so it is
+    unambiguous, and a directory NAME is not: ids were stamped in local time
+    until 2026-08-05, and a container writing UTC against a host writing BST
+    produced ids that sorted forty minutes from the truth. Ids are UTC now;
+    reading the record rather than the name is what stops the next timezone
+    mattering at all.
 
-    Two fallbacks, for directories that cannot answer. A run killed before it
-    wrote a manifest is dated by the timestamp in its id, read as local time
-    — which is what an id meant when this fallback was written, and its mtime
-    breaks the tie either way. A directory whose name is not a run id at all
-    is dated by mtime alone: `--output` lets a caller name a directory
-    anything and QUICKSTART teaches exactly that, so compared as *text* one
-    letter outranks every real run forever — `manual-001` beats `20260730-…`
-    because "m" > "2", and `wring explain` would keep diagnosing the manual
-    run however many newer ones landed.
+    **Every fallback is read as UTC too**, because that is what an id means
+    in this version. Getting this wrong is not theoretical — the first
+    attempt at this function kept the old local-time parse for directories
+    with no record, on the reasoning that it preserved existing behaviour,
+    and that quietly misdated by the host's offset the two cases that reach
+    it most:
+
+      - a loop KILLED mid-flight, which is the only thing `wring resume`
+        exists for, and which never reached `loop.write_manifest`;
+      - every `wring judge` verdict, which writes `verdict.json` and not a
+        manifest — so `wring deliver` picking "the latest verdict" took the
+        fallback 100% of the time.
+
+    A directory whose name is not a run id at all is dated by mtime: `--output`
+    lets a caller name a directory anything and QUICKSTART teaches exactly
+    that, so compared as *text* one letter outranks every real run forever —
+    `manual-001` beats `20260730-…` because "m" > "2", and `wring explain`
+    would keep diagnosing the manual run however many newer ones landed.
 
     Within one second an id ends in a *random* suffix, not a counter, so
     mtime breaks that tie too. Two runs landing in the same second is not a
     corner case: it is what a verify-fix-verify loop does all day.
     """
     mtime = run_dir.stat().st_mtime
-    recorded = _manifest_started_at(run_dir)
+    recorded = _recorded_started_at(run_dir)
     if recorded is not None:
         return recorded.timestamp(), mtime
     try:
         named = datetime.strptime(
             run_dir.name[:_RUN_ID_TIME_LENGTH], _RUN_ID_TIME_FORMAT
-        )
+        ).replace(tzinfo=UTC)
     except ValueError:  # not a run id — a caller-named --output directory
         return mtime, mtime
     return named.timestamp(), mtime
 
 
-def _manifest_started_at(run_dir: Path) -> datetime | None:
+def _recorded_started_at(run_dir: Path) -> datetime | None:
     """A run's own record of when it began, or None if it never wrote one.
 
+    More than one kind of directory gets ordered by `latest_run`, and they do
+    not all write a `manifest.json`: `wring judge` writes `verdict.json`.
+    Both carry `started_at` in the same shape, so both are read here rather
+    than each caller being trusted to remember — a safety property that
+    depends on every call site getting it right is not one.
+
     Deliberately total: this is an ordering key, and a bundle too damaged to
-    read its own manifest still has an mtime. Refusing to list runs because
-    one of them is corrupt would be the wrong trade for `wring explain`.
+    read its own record still has an mtime. Refusing to list runs because one
+    of them is corrupt would be the wrong trade for `wring explain`.
     """
-    try:
-        raw = json.loads((run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    value = raw.get("started_at")
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
+    for filename in _STARTED_AT_RECORDS:
+        try:
+            raw = json.loads((run_dir / filename).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        value = raw.get("started_at")
+        if not isinstance(value, str):
+            continue
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            continue
+    return None
 
 
 def read_manifest(run_dir: Path) -> dict[str, Any]:

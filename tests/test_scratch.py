@@ -33,7 +33,7 @@ SCRATCH = Path(__file__).resolve().parent.parent / "scripts" / "scratch.sh"
 def scratch_dir(base: str, name: str = "probe", env: dict | None = None):
     """Call the real shell function. Returns (exit_code, stdout)."""
     proc = subprocess.run(
-        ["sh", "-c", f'. "$1"; scratch_dir "$2" "$3"', "sh", str(SCRATCH), base, name],
+        ["sh", "-c", '. "$1"; scratch_dir "$2" "$3"', "sh", str(SCRATCH), base, name],
         capture_output=True,
         text=True,
         env=env,
@@ -142,7 +142,10 @@ def test_every_caller_uses_it():
         path
         for path in scripts
         if path.name != "scratch.sh"
-        and ("rm -rf" in path.read_text(encoding="utf-8") or "-delete" in path.read_text(encoding="utf-8"))
+        and any(
+            token in path.read_text(encoding="utf-8")
+            for token in ("rm -rf", "-delete")
+        )
     ]
     assert deleters, "no deleting scripts found — this guard is not guarding"
     for path in deleters:
