@@ -1,5 +1,5 @@
 {
-  "_comment": "sha256 of every JSON schema as it shipped at v0.2.0, captured from the tag itself. Law 7: these schemas are frozen. A byte change here without a new schema_version is a silent break for every reader of an existing bundle. tests/test_schema.py enforces it.",
+  "_comment": "sha256 of every published JSON schema. The ten from the v0.2.0 tag were captured from the tag itself; schemas added after it were captured when they were published, and describe formats frozen from that moment. Law 7: these are frozen. A byte change without a new schema_version is a silent break for every reader of an existing bundle. tests/test_schema.py enforces it; adding a NEW schema file is always allowed.",
   "tag": "v0.2.0",
   "schemas": {
     "acquired-manifest.schema.json": "4eeeedceead51da2f548f49666141a7011bd5e24f641e852f3eed02cd885bd1e",
@@ -11,6 +11,7 @@
     "loop-manifest.schema.json": "3b8ae52bf300abec63c1b0ec446e35288f6cab165712f02725d19a32e7d719c8",
     "manifest.schema.json": "b94f5666f326536697383a70dba54996c43f86477ace5e0701b0ae5090665fcc",
     "rubric.schema.json": "ea555570060f143c7ab48b6ba03aa5a7ebcd8fd9be4512f1ef3c4511c8803a42",
-    "spec.schema.json": "e33906faa571c4ca198de74581efcec768c93e2297a718bf7de2ddc39e99e747"
+    "spec.schema.json": "e33906faa571c4ca198de74581efcec768c93e2297a718bf7de2ddc39e99e747",
+    "untracked.schema.json": "53cfc3897a4a79f9037a87d8540bbf318ded1fe2e3b444004c72ab8971a16a98"
   }
 }

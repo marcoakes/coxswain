@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from wringer import acquire, cli, config, deliver, forge
+from wringer import acquire, cli, config, deliver, evidence, forge
 
 CONFIG = """\
 version: 1
@@ -1067,3 +1067,106 @@ def test_untracked_content_that_did_not_change_still_delivers(
     # and the human was shown a real patch, not an empty one
     patch = (bundle.directory / deliver.PATCH_FILENAME).read_text(encoding="utf-8")
     assert "newdir/a.txt" in patch, "the approving human was shown an empty patch"
+
+
+def test_editing_an_untracked_file_after_verify_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """The gap this closes, stated as it used to be stated in the source:
+    "an *untracked* file's contents are not in the bundle — git cannot diff
+    what it has never seen — so a content-only edit to an untracked file is
+    not detected here."
+
+    The file list is unchanged, every tracked byte is unchanged, and the
+    delivered content is different from the verified content. Nothing else in
+    check_verified_tree could see it.
+    """
+    (delivery_repo / "feature.py").unlink()
+    loose = delivery_repo / "notes.txt"
+    loose.write_text("verified content\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    assert (run_dir / evidence.UNTRACKED_FILENAME).is_file()
+
+    loose.write_text("EDITED AFTER VERIFY\n", encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "edited")
+    assert "notes.txt" in str(refusal.value)
+    assert "git never saw" in str(refusal.value)
+
+
+def test_an_unchanged_untracked_file_still_delivers(
+    delivery_repo, monkeypatch, capsys
+):
+    """The control: recording untracked bytes must not refuse an honest
+    delivery."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "notes.txt").write_text("stable\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "stable")
+    assert "notes.txt" in planned.changed_files
+
+
+def test_a_bundle_without_untracked_json_keeps_its_old_behaviour(
+    delivery_repo, monkeypatch, capsys
+):
+    """Bundles written before this file existed never made the claim, so
+    retro-fitting a refusal onto them would fail deliveries that were always
+    fine. Names are still compared; bytes are not."""
+    (delivery_repo / "feature.py").unlink()
+    loose = delivery_repo / "notes.txt"
+    loose.write_text("verified content\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    (run_dir / evidence.UNTRACKED_FILENAME).unlink()  # as a pre-0.3 bundle
+
+    loose.write_text("EDITED AFTER VERIFY\n", encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "legacy")
+    assert "notes.txt" in planned.changed_files
+
+
+def test_an_unreadable_untracked_file_is_refused_not_ignored(
+    delivery_repo, monkeypatch, capsys
+):
+    """A file whose bytes could not be read has not been verified. Skipping
+    it would let an unreadable file deliver as if it had been checked."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "notes.txt").write_text("x\n", encoding="utf-8")
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    recorded = run_dir / evidence.UNTRACKED_FILENAME
+    payload = json.loads(recorded.read_text(encoding="utf-8"))
+    payload["files"]["notes.txt"] = evidence.UNREADABLE
+    recorded.write_text(json.dumps(payload), encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "unreadable")
+    assert "notes.txt" in str(refusal.value)
+
+
+def test_untracked_json_is_covered_by_the_digests(
+    delivery_repo, monkeypatch, capsys
+):
+    """Write order matters: untracked.json before digests.json, or the
+    bundle's own tamper-evidence would not cover it."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "notes.txt").write_text("x\n", encoding="utf-8")
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    digests = json.loads(
+        (run_dir / evidence.DIGESTS_FILENAME).read_text(encoding="utf-8")
+    )
+    assert evidence.UNTRACKED_FILENAME in digests["files"]

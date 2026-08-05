@@ -17,6 +17,7 @@ rather than reverse-engineer it — the point of
 | [`delivery-manifest.schema.json`](delivery-manifest.schema.json) | `wringer.delivery.v1` — what a verified change became: branch, commit, push, MR |
 | [`acquired-manifest.schema.json`](acquired-manifest.schema.json) | `wringer.acquired.v1` — where a working copy came from |
 | [`digests.schema.json`](digests.schema.json) | `wringer.digests.v1` — `digests.json`, a sha256 per file in a bundle |
+| [`untracked.schema.json`](untracked.schema.json) | `wringer.untracked.v1` — `untracked.json`, a sha256 per *untracked* file in the tree the gates ran against |
 
 The loop schemas carry their own version, **`wringer.loop.v1`**, moving
 independently of the evidence bundle: a loop *references* the runs it drove
@@ -86,11 +87,14 @@ is what a new field is supposed to cost. Adding one is a spec change and
 bumps the version; it is not an implementation detail.
 
 **The freeze is enforced, not promised.** `frozen.json` records the sha256
-of every schema as it stood at the `v0.2.0` tag, captured from the tag
-itself rather than from the working tree. `tests/test_schema.py` fails if
-any of them changes a byte, or disappears. Adding a *new* schema file is
-always allowed and is how a new format arrives; editing a frozen one is
-not, because every bundle already written was written against it.
+of every published schema — the ten from the `v0.2.0` tag captured from the
+tag itself, and each later one captured when it was published.
+`tests/test_schema.py` fails if any changes a byte or disappears, and it
+also fails if a schema is published *without* joining the freeze: a
+published format nobody promised to keep is worse than an unpublished one.
+Adding a new schema file is always allowed and is how a new format arrives;
+editing a frozen one is not, because every bundle already written was
+written against it.
 
 ## Targeting these formats
 

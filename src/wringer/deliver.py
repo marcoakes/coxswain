@@ -244,10 +244,58 @@ def check_verified_tree(root: Path, run_dir: Path, state: git.RepoState) -> None
                 "gate results describe different code — run 'wring verify' again",
                 1,
             )
-    # KNOWN GAP, closed when per-file digests land (plan R3): an *untracked*
-    # file's contents are not in the bundle — git cannot diff what it has never
-    # seen — so a content-only edit to an untracked file is not detected here.
-    # The file list and every tracked byte are. Stated rather than papered over.
+    # And the untracked bytes, which git cannot diff because it has never seen
+    # the files. Without this the check compared untracked content by NAME
+    # alone, so editing a new file between verify and deliver was undetectable
+    # — the last hole in this function's promise.
+    _check_untracked_bytes(root, run_dir, state)
+
+
+def _check_untracked_bytes(root: Path, run_dir: Path, state: git.RepoState) -> None:
+    """Refuse when an untracked file's contents moved since the gates ran.
+
+    Only for bundles that recorded them. A bundle written before
+    `untracked.json` existed keeps exactly the behaviour it had — names
+    compared, contents not — because retro-fitting a refusal onto evidence
+    that never made the claim would fail deliveries that were always fine.
+    """
+    recorded = run_dir / evidence.UNTRACKED_FILENAME
+    if not recorded.is_file():
+        return
+    try:
+        stored = json.loads(recorded.read_text(encoding="utf-8")).get("files", {})
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        raise Refused(
+            f"{run_dir.name} recorded untracked files but "
+            f"{evidence.UNTRACKED_FILENAME} cannot be read ({exc}). That run "
+            "cannot vouch for the tree — run 'wring verify' again",
+            1,
+        ) from exc
+
+    unreadable = sorted(p for p, d in stored.items() if d == evidence.UNREADABLE)
+    if unreadable:
+        raise Refused(
+            f"{run_dir.name} could not read {', '.join(unreadable[:5])} when it "
+            "verified, so their contents were never checked. Delivering would "
+            "claim they were — fix the permissions and run 'wring verify' again",
+            1,
+        )
+
+    live = evidence.hash_untracked(
+        root, evidence.untracked_subject(state.untracked)
+    )
+    moved = sorted(
+        path
+        for path, digest in stored.items()
+        if live.get(path) != digest and not path.startswith(f"{EVIDENCE_DIRNAME}/")
+    )
+    if moved:
+        raise Refused(
+            f"the contents of {', '.join(moved[:5])} differ from what "
+            f"{run_dir.name} verified. git never saw these files, so nothing "
+            "else would have caught it — run 'wring verify' again",
+            1,
+        )
 
 
 def resolve_base(root: Path, settings: config.Deliver) -> tuple[str, str | None]:

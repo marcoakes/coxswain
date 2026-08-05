@@ -193,6 +193,10 @@ def run(
         interrupted=interrupted,
         template_only=template_only,
     )
+    # Before the digests, so the digest covers it. git cannot diff a file it
+    # has never seen, so without this an untracked file's *contents* are
+    # absent from the bundle and delivery could only compare their names.
+    bundle.write_untracked(root, state.untracked)
     # LAST, so it covers everything else the run wrote. `digests.json` is what
     # lets a later `wring attest` say "and none of it has been altered since"
     # about the whole bundle rather than only the ledger.

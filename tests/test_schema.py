@@ -11,6 +11,7 @@ engine, and so no dependency, because the only rule being enforced is
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from wringer import cli, evidence, gates, loop, spec
@@ -735,6 +736,9 @@ def test_the_digest_file_covers_the_manifest_and_the_summary():
     source = inspect.getsource(verify_module.run)
     assert source.index("write_manifest") < source.index("write_digests")
     assert source.index("summary.write") < source.index("write_digests")
+    # untracked.json too, for the same reason: the bundle's tamper-evidence
+    # has to cover the tree's untracked bytes, not sit beside them.
+    assert source.index("write_untracked") < source.index("write_digests")
 
 
 def test_a_real_bundle_digest_file_validates_against_the_real_engine(
@@ -785,10 +789,16 @@ def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_the_freeze_manifest_covers_every_schema_that_shipped():
-    """A manifest that silently lost an entry would freeze nothing."""
-    recorded = frozen_manifest()["schemas"]
-    assert len(recorded) == 10, f"expected 10 frozen schemas, found {len(recorded)}"
+def test_the_freeze_covers_every_published_schema():
+    """Every `*.schema.json` in schema/ is frozen — no exceptions, no
+    opt-in. A published schema outside the freeze is a format nobody
+    promised to keep, which is worse than not publishing it."""
+    recorded = set(frozen_manifest()["schemas"])
+    published = {path.name for path in SCHEMA_DIR.glob("*.schema.json")}
+    assert recorded == published, (
+        f"published but not frozen: {sorted(published - recorded)}; "
+        f"frozen but not published: {sorted(recorded - published)}"
+    )
 
 
 def test_no_schema_frozen_at_v0_2_0_has_changed_a_byte():
@@ -821,3 +831,74 @@ def test_a_new_schema_may_be_added_without_touching_the_freeze():
     recorded = set(frozen_manifest()["schemas"])
     present = {path.name for path in SCHEMA_DIR.glob("*.schema.json")}
     assert recorded <= present, f"missing frozen schemas: {recorded - present}"
+
+
+# --- wringer.untracked.v1 ---------------------------------------------------
+
+
+def test_the_untracked_digest_file_matches_its_schema(
+    repo, write_config, monkeypatch, capsys
+):
+    write_config(repo, TWO_GATES)
+    (repo / "loose.txt").write_text("untracked content\n", encoding="utf-8")
+    nested = repo / "newdir"
+    nested.mkdir()
+    (nested / "inner.txt").write_text("also untracked\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    bundle = only_bundle(repo)
+    recorded = json.loads(
+        (bundle / evidence.UNTRACKED_FILENAME).read_text(encoding="utf-8")
+    )
+    check(recorded, load("untracked.schema.json"), "untracked.json")
+    assert recorded["algorithm"] == "sha256"
+
+    # per FILE, not per directory — the whole point of the -uall fix
+    assert "loose.txt" in recorded["files"]
+    assert "newdir/inner.txt" in recorded["files"]
+    assert "newdir/" not in recorded["files"]
+    assert all(len(d) == 64 for d in recorded["files"].values())
+
+
+def test_a_tree_with_nothing_untracked_writes_no_untracked_file(
+    repo, write_config, monkeypatch, capsys
+):
+    """An empty sibling would be a claim about a tree state that never
+    existed. Absence is the honest record."""
+    write_config(repo, TWO_GATES)
+    # commit the config, so the only untracked thing left is `.wringer/`
+    # itself — which is deliberately never digested
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@e.invalid",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "config"],
+        cwd=repo, check=True, capture_output=True,
+    )
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert not (only_bundle(repo) / evidence.UNTRACKED_FILENAME).exists()
+
+
+def test_a_real_untracked_file_validates_against_the_real_engine(
+    repo, write_config, monkeypatch, capsys
+):
+    built = validators()
+    write_config(repo, TWO_GATES)
+    (repo / "loose.txt").write_text("x\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    recorded = json.loads(
+        (only_bundle(repo) / evidence.UNTRACKED_FILENAME).read_text(encoding="utf-8")
+    )
+    errors = [
+        f"{e.json_path} {e.message}"
+        for e in built["untracked.schema.json"].iter_errors(recorded)
+    ]
+    assert not errors, "\n".join(errors)

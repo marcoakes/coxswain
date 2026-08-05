@@ -16,6 +16,7 @@ import hashlib
 import json
 import secrets
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +40,21 @@ MANIFEST_FILENAME = "manifest.json"
 # bundle written before it exists is a bundle that can never be attested.
 DIGESTS_FILENAME = "digests.json"
 DIGESTS_SCHEMA_VERSION = "wringer.digests.v1"
+# Another sibling, same reasoning as digests.json: `wringer.evidence.v1` is
+# frozen, so the untracked tree's BYTES arrive as their own file rather than
+# as a manifest key. A reader that does not know it ignores it.
+UNTRACKED_FILENAME = "untracked.json"
+UNTRACKED_SCHEMA_VERSION = "wringer.untracked.v1"
+# What a file records when its bytes could not be read. Not a hash, and
+# deliberately not a valid one — `deliver` refuses on it, because a file
+# nobody could read is a file nobody verified.
+UNREADABLE = "unreadable"
+# Wringer's own directory. Excluded from the untracked digests: in a repo that
+# never ran `wring init` it is untracked, so without this a run would hash
+# every file of every PREVIOUS run's bundle — unbounded cost, describing
+# Wringer's output rather than the user's tree. `wring deliver` already
+# filters the same prefix, and agreeing at the source beats agreeing twice.
+WRINGER_DIRNAME = ".wringer"
 RESULT_FILENAME = "result.json"
 DIFF_FILENAME = "diff.patch"
 STATUS_FILENAME = "status.txt"
@@ -154,6 +170,50 @@ def _recorded_started_at(run_dir: Path) -> datetime | None:
     return None
 
 
+def untracked_subject(paths: Iterable[str]) -> tuple[str, ...]:
+    """The untracked paths whose bytes are worth recording.
+
+    Everything except Wringer's own `.wringer/`. A repo that never ran
+    `wring init` has no gitignore for it, so it shows up untracked — and
+    hashing it would mean every run digesting every previous run's bundle,
+    growing without bound and describing this tool's output rather than the
+    user's change.
+    """
+    prefix = f"{WRINGER_DIRNAME}/"
+    return tuple(
+        path
+        for path in paths
+        if path != WRINGER_DIRNAME and not path.startswith(prefix)
+    )
+
+
+def hash_untracked(root: Path, paths: Iterable[str]) -> dict[str, str]:
+    """sha256 per untracked file, keyed by repo-relative POSIX path.
+
+    ONE implementation, called by both the writer (`Bundle.write_untracked`)
+    and the reader (`wring deliver`'s check). Two implementations of the same
+    hash is a bug waiting for a platform difference to expose it — and a
+    disagreement here reads as tampering, which is the worst possible false
+    alarm for a tool whose product is trust.
+
+    A file that cannot be read records `UNREADABLE`. Not an exception and not
+    a skip: an unreadable file has not been verified, and the caller decides
+    what that costs.
+    """
+    entries: dict[str, str] = {}
+    for relative in sorted(paths):
+        target = root / relative
+        try:
+            digest = hashlib.sha256()
+            with target.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(65536), b""):
+                    digest.update(chunk)
+            entries[relative] = digest.hexdigest()
+        except OSError:
+            entries[relative] = UNREADABLE
+    return entries
+
+
 def read_manifest(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / MANIFEST_FILENAME)
 
@@ -222,6 +282,7 @@ def _clear_previous(directory: Path) -> None:
         DIFF_FILENAME,
         STATUS_FILENAME,
         DIGESTS_FILENAME,
+        UNTRACKED_FILENAME,
     ):
         (directory / filename).unlink(missing_ok=True)
     previous_gates = directory / GATES_DIRNAME
@@ -446,6 +507,51 @@ class Bundle:
 
     def _scrub(self, value: Any) -> Any:
         return deep_scrub(self.redactor, value)
+
+    def write_untracked(self, root: Path, paths: tuple[str, ...]) -> Path | None:
+        """Hash the tree's untracked files into a sibling `untracked.json`.
+
+        The gap this closes: git cannot diff a file it has never seen, so
+        `diff.patch` is silent about untracked content and the delivery check
+        could compare untracked files only by NAME. A content-only edit to a
+        new file between `verify` and `deliver` was therefore undetectable —
+        the last hole in delivery's promise that the tree it ships is the tree
+        the gates ran against.
+
+        Hashes, not content: 64 hex characters per file, whatever the file's
+        size. And *untracked* is not *ignored* — `.venv/`, `node_modules/`
+        and everything else in `.gitignore` never appear in this list, so the
+        cost is bounded by what `git status` already reports rather than by
+        what is on disk.
+
+        A file that cannot be read records `"unreadable"` rather than being
+        skipped. Delivery treats that as a mismatch: a file whose bytes could
+        not be checked has not been verified, and silence would be the
+        friendlier lie.
+
+        Written BEFORE `digests.json`, so the digest covers it. Returns None
+        when there is nothing untracked — an empty sibling file would be a
+        claim about a tree state that never existed.
+        """
+        subject = untracked_subject(paths)
+        if not subject:
+            return None
+
+        entries = hash_untracked(root, subject)
+        path = self.directory / UNTRACKED_FILENAME
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": UNTRACKED_SCHEMA_VERSION,
+                    "algorithm": "sha256",
+                    "files": entries,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return path
 
     def write_digests(self) -> Path:
         """Hash every file in the bundle, into a sibling `digests.json`.
