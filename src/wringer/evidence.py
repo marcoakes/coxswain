@@ -203,6 +203,15 @@ def _clear_previous(directory: Path) -> None:
     the same screen its summary calls it skipped. A bundle that contradicts
     itself is worse than no bundle at all.
 
+    `digests.json` is in this list for a sharper reason than the rest. It is
+    a sha256 of every other file in the bundle, and it is what makes a later
+    edit detectable. Left behind from an earlier run it does not merely go
+    stale — it describes files that are gone and misdescribes the ones that
+    replaced them, so a bundle carries a tamper-evidence record that fails
+    against its own contents. `wring audit` (P5) reads exactly this file to
+    say "and none of it has been altered since"; a survivor here would make
+    it report tampering on an honest run.
+
     Only Wringer's own artifacts go: the directory belongs to the caller,
     and anything else they keep in it is theirs.
     """
@@ -212,6 +221,7 @@ def _clear_previous(directory: Path) -> None:
         SUMMARY_FILENAME,
         DIFF_FILENAME,
         STATUS_FILENAME,
+        DIGESTS_FILENAME,
     ):
         (directory / filename).unlink(missing_ok=True)
     previous_gates = directory / GATES_DIRNAME

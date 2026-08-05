@@ -770,3 +770,4 @@ gates:
 
     recorded = (repo / "cwd.txt").read_text(encoding="utf-8").strip()
     assert Path(recorded).resolve() == repo.resolve()
+

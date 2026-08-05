@@ -1,0 +1,16 @@
+{
+  "_comment": "sha256 of every JSON schema as it shipped at v0.2.0, captured from the tag itself. Law 7: these schemas are frozen. A byte change here without a new schema_version is a silent break for every reader of an existing bundle. tests/test_schema.py enforces it.",
+  "tag": "v0.2.0",
+  "schemas": {
+    "acquired-manifest.schema.json": "4eeeedceead51da2f548f49666141a7011bd5e24f641e852f3eed02cd885bd1e",
+    "delivery-manifest.schema.json": "46eb3fbc8be513979962213eee1c06d6783aeaea8b4afcf1ec3d155037f0aa33",
+    "digests.schema.json": "ad0bd70c98149e2bc54ebf7abc1295bfbadc31a05b97e3ce92c24cccc8252ee8",
+    "evidence-event.schema.json": "ddc61d7b0eaa39fd0d08cf77cd2eff64d9fc1bb959a5e8586b51543abfa5157e",
+    "gate-result.schema.json": "3e1a4af0742b4191170a4c605d7e07ee441fb7d44a34925271c621ccfd4326fd",
+    "loop-event.schema.json": "17686a89b294dcecf91712abe0ca11e3620612571633b7f0608a5f102ef4ed5c",
+    "loop-manifest.schema.json": "3b8ae52bf300abec63c1b0ec446e35288f6cab165712f02725d19a32e7d719c8",
+    "manifest.schema.json": "b94f5666f326536697383a70dba54996c43f86477ace5e0701b0ae5090665fcc",
+    "rubric.schema.json": "ea555570060f143c7ab48b6ba03aa5a7ebcd8fd9be4512f1ef3c4511c8803a42",
+    "spec.schema.json": "e33906faa571c4ca198de74581efcec768c93e2297a718bf7de2ddc39e99e747"
+  }
+}

@@ -469,3 +469,39 @@ def test_manifest_matches_the_spec_shape(tmp_path: Path):
         },
         "result": {"status": "failed", "failed_gate": "test"},
     }
+
+
+def test_reusing_an_output_directory_removes_the_previous_digests(tmp_path: Path):
+    """`digests.json` must not outlive the run it describes.
+
+    Every other stale artifact is overwritten by the next run, so the damage
+    is bounded. This one is different in kind: it is the bundle's own
+    tamper-evidence record, a sha256 of every other file. A survivor
+    describes files that are gone and misdescribes the ones that replaced
+    them — so it fails against the very bundle it sits in.
+
+    The window is real even though `write_digests()` rebuilds the file at the
+    end of a run: a run that is killed, crashes, or loses power AFTER
+    `_clear_previous` and BEFORE `write_digests` leaves the previous run's
+    digests beside this run's partial files. `wring audit` (P5) reads exactly
+    that file to say "and none of it has been altered since", so a survivor
+    makes it cry tampering on an honest bundle — the worst possible failure
+    for a tool whose product is trust.
+
+    Asserted against the clearing itself rather than through a full verify,
+    because a full verify always reaches `write_digests` and would pass with
+    or without the fix. (It did: the first version of this test guarded
+    nothing.)
+    """
+    directory = tmp_path / "fixed"
+    directory.mkdir()
+    stale = directory / evidence.DIGESTS_FILENAME
+    stale.write_text('{"files": {"gates/001_gone/stdout.log": "deadbeef"}}', "utf-8")
+    (directory / evidence.MANIFEST_FILENAME).write_text("{}", encoding="utf-8")
+
+    evidence.Bundle.at(directory, now=NOW)
+
+    assert not stale.exists(), (
+        "last run's digests.json survived into this run's bundle — a "
+        "tamper-evidence record that fails against its own contents"
+    )

@@ -752,3 +752,72 @@ def test_a_real_bundle_digest_file_validates_against_the_real_engine(
         for e in built["digests.schema.json"].iter_errors(recorded)
     ]
     assert not errors, "\n".join(errors)
+
+
+# --- law 7: a frozen schema stays frozen -----------------------------------
+#
+# The drift tests above compare each schema against what the code WRITES, so
+# they pass whenever code and schema move together — which is exactly law 7's
+# failure mode, not a guard against it. Nine schema versions froze at v0.2.0.
+# A byte change to any of them without a new `schema_version` silently breaks
+# every reader of every bundle already on disk.
+#
+# `schema/frozen.json` records the sha256 of each schema as it SHIPPED,
+# captured from `git show v0.2.0:schema/…` rather than from the working tree.
+# This test is the freeze. Both P5 specs' DONE lists require it, because
+# `wring attest` is a promise about bundles whose format cannot have moved
+# underneath it.
+#
+# Deliberately hash-based rather than git-based: it works in a shallow clone,
+# in a packaged sdist, and anywhere the tag is not fetched — a guard that
+# skips in CI is not a guard.
+
+FROZEN = SCHEMA_DIR / "frozen.json"
+
+
+def frozen_manifest() -> dict:
+    return json.loads(FROZEN.read_text(encoding="utf-8"))
+
+
+def sha256_of(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_the_freeze_manifest_covers_every_schema_that_shipped():
+    """A manifest that silently lost an entry would freeze nothing."""
+    recorded = frozen_manifest()["schemas"]
+    assert len(recorded) == 10, f"expected 10 frozen schemas, found {len(recorded)}"
+
+
+def test_no_schema_frozen_at_v0_2_0_has_changed_a_byte():
+    recorded = frozen_manifest()["schemas"]
+    offenders = []
+    for name, expected in sorted(recorded.items()):
+        path = SCHEMA_DIR / name
+        if not path.is_file():
+            offenders.append(f"{name}: DELETED — a frozen schema may not vanish")
+            continue
+        actual = sha256_of(path)
+        if actual != expected:
+            offenders.append(f"{name}: {expected[:12]} -> {actual[:12]}")
+
+    assert not offenders, (
+        "these schemas froze at v0.2.0 and have changed (law 7):\n  "
+        + "\n  ".join(offenders)
+        + "\n\nEvery bundle already on disk was written against them, and "
+        "`wring attest` is a promise about exactly those bundles. If the "
+        "change is genuinely needed, it is a NEW schema version with a new "
+        "`schema_version` id and a new file — not an edit to this one. "
+        "Adding a new schema/*.schema.json is always allowed; only these ten "
+        "are frozen."
+    )
+
+
+def test_a_new_schema_may_be_added_without_touching_the_freeze():
+    """The freeze must not block P5. `wringer.attestation.v1` and
+    `wringer.vacuity.v1` are new files, and new files are additive."""
+    recorded = set(frozen_manifest()["schemas"])
+    present = {path.name for path in SCHEMA_DIR.glob("*.schema.json")}
+    assert recorded <= present, f"missing frozen schemas: {recorded - present}"
