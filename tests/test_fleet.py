@@ -533,3 +533,75 @@ def test_a_child_budget_overrides_the_repos_own(repo, monkeypatch, capsys):
         .splitlines()
     ]
     assert any(e.get("timed_out") for e in events if e["type"] == "worker.finished")
+
+
+# --- the shapes no test produced -------------------------------------------
+#
+# Publishing `wringer.fleet.v1` means a drift test validates real artifacts
+# against the schema. Three event shapes had no fixture producing them, so a
+# schema declaring them would have been checked against nothing — the suite's
+# own standard: "the optional keys really were exercised, or this test proves
+# less than it looks like it does" (tests/test_schema.py).
+
+FALLBACK_CONFIG = """\
+version: 1
+gates:
+  - id: noop
+    run: "true"
+fleet:
+  concurrency: 1
+  deadline: 300
+  progress_window: 60
+  retries: 2
+  worker_fallbacks:
+    - "sh -c 'printf FIXED > work.txt'"
+"""
+
+EXHAUSTED_FAIL_CONFIG = """\
+version: 1
+gates:
+  - id: noop
+    run: "true"
+fleet:
+  concurrency: 1
+  deadline: 300
+  progress_window: 60
+  retries: 0
+  on_exhausted: fail
+"""
+
+
+def test_a_retry_records_which_fallback_worker_it_used(repo, monkeypatch, capsys):
+    """`fallback` appears on `task.started` only from attempt 2, and only
+    when a `worker_fallbacks` rung exists for it."""
+    task = make_task(repo, "t1", "sh -c 'exit 1'")
+    (repo / ".wringer.yaml").write_text(FALLBACK_CONFIG, encoding="utf-8")
+    (repo / "tasks.jsonl").write_text(json.dumps(task) + "\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    cli.main(["fleet", "tasks.jsonl"])
+    capsys.readouterr()
+
+    started = [e for e in _events(repo) if e["type"] == "task.started"]
+    assert any("fallback" in e for e in started), started
+    assert not any("fallback" in e for e in started if e["attempt"] == 1)
+
+
+def test_on_exhausted_fail_records_the_third_task_finished_shape(
+    repo, monkeypatch, capsys
+):
+    """`task.finished` has three disjoint key sets. This is the one no other
+    test reaches: `{task, why: "exhausted"}` with no status, reason or loop."""
+    task = make_task(repo, "t1", "sh -c 'exit 1'")
+    (repo / ".wringer.yaml").write_text(EXHAUSTED_FAIL_CONFIG, encoding="utf-8")
+    (repo / "tasks.jsonl").write_text(json.dumps(task) + "\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    cli.main(["fleet", "tasks.jsonl"])
+    capsys.readouterr()
+
+    finished = [e for e in _events(repo) if e["type"] == "task.finished"]
+    exhausted = [e for e in finished if e.get("why") == "exhausted"]
+    assert exhausted, finished
+    assert "status" not in exhausted[0]
+    assert "reason" not in exhausted[0]

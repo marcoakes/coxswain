@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/fleet-manifest.schema.json",
+  "title": "Wringer fleet manifest",
+  "description": "`manifest.json` of a `wring fleet` bundle — the index of a supervised queue: what was declared, what the supervisor was configured to allow, and the honest terminal counts. `wringer.fleet.v1` moves independently of the evidence bundle, because a fleet REFERENCES the loops it drove (`loops`, by directory name) rather than containing them. Unlike the ledger beside it, this file is not scrubbed: it holds no command strings, only ids, counts and reasons.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "fleet_id",
+    "started_at",
+    "config",
+    "result",
+    "tasks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.fleet.v1"
+    },
+    "fleet_id": {
+      "description": "The bundle directory's name — `YYYYMMDD-HHMMSS-<4 hex>`, stamped in UTC so host and container runs of one repository sort together.",
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "description": "Local time with UTC offset, seconds precision. Local because a human reads it and the offset is the part they want; the id is the part that sorts.",
+      "type": "string"
+    },
+    "config": {
+      "description": "The supervisor's declared bounds. Deliberately a SUBSET of the `fleet:` config section: these four decide what the supervisor did, and recording keys it merely parsed would imply they were exercised.",
+      "type": "object",
+      "required": ["concurrency", "deadline", "retries", "join"],
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": { "type": "integer", "minimum": 1 },
+        "deadline": { "type": "integer", "minimum": 1 },
+        "retries": { "type": "integer", "minimum": 0 },
+        "join": { "type": "string" }
+      }
+    },
+    "result": {
+      "description": "Honest partial success: three counts that sum to the declared task set, and whether the declared join condition held. A fleet that parked half its work reports it rather than rounding to failure.",
+      "type": "object",
+      "required": ["succeeded", "failed", "parked", "join_satisfied"],
+      "additionalProperties": false,
+      "properties": {
+        "succeeded": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "parked": { "type": "integer", "minimum": 0 },
+        "join_satisfied": { "type": "boolean" }
+      }
+    },
+    "tasks": {
+      "description": "Every declared task and how it ended. Terminal states only — a task still pending when the fleet stopped is parked, not omitted.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "reason", "attempts", "loops"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["succeeded", "failed", "parked"] },
+          "reason": {
+            "description": "Why it ended in that state. Empty for a task that simply succeeded — absence of a reason is itself the reason.",
+            "type": "string"
+          },
+          "attempts": {
+            "description": "Spawns, not retries. 0 for a task parked before it ever ran — a missing directory, a worktree that could not be made, or a deadline that bit while it was queued.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "loops": {
+            "description": "The loop bundle directory names this task produced, in order. References, not blobs: the loops carry their own evidence and their own chained ledgers.",
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

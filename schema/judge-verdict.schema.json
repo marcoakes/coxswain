@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/judge-verdict.schema.json",
+  "title": "Wringer judge verdict",
+  "description": "`verdict.json` — a rubric verdict over a FINISHED evidence bundle. `wring judge` is structurally unable to see a worker's output: it reads the bundle and the rubric and nothing else, which is what makes the verdict about the change rather than about the agent's account of it. Every key here is always written; the conditionality lives in the VALUES, and `null` means something specific in each case. Dry run is the default and the only path to a socket is `--send`.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "verdict_id",
+    "started_at",
+    "mode",
+    "evidence_dir",
+    "rubric",
+    "endpoint",
+    "model",
+    "verdict",
+    "criteria",
+    "note",
+    "duration_ms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.judge.v1"
+    },
+    "verdict_id": {
+      "description": "The verdict directory's name — `YYYYMMDD-HHMMSS-<4 hex>`, stamped in UTC.",
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "description": "Local time with UTC offset, seconds precision.",
+      "type": "string"
+    },
+    "mode": {
+      "description": "`live` exactly when `--send` was given. Anything else is `dry_run`, which opens no socket at all — the request is still written, so what WOULD have been sent is auditable before it is sent.",
+      "enum": ["dry_run", "live"]
+    },
+    "evidence_dir": {
+      "description": "Root-relative path of the bundle judged. The cross-link `wring attest` follows.",
+      "type": "string"
+    },
+    "rubric": {
+      "description": "Which acceptance criteria were applied, by content. The sha256 is what makes a verdict re-checkable: a rubric edited after the fact no longer matches.",
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "endpoint": {
+      "description": "Scrubbed by the redactor before it is written, like every other string in a bundle.",
+      "type": "string"
+    },
+    "model": { "type": "string" },
+    "verdict": {
+      "description": "`null` when nothing judged anything — a dry run, or a rubric with no machine-scorable criteria. NULL IS NOT `needs_human`: one means no judgement was attempted, the other means a judgement was attempted and a person must finish it. Collapsing them would let an unsent verdict read as an escalation.",
+      "enum": ["pass", "fail", "needs_human", null]
+    },
+    "criteria": {
+      "description": "One row per rubric criterion. EMPTY on a dry run and on transport failure — nothing was scored, and inventing rows would be inventing a verdict.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "met", "required", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "met": {
+            "description": "`null` means unscored, not unmet: a `human: true` criterion is never sent to a judge and comes back unscored rather than guessed at, and a required one forces `needs_human`.",
+            "type": ["boolean", "null"]
+          },
+          "required": { "type": "boolean" },
+          "reason": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "note": {
+      "description": "Free text from the judge. Empty string when there is nothing to say — written rather than omitted, so a reader never has to distinguish \"no note\" from \"the key is missing\".",
+      "type": "string"
+    },
+    "duration_ms": { "type": "integer", "minimum": 0 }
+  }
+}

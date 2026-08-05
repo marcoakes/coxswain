@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/fleet-event.schema.json",
+  "title": "Wringer fleet event",
+  "description": "ONE LINE of `fleet.jsonl`, not the file. Append-only, one JSON object per line, every line carrying `prev_hash` — the sha256 of the line before it, or 64 zeros for the first — so the ledger is tamper-evident on its own terms. Every string value is scrubbed by the redactor before it is written. Absence is meaningful throughout: a key appears only in the case it describes.",
+  "type": "object",
+  "required": ["type", "ts", "prev_hash"],
+  "properties": {
+    "type": { "type": "string" },
+    "ts": {
+      "description": "Local ISO-8601 with offset, millisecond precision — fine enough to order two fast events, coarse enough to stay readable.",
+      "type": "string"
+    },
+    "prev_hash": {
+      "description": "sha256 of the previous line, or 64 zeros for the first. Makes the LEDGER tamper-evident and says nothing about the rest of the bundle — that is `digests.json`'s job.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "oneOf": [
+    {
+      "title": "fleet.started",
+      "required": ["type", "ts", "prev_hash", "fleet_id", "tasks", "concurrency", "deadline"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "fleet.started" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "fleet_id": { "type": "string" },
+        "tasks": { "type": "integer", "minimum": 0 },
+        "concurrency": { "type": "integer", "minimum": 1 },
+        "deadline": { "type": "integer", "minimum": 1 }
+      }
+    },
+    {
+      "title": "task.worktree",
+      "description": "Only when `worktree: true`. The only git WRITE a fleet performs, and it is metadata — `worktree add` and `worktree remove`, never a commit or a branch move.",
+      "required": ["type", "ts", "prev_hash", "task", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.worktree" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
+    {
+      "title": "task.started",
+      "required": ["type", "ts", "prev_hash", "task", "attempt", "dir"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.started" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "dir": { "type": "string" },
+        "fallback": {
+          "description": "Present only from attempt 2, and only when `fleet.worker_fallbacks` declares a rung for it. The self-healing ladder is a declared escalation, so which rung ran is evidence rather than a detail.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "title": "task.parked",
+      "description": "A task that will not be retried, and why. `deterministic` is the important one: the same failure signature twice means retrying would repeat it, which is the lesson of the incident this supervision layer was built after.",
+      "required": ["type", "ts", "prev_hash", "task", "why"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.parked" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "why": {
+          "enum": ["deadline", "worktree_failed", "missing_dir", "deterministic", "exhausted"]
+        }
+      }
+    },
+    {
+      "title": "task.reaped",
+      "description": "A child killed for making no progress — liveness measured by ledger growth, not by a process still existing.",
+      "required": ["type", "ts", "prev_hash", "task"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.reaped" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" }
+      }
+    },
+    {
+      "title": "task.finished — succeeded",
+      "required": ["type", "ts", "prev_hash", "task", "status", "loop"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.finished" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "status": { "const": "succeeded" },
+        "loop": {
+          "description": "The loop bundle this task produced, or null when the child wrote none.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    {
+      "title": "task.finished — failed",
+      "required": ["type", "ts", "prev_hash", "task", "status", "reason", "loop"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.finished" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "status": { "const": "failed" },
+        "reason": { "type": "string" },
+        "loop": { "type": ["string", "null"] },
+        "failure_signature": {
+          "description": "Present only when the child's last `verify.finished` carried one. Two identical signatures are what the breaker refuses to retry.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "title": "task.finished — exhausted with on_exhausted: fail",
+      "description": "A THIRD shape under the same `type`, with a disjoint key set: no status, no reason, no loop. Modelled rather than tidied — `wringer.fleet.v1` froze at v0.2.0 and describes what the code writes, not what would have been neater.",
+      "required": ["type", "ts", "prev_hash", "task", "why"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.finished" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "why": { "const": "exhausted" }
+      }
+    },
+    {
+      "title": "task.retried",
+      "required": ["type", "ts", "prev_hash", "task", "after"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "task.retried" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "task": { "type": "string" },
+        "after": { "type": "string" }
+      }
+    },
+    {
+      "title": "fleet.finished",
+      "required": ["type", "ts", "prev_hash", "succeeded", "failed", "parked", "join_satisfied"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "fleet.finished" },
+        "ts": { "type": "string" },
+        "prev_hash": { "type": "string" },
+        "succeeded": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "parked": { "type": "integer", "minimum": 0 },
+        "join_satisfied": { "type": "boolean" }
+      }
+    }
+  ]
+}

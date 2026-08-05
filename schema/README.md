@@ -18,6 +18,10 @@ rather than reverse-engineer it — the point of
 | [`acquired-manifest.schema.json`](acquired-manifest.schema.json) | `wringer.acquired.v1` — where a working copy came from |
 | [`digests.schema.json`](digests.schema.json) | `wringer.digests.v1` — `digests.json`, a sha256 per file in a bundle |
 | [`untracked.schema.json`](untracked.schema.json) | `wringer.untracked.v1` — `untracked.json`, a sha256 per *untracked* file in the tree the gates ran against |
+| [`fleet-manifest.schema.json`](fleet-manifest.schema.json) | `wringer.fleet.v1` — `manifest.json` of a `wring fleet` bundle |
+| [`fleet-event.schema.json`](fleet-event.schema.json) | **one line** of a fleet's `fleet.jsonl` |
+| [`judge-verdict.schema.json`](judge-verdict.schema.json) | `wringer.judge.v1` — `verdict.json`, a rubric verdict over a finished bundle |
+| [`judge-request.schema.json`](judge-request.schema.json) | `request.json` — exactly what `wring judge` would send, written before any socket opens |
 
 The loop schemas carry their own version, **`wringer.loop.v1`**, moving
 independently of the evidence bundle: a loop *references* the runs it drove
@@ -26,6 +30,14 @@ without dragging each other along.
 
 `summary.md`, `diff.patch` and `status.txt` have no schema: they are for
 people, and machines should read the three files above instead.
+
+**`response.json` has no schema either, and that is a decision rather than
+an omission.** It holds whatever the judge's endpoint returned — an
+arbitrary JSON body from a service this project does not control. A schema
+for it could only be permissive enough to guarantee nothing, and a
+guarantee that means nothing is exactly what the rest of these files exist
+to avoid. What Wringer *sends* is schematised, because that is the part
+Wringer is answerable for.
 
 ## Absence is meaningful
 
@@ -68,6 +80,16 @@ join it**, and become as immutable as it is:
 
 Until that tag they are amendable in place on `main`, and every amendment is
 named in its commit message. After it, a new field costs a version.
+
+**`wringer.fleet.v1` and `wringer.judge.v1` had no schema FILE until
+2026-08-05**, which made their freeze a promise nobody could check — the
+shape this repository keeps finding in itself. They are published now, and
+they describe what 0.2.0 writes rather than what would have been neater. One
+wart is load-bearing: a fleet's `task.finished` carries **three disjoint key
+sets** under one `type` (succeeded, failed, and exhausted-with-`on_exhausted:
+fail`, which has no `status` at all). The schema models all three. Tidying
+it would be amending a frozen format, and the difference between describing
+and improving is the whole of law 7.
 
 One correction is worth recording, because it is exactly what this rule
 exists to prevent. During 0.2 development `prev_hash` was added to every

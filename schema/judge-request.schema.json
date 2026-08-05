@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/judge-request.schema.json",
+  "title": "Wringer judge request",
+  "description": "`request.json` — exactly what `wring judge` would send, written BEFORE any socket opens and written in dry-run mode too. That ordering is the point: what leaves the machine is auditable before it leaves, and a dry run produces the same artifact as a live one so there is something to read before deciding to send. Scrubbed by the redactor, so a rubric or a bundle carrying a secret does not put it on the wire OR in this file. Part of `wringer.judge.v1`. There is deliberately NO schema for `response.json`: it is the endpoint's arbitrary JSON body, and a schema for it could only be permissive enough to mean nothing.",
+  "type": "object",
+  "required": ["model", "max_tokens", "temperature", "messages"],
+  "additionalProperties": false,
+  "properties": {
+    "model": { "type": "string", "minLength": 1 },
+    "max_tokens": { "type": "integer", "minimum": 1 },
+    "temperature": {
+      "description": "Always 0. A judge that is not deterministic is not a gate, and a rubric verdict that changes between identical runs is an opinion rather than evidence.",
+      "const": 0
+    },
+    "messages": {
+      "description": "Exactly two: the system framing, then the user payload built from the bundle and the rubric.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["role", "content"],
+        "additionalProperties": false,
+        "properties": {
+          "role": { "enum": ["system", "user"] },
+          "content": { "type": "string" }
+        }
+      }
+    }
+  }
+}

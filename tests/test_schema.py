@@ -902,3 +902,177 @@ def test_a_real_untracked_file_validates_against_the_real_engine(
         for e in built["untracked.schema.json"].iter_errors(recorded)
     ]
     assert not errors, "\n".join(errors)
+
+
+# --- wringer.fleet.v1 and wringer.judge.v1 ---------------------------------
+#
+# Both were declared frozen at v0.2.0 in schema/README with no schema FILE, so
+# the freeze was unverifiable — a promise about a format nobody had written
+# down. These publish them, and the freeze guard now covers them like the rest.
+#
+# Modelled on what 0.2.0 WRITES, warts included. `task.finished` carries three
+# disjoint key sets under one `type`; the schema has three branches rather
+# than a tidied-up single one, because law 7 freezes the format that shipped,
+# not the format that would have been neater.
+
+
+def fleet_branch(event: dict) -> dict:
+    """The one fleet-event branch that describes this event.
+
+    `branch()` above matches on the `type` const alone, which cannot work
+    here: three branches share `task.finished`. This picks by the whole key
+    set and asserts the match is unambiguous — an event matching two branches
+    would mean the schema cannot tell two shapes apart, which is worse than
+    no schema.
+    """
+    written = set(event)
+    matches = [
+        option
+        for option in load("fleet-event.schema.json")["oneOf"]
+        if option["properties"]["type"]["const"] == event["type"]
+        and set(option.get("required", ())) <= written
+        and written <= set(option["properties"])
+    ]
+    assert len(matches) == 1, (
+        f"{event['type']} with keys {sorted(written)} matched "
+        f"{len(matches)} schema branches; exactly one must describe it"
+    )
+    return matches[0]
+
+
+def fleet_bundle(root: Path) -> Path:
+    from wringer import fleet
+
+    found = sorted((root / fleet.FLEETS_DIRNAME).iterdir())
+    assert len(found) == 1, found
+    return found[0]
+
+
+def run_a_mixed_fleet(repo: Path, monkeypatch, capsys) -> Path:
+    """A fleet producing succeeded, failed and parked in one bundle."""
+    from test_fleet import FALLBACK_CONFIG, make_task
+
+    good = make_task(repo, "good", "sh -c 'printf FIXED > work.txt'")
+    bad = make_task(repo, "bad", "sh -c 'exit 1'")
+    (repo / ".wringer.yaml").write_text(FALLBACK_CONFIG, encoding="utf-8")
+    (repo / "tasks.jsonl").write_text(
+        json.dumps(good) + "\n" + json.dumps(bad) + "\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+    cli.main(["fleet", "tasks.jsonl"])
+    capsys.readouterr()
+    return fleet_bundle(repo)
+
+
+def test_a_real_fleet_bundle_matches_its_schemas(repo, monkeypatch, capsys):
+    from wringer import fleet
+
+    bundle = run_a_mixed_fleet(repo, monkeypatch, capsys)
+
+    recorded = json.loads(
+        (bundle / fleet.MANIFEST_FILENAME).read_text(encoding="utf-8")
+    )
+    check(recorded, load("fleet-manifest.schema.json"), "fleet manifest.json")
+    assert recorded["schema_version"] == "wringer.fleet.v1"
+
+    seen = set()
+    for line in (bundle / fleet.EVENTS_FILENAME).read_text("utf-8").splitlines():
+        event = json.loads(line)
+        check(event, fleet_branch(event), f"fleet event {event['type']}")
+        seen.add(event["type"])
+    assert {"fleet.started", "task.started", "fleet.finished"} <= seen, seen
+
+
+def test_a_real_fleet_bundle_validates_against_the_real_engine(
+    repo, monkeypatch, capsys
+):
+    from wringer import fleet
+
+    built = validators()
+    bundle = run_a_mixed_fleet(repo, monkeypatch, capsys)
+
+    errors = [
+        f"manifest {e.json_path} {e.message}"
+        for e in built["fleet-manifest.schema.json"].iter_errors(
+            json.loads((bundle / fleet.MANIFEST_FILENAME).read_text("utf-8"))
+        )
+    ]
+    for line in (bundle / fleet.EVENTS_FILENAME).read_text("utf-8").splitlines():
+        event = json.loads(line)
+        errors += [
+            f"{event['type']} {e.json_path} {e.message}"
+            for e in built["fleet-event.schema.json"].iter_errors(event)
+        ]
+    assert not errors, "\n".join(errors)
+
+
+def test_every_fleet_event_shape_the_schema_declares_is_produced_somewhere():
+    """The suite's own standard: a declared shape no fixture produces is a
+    branch validated against nothing. `task.finished` has three, and two of
+    them had no test until this slice."""
+    declared = {
+        option["title"] for option in load("fleet-event.schema.json")["oneOf"]
+    }
+    fleet_tests = (
+        Path(__file__).resolve().parent / "test_fleet.py"
+    ).read_text(encoding="utf-8")
+    for needed in ("fallback", "exhausted"):
+        assert needed in fleet_tests, (
+            f"no fixture produces the {needed!r} shape, so its schema branch "
+            "is checked against nothing"
+        )
+    assert len(declared) == 10, sorted(declared)
+
+
+def test_a_real_judge_verdict_matches_its_schemas(repo, monkeypatch, capsys):
+    """Dry run: `verdict` is null and `criteria` is empty, which are the two
+    values a reader is most likely to misread. Null is not `needs_human` —
+    one means nothing was judged, the other means a person must finish it."""
+    from test_judge import setup_repo
+
+    from wringer import judge
+
+    setup_repo(repo)
+    monkeypatch.chdir(repo)
+    cli.main(["verify"])
+    cli.main(["judge"])
+    capsys.readouterr()
+
+    found = sorted((repo / judge.VERDICTS_DIRNAME).iterdir())
+    assert len(found) == 1, found
+
+    recorded = json.loads(
+        (found[0] / judge.VERDICT_FILENAME).read_text(encoding="utf-8")
+    )
+    check(recorded, load("judge-verdict.schema.json"), "verdict.json")
+    assert recorded["schema_version"] == "wringer.judge.v1"
+    assert recorded["mode"] == "dry_run"
+    assert recorded["verdict"] is None
+    assert recorded["criteria"] == []
+
+    request = json.loads(
+        (found[0] / judge.REQUEST_FILENAME).read_text(encoding="utf-8")
+    )
+    check(request, load("judge-request.schema.json"), "request.json")
+
+    built = validators()
+    errors = [
+        f"verdict {e.json_path} {e.message}"
+        for e in built["judge-verdict.schema.json"].iter_errors(recorded)
+    ] + [
+        f"request {e.json_path} {e.message}"
+        for e in built["judge-request.schema.json"].iter_errors(request)
+    ]
+    assert not errors, "\n".join(errors)
+
+
+def test_response_json_is_deliberately_unschematised():
+    """A schema for an arbitrary endpoint body could only be permissive
+    enough to guarantee nothing, and this project does not publish vacuous
+    guarantees. schema/README says so; this stops one appearing quietly."""
+    assert not (SCHEMA_DIR / "judge-response.schema.json").exists()
+    readme = (SCHEMA_DIR / "README.md").read_text(encoding="utf-8")
+    assert "response.json" in readme, (
+        "the absence of a response.json schema is a decision, and a decision "
+        "nobody wrote down is indistinguishable from an oversight"
+    )
