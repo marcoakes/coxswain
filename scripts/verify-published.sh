@@ -7,7 +7,8 @@
 # the thing people actually download.
 set -u
 
-W=${1:-/private/tmp/claude-501/-Users-marc-Claude/pypi-check}
+. "$(dirname "$0")/scratch.sh"
+W=$(scratch_dir "${1:-}" pypi-check) || exit 2
 UV="$HOME/.local/bin/uv"
 WANT=${2:-0.2.0}
 

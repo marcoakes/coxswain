@@ -12,14 +12,38 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-WORK=${1:-/private/tmp/claude-501/-Users-marc-Claude/setup-selftest}
-PATH="$ROOT/.venv/bin:$PATH"
+. "$(dirname "$0")/scratch.sh"
+WORK=$(scratch_dir "${1:-}" setup-selftest) || exit 2
+
+# The `wring` under test. SETUP.md step 3 installs it with `uv tool install`,
+# which puts it in ~/.local/bin — so that is where to look first. The repo's
+# .venv stays as a fallback for a developer working from a checkout.
+#
+# The old line prepended ONLY the venv, which the rewritten step 3 no longer
+# creates. The prepend was a silent no-op and the script tested whatever
+# `wring` happened to be on PATH, which might be an old release, or nothing
+# at all (R2-06). Testing the wrong binary and testing no binary look
+# identical in a passing log, so this now says which one it found and stops
+# if there is none.
+PATH="$HOME/.local/bin:$ROOT/.venv/bin:$PATH"
 export PATH
+
+if ! command -v wring >/dev/null 2>&1; then
+    echo "FATAL: no 'wring' on PATH — there is nothing to test." >&2
+    echo "  looked in: $HOME/.local/bin, $ROOT/.venv/bin, then \$PATH" >&2
+    echo "  install it first, as SETUP.md step 3 does:" >&2
+    echo "    uv tool install --force --python 3.12 $ROOT" >&2
+    exit 2
+fi
 
 PASS=0
 FAIL=0
 ok()   { echo "  ok    $1"; PASS=$((PASS + 1)); }
 bad()  { echo "  FAIL  $1"; FAIL=$((FAIL + 1)); }
+
+echo "wring under test: $(command -v wring) ($(wring --version 2>&1))"
+echo "scratch tree    : $WORK"
+echo
 
 if [ -d "$WORK" ]; then find "$WORK" -mindepth 1 -delete 2>/dev/null; fi
 mkdir -p "$WORK" || exit 2

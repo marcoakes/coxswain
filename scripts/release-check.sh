@@ -11,7 +11,8 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-WORK=${1:-/private/tmp/claude-501/-Users-marc-Claude/release-check}
+. "$(dirname "$0")/scratch.sh"
+WORK=$(scratch_dir "${1:-}" release-check) || exit 2
 UV="$HOME/.local/bin/uv"
 
 PASS=0

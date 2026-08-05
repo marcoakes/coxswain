@@ -9,7 +9,8 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-WORK=${1:-/private/tmp/claude-501/-Users-marc-Claude/ci-repro}
+. "$(dirname "$0")/scratch.sh"
+WORK=$(scratch_dir "${1:-}" ci-repro) || exit 2
 UV="$HOME/.local/bin/uv"
 
 rm -rf "$WORK"

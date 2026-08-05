@@ -9,7 +9,8 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-SCRATCH=${1:-/private/tmp/claude-501/-Users-marc-Claude/wringer-demo}
+. "$(dirname "$0")/scratch.sh"
+SCRATCH=$(scratch_dir "${1:-}" demo) || exit 2
 PY="$ROOT/.venv/bin/python"
 WRING="$ROOT/.venv/bin/wring"
 

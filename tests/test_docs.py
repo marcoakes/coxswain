@@ -1,4 +1,4 @@
-"""Guards on the documents that are meant to be executed literally.
+"""Guards on the documents and scripts that are meant to be run literally.
 
 `SETUP.md` is not prose about how installation might go — it is a runbook an
 agent is instructed to follow verbatim, one command at a time. A wrong
@@ -96,3 +96,51 @@ def test_no_runbook_spells_the_two_measured_failures_anywhere(name: str):
             "`container` 1.2.0 (field report 2026-08-05, AC-01). The "
             "subcommand is `image`, singular."
         )
+
+
+# --- R2-05: no script may be addressed to one developer's machine ---------
+#
+# Five scripts in scripts/ defaulted their scratch tree to
+# /private/tmp/claude-501/-Users-marc-Claude/… — a sandbox path named after
+# one machine and one user — and three of them point `rm -rf` or `find
+# -delete` at it. On any other machine that either fails or, worse, deletes
+# something that happens to be there.
+#
+# This is the cheapest possible test against the most embarrassing possible
+# regression, and it is permanent: the next hardcoded sandbox path cannot
+# reach main.
+
+# The sandbox this repo is developed in, in both spellings it appears as.
+_DEVELOPER_PATHS = (
+    re.compile(r"claude-50[0-9]"),
+    re.compile(r"-Users-[A-Za-z0-9]+-"),
+    re.compile(r"/Users/(?!you\b)[A-Za-z0-9._-]+/"),
+)
+
+
+def script_files() -> list[Path]:
+    return sorted((repo_root() / "scripts").glob("*.sh"))
+
+
+def test_scripts_exist_to_be_guarded():
+    """A guard over an empty glob passes and means nothing."""
+    assert script_files(), "no scripts/*.sh found — this guard is not guarding"
+
+
+@pytest.mark.parametrize("pattern", _DEVELOPER_PATHS, ids=lambda p: p.pattern)
+def test_no_script_hardcodes_one_developers_machine(pattern: re.Pattern[str]):
+    """`/Users/you/` is allowed: it is the documentation placeholder, and it
+    is obviously not a real path. Any other home directory is a real one."""
+    offenders = [
+        f"{path.name}:{number}: {line.strip()}"
+        for path in script_files()
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if pattern.search(line)
+    ]
+    assert not offenders, (
+        "scripts must work on any machine — these name one developer's:\n  "
+        + "\n  ".join(offenders)
+        + "\nUse scripts/scratch.sh, which defaults to $TMPDIR."
+    )

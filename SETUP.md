@@ -430,7 +430,7 @@ A real captured run, on a Mac with no container runtime installed:
 
 ```
 ✓ python                Python 3.12.13
-✓ wring                 wring 0.2.0 at /Users/you/wringer/.venv/bin/wring
+✓ wring                 wring 0.2.0 at /Users/you/.local/bin/wring
 ✓ git                   git version 2.50.1 (Apple Git-155)
 ! container runtime     no container runtime found (Apple silicon detected)
                         → Install apple/container (needs macOS 26) or Docker Desktop — or skip the container and run wring directly
