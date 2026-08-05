@@ -33,7 +33,9 @@ Two runtimes are covered, and one image serves both:
   in CI.** GitHub's macOS runners have no nested virtualization, so nothing
   automated ever runs it. It is verified by `wring doctor`, by the manual
   check in step 7, and by one field run on macOS 26.5.2 / arm64 on
-  2026-08-05 — that is the whole of its coverage. If it breaks for you, that
+  2026-08-05 — that is the whole of its coverage, and it is written down
+  with its date and its limits in
+  [docs/MANUAL_CHECKS.md](docs/MANUAL_CHECKS.md). If it breaks for you, that
   is a real bug worth reporting, not something you did wrong.
 
 The same OCI image also runs under Kubernetes. That is a deployment concern
