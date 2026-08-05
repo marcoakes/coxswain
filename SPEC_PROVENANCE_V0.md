@@ -1,10 +1,10 @@
 # SPEC — tamper-evident provenance (P5, part 1)
 
-*Drafted 2026-08-03 by the planning window. **DRAFT — awaiting Marc's
-approval; not binding until he says so.** His open rulings are marked ⚖.
-Builds on machinery that already ships: `digests.json` per bundle,
-`prev_hash` on every ledger, `spec_sha256` in deliveries, the rubric's
-sha256 in verdicts.*
+*Drafted 2026-08-03 by the planning window. **Ruling 1 (signing) decided by
+Marc 2026-08-05 — see §5. DRAFT on its remaining ⚖ ruling; not binding
+until he says so.** Builds on machinery that already ships: `digests.json`
+per bundle, `prev_hash` on every ledger, `spec_sha256` in deliveries, the
+rubric's sha256 in verdicts.*
 
 ## Positioning
 
@@ -38,6 +38,76 @@ And it must say, in its own artifact, what it does **not** claim:
 - **The clauses it lacks inputs for are absent, not invented.** No spec →
   no `authorized_by` clause. No verdict → no `judged_by`. An attestation
   over a bare `wring verify` bundle is small and still worth having.
+- **Unsigned. It does not say who produced it.** v0 attestations carry no
+  signature, so they prove the evidence is unaltered and say nothing about
+  authorship (ruling 1). The artifact states this itself — see §1a.
+
+## 1a. Saying the limit out loud — BINDING (ruling 1)
+
+The word *attestation* sounds cryptographic, and a reader who assumes it
+means "signed by someone" has been misled by a green thing that means less
+than it looks like. That is the vacuity failure in a new costume, and this
+project has already ruled once this week that a passing artifact must
+narrate its own emptiness.
+
+So the limit is **in the artifact and on the terminal**, not only in these
+docs:
+
+- `attestation.json` carries `"signature": null` and a `"limits"` array
+  whose first entry is, verbatim: *"unsigned — this proves the named
+  bundles are unaltered since they were written, not who produced them,
+  and not that they were not fabricated wholesale."*
+- `wring attest` prints that sentence as a `!` line — doctor's mark for
+  "worth knowing, not a problem" — never a `✗`. Nothing failed.
+- `wring audit` repeats it on success. A passing audit must not read as a
+  stronger claim than it is.
+- `--json` carries `signature` and `limits` too. An agent consuming this
+  is exactly the reader most likely to over-read a bare `"ok": true`.
+
+**Acceptance:** delete the limits sentence and a test fails.
+
+## 1b. The signature seat — BINDING (ruling 1)
+
+A signature is a **sibling file**, never a field inside a signed payload:
+
+```
+attestation.json          the claim
+attestation.json.sig      v1, optional, absent in v0
+```
+
+This is the pattern this codebase has now used three times against frozen
+schemas (`digests.json`, and `vacuity.json` in the sibling spec), and it is
+what makes v1 signing purely additive: every v0 attestation stays valid
+byte-for-byte, `audit` gains "and the signature verifies" as an extra
+clause, and no format migration is ever needed. A signature embedded in the
+payload would require canonicalising the JSON before signing — a class of
+bug with a long history — and would break every attestation written before
+it existed.
+
+When signing does arrive it should be `ssh-keygen -Y`, for a reason that is
+about adoption rather than cryptography: developers already have SSH keys,
+and GitHub already publishes the public half at `github.com/<user>.keys`,
+which solves key *distribution* — the genuinely hard part — for free.
+
+## 1c. Free attribution, where the repo already has it — BINDING (ruling 1)
+
+Wringer touches no key, and it can still carry real attribution for repos
+that already sign their commits.
+
+The attestation already names the delivered commit. It additionally
+**records what git says about that commit's signature, as a fact, without
+judging it**: `git log -1 --format=%G?` yields `G` (good), `B` (bad), `U`
+(good, untrusted), `N` (none), and the attestation stores that character
+and the reported signer verbatim under `commit_signature`.
+
+- Wringer never verifies a signature and never consults a trust store —
+  that is the verifier's job and their trust root, not ours.
+- A repo with signed commits gets a genuine chain for nothing: signed
+  commit → attestation names that commit → digests prove the bundle.
+- A repo without signed commits records `N` and loses nothing.
+- `wring audit` reports the recorded value; it does **not** re-verify it,
+  and says so. Re-verification would need the verifier's keyring and would
+  put a network-shaped dependency on a command that must work on a plane.
 
 ## 2. CLI
 
@@ -109,21 +179,37 @@ cross-link and hash in the attestation. No config needed — an auditor may
 not have `.wringer.yaml` and must not need it. `--json` for CI; the honest
 failure output names the first clause that broke and stops.
 
-## 5. ⚖ Marc's rulings, needed at approval
+## 5. Rulings
 
-1. **Signing.** v0 options: **(a)** unsigned, format leaves a detached-
-   signature seat for v1 — *recommended: smallest honest step*; **(b)**
-   `ssh-keygen -Y sign` now — real signatures, zero new key
-   infrastructure, but law 9 needs a careful line (Wringer *invokes* the
-   user's ssh-keygen; it never reads a key).
-2. **RFC.** Publish `wringer.attestation.v1` as an RFC issue alongside the
-   schema, per the standards play in northstar §9a?
+1. **Signing — DECIDED 2026-08-05: unsigned.** Not the weaker of two
+   options; the one that keeps `wring attest` free of setup. Signing in v0
+   would force four answers nobody asked for — which key, where the public
+   half lives, what `audit` does when it cannot find it, and what CI does —
+   and the last means a signing key in CI secrets, which contradicts the
+   product's most distinctive promise that it never touches a credential.
+
+   The claim unsigned makes is the one most readers actually need: an
+   attestation is usually read by someone who already trusts its source and
+   is asking "did the gates really run, and has anything changed since",
+   not "did someone forge this". Signing matters when the reader distrusts
+   the producer — a real market, but not the first one.
+
+   Binding consequences, each with a test: **§1a** the artifact states its
+   own limit, in the file and on the terminal · **§1b** a signature is a
+   sibling file so v1 is purely additive · **§1c** the attestation records
+   what git says about the delivered commit's signature, giving repos that
+   already sign their commits real attribution for free, with Wringer still
+   touching no key.
+
+2. ⚖ **RFC.** Publish `wringer.attestation.v1` as an RFC issue alongside
+   the schema, per the standards play in northstar §9a?
 
 ## 6. Non-goals (binding once approved)
 
-Signing beyond ruling 1 · transparency logs · in-toto/SLSA format
-compatibility (map later, don't contort now) · attesting anything a bundle
-does not already record · network anything.
+Signing in v0 · verifying a commit signature rather than recording it ·
+transparency logs · in-toto/SLSA format compatibility (map later, don't
+contort now) · attesting anything a bundle does not already record ·
+network anything.
 
 ## 7. Definition of DONE
 
@@ -133,6 +219,15 @@ does not already record · network anything.
       and it names that file and fails** — the money test
 - [ ] every §3 refusal has a test that fails without it
 - [ ] pre-0.2 committed example bundle is refused with the stated message
+- [ ] **§1a** — the limits sentence is in `attestation.json`, in `--json`,
+      and on the terminal for both `attest` and `audit`; deleting it fails
+      a test
+- [ ] **§1b** — `attestation.json.sig` is absent in v0 and the format needs
+      no change to accept one; a fixture attestation with a sibling `.sig`
+      still audits clean, ignoring it
+- [ ] **§1c** — `commit_signature` records git's `%G?` verbatim; a repo
+      with a signed commit records `G`, one without records `N`, and
+      `audit` reports without re-verifying either
 - [ ] `wringer.attestation.v1` under `schema/`, freeze-guard extended
 - [ ] docs carry a captured attest→doctor→audit transcript, including the
       tamper detection
