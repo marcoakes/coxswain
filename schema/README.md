@@ -85,6 +85,27 @@ are strict — `additionalProperties` is `false` — because the version string
 is what a new field is supposed to cost. Adding one is a spec change and
 bumps the version; it is not an implementation detail.
 
+**The freeze is enforced, not promised.** `frozen.json` records the sha256
+of every schema as it stood at the `v0.2.0` tag, captured from the tag
+itself rather than from the working tree. `tests/test_schema.py` fails if
+any of them changes a byte, or disappears. Adding a *new* schema file is
+always allowed and is how a new format arrives; editing a frozen one is
+not, because every bundle already written was written against it.
+
+## Targeting these formats
+
+They are published so a tool can target the format rather than
+reverse-engineer it, and they belong to nobody — that is the point. If you
+are building against one and something is ambiguous, wrong, or missing, an
+issue on this repository is the right place, and the format changing
+because an outside consumer hit a wall is a good outcome rather than an
+embarrassing one.
+
+There is deliberately no formal RFC process yet. A standard needs
+constituents before it needs ceremony, and inviting comment into an empty
+room spends the one occasion when "here is our format, tell us what is
+wrong with it" is a real question.
+
 ## How these stay true
 
 [`tests/test_schema.py`](../tests/test_schema.py) runs real verifications —

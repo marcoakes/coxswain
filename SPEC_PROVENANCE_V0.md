@@ -1,10 +1,9 @@
 # SPEC — tamper-evident provenance (P5, part 1)
 
-*Drafted 2026-08-03 by the planning window. **Ruling 1 (signing) decided by
-Marc 2026-08-05 — see §5. DRAFT on its remaining ⚖ ruling; not binding
-until he says so.** Builds on machinery that already ships: `digests.json`
-per bundle, `prev_hash` on every ledger, `spec_sha256` in deliveries, the
-rubric's sha256 in verdicts.*
+*Drafted 2026-08-03 by the planning window. **APPROVED by Marc 2026-08-05 —
+both rulings decided (§5). Binding.** Builds on machinery that already
+ships: `digests.json` per bundle, `prev_hash` on every ledger,
+`spec_sha256` in deliveries, the rubric's sha256 in verdicts.*
 
 ## Positioning
 
@@ -201,8 +200,40 @@ failure output names the first clause that broke and stops.
    already sign their commits real attribution for free, with Wringer still
    touching no key.
 
-2. ⚖ **RFC.** Publish `wringer.attestation.v1` as an RFC issue alongside
-   the schema, per the standards play in northstar §9a?
+2. **RFC — DECIDED 2026-08-05: not yet, and here is the trigger.**
+
+   Nobody would read it today. The northstar's own sequence says so:
+   *"5–10 strangers whose agents run `wring verify` in their CI within a
+   quarter — those become the RFC voices that turn the schemas into a
+   standard."* The voices come **from** the users. Publishing before the
+   launch inverts that and puts an RFC on a repository with no audience.
+
+   The cost is the part worth naming. An RFC issue is a public commitment
+   surface: once `wringer.attestation.v1` is out as one, changing it looks
+   like breaking a standard even if nobody adopted it. Stacked on law 7
+   that freezes the format twice — technically and socially — before it has
+   ever been consumed outside this repo. And attestation is the format most
+   likely to need changing after first contact, because its whole job is to
+   be legible to an auditor and no auditor has read one. Two field reports
+   this month found the same shape: what was wrong was what had never been
+   executed. A format nobody has consumed is in that category.
+
+   **Instead, and already done:** the schema ships in `schema/` with the
+   others, and `schema/README` says plainly that these formats belong to
+   nobody, that an issue is the right place to report an ambiguity, and
+   that a format changing because an outside consumer hit a wall is a good
+   outcome. That is the whole targetable/open/neutral signal at no
+   commitment cost.
+
+   **Trigger for revisiting:** the first time someone outside the project
+   asks for the format, or tries to consume an attestation and hits
+   friction. Then the RFC has a real question attached and a constituency,
+   which is the only thing that makes one work.
+
+   **What would flip it:** evidence that a vendor or standards body is
+   about to define provenance for AI-written code. Planting a flag early
+   beats being late even into an empty room. That is a market-timing call,
+   and it is Marc's.
 
 ## 6. Non-goals (binding once approved)
 
