@@ -26,6 +26,29 @@ jobs:
           name: wringer-evidence
           path: .wringer/runs/
 
+  # SETUP.md's own commands, executed. Four of the 2026-08-05 field report's
+  # findings (R2-01, R2-03, R2-04, R2-06) are guarded only by this script,
+  # and until it ran here it bit only when a human remembered to run it —
+  # which is the same "a step whose gate had never been executed" shape both
+  # field reports keep finding. It needs no container runtime: the steps that
+  # do are step 7's, and it skips them by design.
+  setup-runbook:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, because the runbook's install advice is macOS-specific and
+        # its git and doctor behaviour is not.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - name: Run SETUP.md's own commands
+        run: sh scripts/setup-selftest.sh
+
   # `verify` proves the tool on one interpreter; this proves the code on every
   # supported one, and on both operating systems v0.1 claims to support.
   pytest:

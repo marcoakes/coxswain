@@ -28,15 +28,16 @@ Two runtimes are covered, and one image serves both:
 
 - **Docker** — Linux, macOS, and Windows under WSL2. This is the path
   exercised in CI.
-- **Apple `container`** (1.2.0; the commands here were verified against
-  1.2.0) — **macOS 26 on Apple silicon only.** **This path is not exercised
-  in CI.** GitHub's macOS runners have no nested virtualization, so nothing
-  automated ever runs it. It is verified by `wring doctor`, by the manual
-  check in step 7, and by one field run on macOS 26.5.2 / arm64 on
-  2026-08-05 — that is the whole of its coverage, and it is written down
-  with its date and its limits in
-  [docs/MANUAL_CHECKS.md](docs/MANUAL_CHECKS.md). If it breaks for you, that
-  is a real bug worth reporting, not something you did wrong.
+- **Apple `container`** (1.2.0) — **macOS 26 on Apple silicon only.**
+  **This path is not exercised in CI.** GitHub's macOS runners have no
+  nested virtualization, so nothing automated ever runs it. Its whole
+  coverage is `wring doctor`, the manual check in step 7, and **one** field
+  run on macOS 26.5.2 / arm64 on 2026-08-05 — which is where these commands
+  and their outputs come from. That run needed corrections applied by hand;
+  the corrected text below has not itself been re-run on an Apple host yet.
+  [docs/MANUAL_CHECKS.md](docs/MANUAL_CHECKS.md) records exactly that, with
+  its date and its limits. If it breaks for you, that is a real bug worth
+  reporting, not something you did wrong.
 
 The same OCI image also runs under Kubernetes. That is a deployment concern
 and is out of scope here.
@@ -277,11 +278,8 @@ both stop conditions:
   problem is the one the problem blocks —
 
   ```
-  $ ls -la /Applications/Docker.app
-  ls: /Applications/Docker.app: Permission denied
-
-  $ ls -ld /Applications/Docker.app
-  d---------  2 root  admin  64 ... /Applications/Docker.app
+  $ ls -la /Applications/Docker.app     →  ls: Permission denied
+  $ ls -ld /Applications/Docker.app     →  d---------  2 root  admin  64 ...
   ```
 
   That shape — no permission bits at all, owned by `root`, a link count of
@@ -496,6 +494,12 @@ Paths and versions will differ; the check *names* will not — a test in this
 repository fails if this transcript names a check `wring doctor` does not
 have.
 
+Both transcripts on this page are captured output. The only edit is
+anonymising the home directory: the machine they came from prints
+`/Users/<its user>/…`, and the clone lives one directory deeper than the
+`~/wringer` this runbook assumes. Nothing else was touched, and nothing was
+composed.
+
 **And what "reported as skipped" actually looks like.** The paragraph above
 tells you the three repository checks skip outside a repo, but the command
 above cannot show you that — run from the clone, they never skip. So here is
@@ -652,12 +656,15 @@ here; the shape will not.
 **`--user` and `-e HOME` are required on Linux, and harmless elsewhere.** The
 image runs as uid 1000, a bind-mounted directory keeps its host ownership,
 and Wringer must write its evidence into that mount. On **Linux** that fails
-without these flags, which is why CI passes them on every push. **Docker
-Desktop on macOS** and **Apple `container`** both translate uids across the
-mount, so the flags change nothing there — measured on Apple `container`
-1.2.0: a flagless run exits 0 and the bundle lands owned by the host user.
-Pass them anyway; one recipe that is correct everywhere beats three that are
-each correct somewhere.
+without these flags, which is why CI passes them on every push. **Apple
+`container` translates uids across the mount, so the flags change nothing
+there** — measured on 1.2.0: a flagless run exits 0 and the bundle lands
+owned by the host user. **Docker Desktop on macOS is believed to behave the
+same way, and nobody has ever checked** — it is the one combination neither
+CI nor any field run has touched (see
+[docs/MANUAL_CHECKS.md](docs/MANUAL_CHECKS.md)). Pass the flags anyway; one
+recipe that is correct everywhere beats three that are each correct
+somewhere.
 
 One cosmetic surprise: `--user 502:20` reports `gid=20(dialout)` inside the
 container. Group 20 is `staff` on macOS and `dialout` on Linux, and the

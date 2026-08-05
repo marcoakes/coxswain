@@ -39,6 +39,8 @@ output: .wringer/runs/<run_id>/
 Detects common project commands and writes `.wringer.yaml`. If detection is
 uncertain, **generate comments rather than being clever**.
 
+When detection finds real commands, it writes them — the shape below.
+
 ```yaml
 version: 1
 gates:
@@ -56,6 +58,27 @@ evidence:
     - env
     - logs
 ```
+
+When it finds nothing to gate it writes a **template**, not a guess
+(amended 2026-08-05, field report R2-07/R2-08). The template says which
+build-config files it did see, so a correct refusal to invent gates cannot
+read as a broken detector, and its single gate is a `placeholder` that
+passes:
+
+```yaml
+gates:
+  - id: placeholder
+    run: "true"
+```
+
+That makes a first `wring init && wring verify` exit 0 on a healthy tree
+rather than red — the examples above are shipped commented out. **A passing
+placeholder must never be silent**: while every required gate is still the
+untouched placeholder, `wring verify` says so on the terminal and in
+`summary.md`, because a bundle whose result reads `passed` must not be
+readable as "verified" when nothing was proven. That condition is detected
+by comparing against the shipped template's own constants; it is **not** a
+manifest field, because `wringer.evidence.v1` is frozen.
 
 ### `wring verify`
 

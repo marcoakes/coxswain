@@ -177,7 +177,10 @@ _DEVELOPER_PATHS = (
 
 
 def script_files() -> list[Path]:
-    return sorted((repo_root() / "scripts").glob("*.sh"))
+    """Every script, not just the shell ones — scripts/ holds Python too, and
+    a hardcoded path is no less hardcoded for being in a .py file."""
+    scripts = repo_root() / "scripts"
+    return sorted([*scripts.glob("*.sh"), *scripts.glob("*.py")])
 
 
 def test_scripts_exist_to_be_guarded():
@@ -201,4 +204,58 @@ def test_no_script_hardcodes_one_developers_machine(pattern: re.Pattern[str]):
         "scripts must work on any machine — these name one developer's:\n  "
         + "\n  ".join(offenders)
         + "\nUse scripts/scratch.sh, which defaults to $TMPDIR."
+    )
+
+
+# --- R2-03/R2-04: the selftest must test the runbook, not a paraphrase -----
+#
+# scripts/setup-selftest.sh keeps its own copy of SETUP.md step 7H so it can
+# run it twice. Nothing structurally couples the two, so the runbook could
+# regress to `git add -A` while the selftest stayed green against its fixed
+# copy — a guard that no longer guards the thing it names. These assertions
+# are the coupling: the three tokens R2-03 and R2-04 turn on must be present
+# in both files, and the token they replaced must be in neither.
+
+
+def step_7h_block(text: str) -> str:
+    """SETUP.md's step 7H command block."""
+    after = text.split("## Step 7H", 1)
+    assert len(after) == 2, "SETUP.md has no step 7H"
+    blocks = bash_blocks(after[1])
+    assert blocks, "step 7H has no command block"
+    return blocks[0]
+
+
+REQUIRED_7H_TOKENS = (
+    ".gitignore",  # R2-03: the probe must not commit its own evidence
+    "[ -d .git ]",  # R2-04: no re-init warning on a second run
+    "git diff --cached --quiet",  # the && chain must survive a second run
+)
+
+
+def test_step_7h_and_its_selftest_agree():
+    setup = step_7h_block((repo_root() / "SETUP.md").read_text(encoding="utf-8"))
+    selftest = (repo_root() / "scripts" / "setup-selftest.sh").read_text(
+        encoding="utf-8"
+    )
+
+    for token in REQUIRED_7H_TOKENS:
+        assert token in setup, f"SETUP.md step 7H lost `{token}`"
+        assert token in selftest, f"setup-selftest.sh's 7H copy lost `{token}`"
+
+    assert "git add -A" not in setup, (
+        "SETUP.md step 7H is back to `git add -A`, which stages the previous "
+        "run's .wringer/ and commits raw gate output into the probe repo "
+        "(field report 2026-08-05, R2-03)"
+    )
+    # Commands only. The script's own comment explains the R2-03 defect and
+    # has to be able to name it, the same way SETUP.md's warning has to be
+    # able to spell `container images`.
+    commands = [
+        line for line in selftest.splitlines() if not line.lstrip().startswith("#")
+    ]
+    offenders = [line.strip() for line in commands if "git add -A" in line]
+    assert not offenders, (
+        "setup-selftest.sh's 7H copy is back to `git add -A`, so it would "
+        f"pass while the runbook it stands for is broken: {offenders}"
     )

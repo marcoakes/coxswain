@@ -139,14 +139,22 @@ def _seen(root: Path) -> tuple[str, ...]:
 def is_untouched_template(gates: Iterable[Gate]) -> bool:
     """Whether these gates are still nothing but the shipped placeholder.
 
-    Required gates only. Someone who has added their real gates and left the
-    placeholder behind as `optional: true` has configured the repo; someone
+    Judged on the REQUIRED gates, because they are the ones whose passing is
+    the run's verdict. Someone who added their real gates and left the
+    placeholder behind as `optional: true` has configured this repo; someone
     whose only required gate is `true` has not, whatever the run says.
+
+    The exception is a config with no required gates at all. `wring verify`
+    exits 0 there having proven nothing whatsoever — a stronger version of
+    the same vacuity — so if what is left is only placeholders, that still
+    counts as untouched rather than as a configured repo.
     """
+    gates = list(gates)
     required = [gate for gate in gates if not gate.optional]
-    return bool(required) and all(
+    judged = required or gates
+    return bool(judged) and all(
         gate.id == PLACEHOLDER_GATE_ID and gate.run.strip() == PLACEHOLDER_GATE_RUN
-        for gate in required
+        for gate in judged
     )
 
 

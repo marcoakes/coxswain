@@ -24,7 +24,7 @@ is a check nobody ran — this file is subject to law 1 like everything else.
 | Sequence | Host | OS | Runtime | Date | Commit | Result |
 |---|---|---|---|---|---|---|
 | Apple `container` | Apple silicon, MDM-managed, uid:gid `502:20` | macOS 26.5.2, `Darwin arm64` | Apple `container` 1.2.0 (Homebrew formula, Workbrew 1.7.3 / Homebrew 6.0.15) | 2026-08-05 | `75167c2` | **Passed with corrections applied by hand** — see the note below |
-| Docker stub (R2-02) | Apple silicon, MDM-managed | macOS 26.5.2 | none — `/Applications/Docker.app` present as a stripped stub | 2026-08-05 | `75167c2` | **Observed.** `d--------- 2 root admin 64`, no binary, no socket |
+| Docker stub (R2-02) | Apple silicon, MDM-managed | macOS 26.5.2 | none — `/Applications/Docker.app` present as a stripped stub | 2026-08-05 | `75167c2` | **Observed, not executed as a sequence.** `d--------- 2 root admin 64`, no binary, no socket — seen while diagnosing step 4B. Sequence C below was written afterwards and has never been run as written |
 | Docker Desktop on macOS | — | — | — | **never** | — | **UNCLAIMED — never tested by anyone** |
 | Docker on Linux | GitHub Actions `ubuntu-latest` | — | Docker (CI) | every push | `main` | Automated; see `.github/workflows/tests.yml` |
 
@@ -166,9 +166,17 @@ have it or you do not.
 These are covered by automated tests and do not belong on a manual list.
 They are named so nobody adds them again out of caution:
 
-- `container images` never appearing as a command, and `ls -la
-  /Applications/Docker.app` never appearing in a runbook — `tests/test_docs.py`.
+- `container images` and `ls -la /Applications/Docker.app` never appearing as
+  a *command* a runbook tells you to run — `tests/test_docs.py`. Prose may
+  still name them, and does: the fixes for both explain the broken form on
+  purpose, and a warning that cannot spell the wrong command is not a
+  warning. The guards distinguish a ```bash fence (an instruction) from an
+  untagged one (a transcript of what happened).
 - No script defaulting to one developer's sandbox path — `tests/test_docs.py`.
+- The scratch tree a script may recursively delete always ends in a component
+  the tool chose — `tests/test_scratch.py`.
+- SETUP.md's step 7H and the selftest's copy of it not drifting apart —
+  `tests/test_docs.py`.
 - `run_id` being timezone-invariant — `tests/test_evidence.py`.
 - The blank template naming what it found — `tests/test_detect.py`.
 - `wring init && wring verify` exiting 0 in an empty repo, and saying the

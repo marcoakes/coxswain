@@ -247,6 +247,22 @@ def test_a_real_gate_is_never_mistaken_for_the_placeholder(tmp_path: Path):
     assert detect.is_untouched_template(config.load(written).gates) is False
 
 
+def test_a_lone_optional_placeholder_is_still_untouched(tmp_path: Path):
+    """Marking the placeholder optional leaves a config with NO required
+    gates. `wring verify` exits 0 there having proven even less than the
+    placeholder proved, so it must not be the way to silence the warning."""
+    written = tmp_path / config.CONFIG_FILENAME
+    written.write_text(
+        "version: 1\ngates:\n"
+        f"  - id: {detect.PLACEHOLDER_GATE_ID}\n"
+        f'    run: "{detect.PLACEHOLDER_GATE_RUN}"\n'
+        "    optional: true\n",
+        encoding="utf-8",
+    )
+
+    assert detect.is_untouched_template(config.load(written).gates) is True
+
+
 def test_the_placeholder_left_behind_as_optional_is_not_untouched(
     tmp_path: Path,
 ):

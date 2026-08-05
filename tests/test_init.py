@@ -18,6 +18,40 @@ def test_init_writes_template_that_parses(tmp_path, monkeypatch, capsys):
     assert cfg.gates[0].optional is False
 
 
+def test_init_names_the_file_it_found_on_the_terminal(tmp_path, monkeypatch, capsys):
+    """R2-07's other half. The rendered `.wringer.yaml` comment is covered in
+    tests/test_detect.py, but the defect the field report actually quoted was
+    the line `wring init` PRINTS:
+
+        Wrote .wringer.yaml — nothing to detect here, so it is a template.
+
+    said to someone looking at their own pyproject.toml. Without this test
+    that exact wording can be restored and the suite stays green.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["init"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "found pyproject.toml" in out
+    assert "nothing to detect here" not in out
+
+
+def test_init_says_plainly_when_there_was_nothing_to_read(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["init"]) == cli.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "nothing here to read commands from" in out
+    assert "pyproject.toml" not in out
+
+
 def test_a_fresh_init_then_verify_exits_zero_and_says_it_proved_nothing(
     repo, monkeypatch, capsys
 ):
