@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/attestation.schema.json",
+  "title": "Wringer attestation",
+  "description": "`attestation.json` — the provenance claim `wring attest` assembles and `wring audit` checks, offline, by someone who trusts nobody involved. It says: change C was authorized by spec S, proven by gates G with recorded results against tree T, judged against rubric R with verdict V, and delivered as branch B — and every bundle backing those clauses is byte-identical to when it was written. A clause whose inputs are absent is ABSENT, not invented: an attestation over a bare `wring verify` bundle carries `proven_by` alone and is still worth having. Bundles link to each other by path; this file re-anchors them by digest, recording the sha256 of each one's digests.json, so from the moment it is written the linkage is content-addressed. v0 attestations are UNSIGNED and say so in their own `limits` array — a signature, if one ever arrives, is the sibling file `attestation.json.sig`, never a field in here, so that signing stays purely additive and every existing attestation remains valid byte-for-byte.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "attestation_id",
+    "created_at",
+    "signature",
+    "limits",
+    "proven_by",
+    "change",
+    "bundles"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.attestation.v1"
+    },
+    "attestation_id": {
+      "description": "A run id: `20260806-090348-1029`. Do not parse it for a timestamp; `created_at` is the field that carries one unambiguously.",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "Local time with UTC offset, seconds resolution.",
+      "type": "string"
+    },
+    "signature": {
+      "description": "Always null in v0, by ruling, and the artifact says so in `limits`. A signature is a SIBLING file (`attestation.json.sig`), never a field inside a signed payload — embedding one would require canonicalising this JSON before signing, a class of bug with a long history, and would invalidate every attestation written before it existed.",
+      "type": "null"
+    },
+    "limits": {
+      "description": "What this attestation does NOT claim, in its own words, in the file itself. The first entry is fixed text about being unsigned, and `wring audit` REFUSES an attestation whose limits have been removed: a green artifact that has had its own caveats stripped reads as a stronger claim than it is, which is the vacuity failure in a new costume.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "change": {
+      "description": "The commit this attestation is about — the delivered commit where there is one, otherwise the commit the gates ran against.",
+      "type": "object",
+      "required": ["commit", "commit_signature"],
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": ["string", "null"]
+        },
+        "commit_signature": {
+          "description": "What git says about that commit's signature, recorded as a FACT and never judged. Wringer touches no key and consults no trust store — that is the verifier's job and their trust root. `wring audit` reports this and does not re-verify it, which is what keeps `audit` runnable on a plane.",
+          "type": "object",
+          "required": ["commit", "status", "signer", "means"],
+          "additionalProperties": false,
+          "properties": {
+            "commit": {"type": ["string", "null"]},
+            "status": {
+              "description": "git's `%G?` verbatim: G good, B bad, U good-but-untrusted, X expired, Y expired key, R revoked key, E unverifiable, N none. Null only when no commit is named.",
+              "type": ["string", "null"]
+            },
+            "signer": {
+              "description": "git's `%GS`, the signer git reports. Null when there is none.",
+              "type": ["string", "null"]
+            },
+            "means": {
+              "description": "A plain-English gloss of `status`, so a reader of the artifact does not have to know git's alphabet. A courtesy, not an interpretation.",
+              "type": ["string", "null"]
+            }
+          }
+        }
+      }
+    },
+    "authorized_by": {
+      "description": "ABSENT when no spec authorised the change. Present only when `wringer.spec.yaml` exists AND says `approved: true` — attest LOADS the spec rather than hashing it blind, because `spec_sha256` hashes the file without parsing it and an unapproved spec hashes exactly like an approved one.",
+      "type": "object",
+      "required": ["spec", "sha256", "approved"],
+      "additionalProperties": false,
+      "properties": {
+        "spec": {"type": "string"},
+        "sha256": {"type": ["string", "null"]},
+        "approved": {"const": true}
+      }
+    },
+    "proven_by": {
+      "description": "The run bundle: which tree the gates ran against, and what they returned. Always present — an attestation with nothing proven is not one.",
+      "type": "object",
+      "required": ["run", "head_sha", "branch", "dirty", "gates"],
+      "additionalProperties": false,
+      "properties": {
+        "run": {"type": "string"},
+        "head_sha": {"type": ["string", "null"]},
+        "branch": {"type": ["string", "null"]},
+        "dirty": {"type": ["boolean", "null"]},
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["gate_id", "status", "exit_code"],
+            "additionalProperties": false,
+            "properties": {
+              "gate_id": {"type": ["string", "null"]},
+              "status": {"type": ["string", "null"]},
+              "exit_code": {"type": ["integer", "null"]}
+            }
+          }
+        }
+      }
+    },
+    "judged_by": {
+      "description": "ABSENT when no verdict about THIS run exists. Matched on the verdict's own `evidence_dir`, never on which verdict is newest: a verdict about a different change is worse than no verdict. A dry-run verdict is refused rather than recorded — nothing was judged, so the clause would be theatre.",
+      "type": "object",
+      "required": ["verdict_dir", "rubric", "verdict", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict_dir": {"type": "string"},
+        "rubric": {
+          "type": ["object", "null"],
+          "required": ["path", "sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {"type": "string"},
+            "sha256": {"type": "string"}
+          }
+        },
+        "verdict": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]}
+      }
+    },
+    "delivered_as": {
+      "description": "ABSENT when the anchor was a run rather than a delivery. `mode` is `dry_run` for a delivery that was planned and not sent, which is a real and attestable state: the plan existed and the branch did not.",
+      "type": "object",
+      "required": [
+        "delivery_dir", "mode", "branch", "base", "commit", "pushed",
+        "merge_request"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delivery_dir": {"type": "string"},
+        "mode": {"enum": ["dry_run", "live"]},
+        "branch": {"type": ["string", "null"]},
+        "base": {"type": ["string", "null"]},
+        "commit": {"type": ["string", "null"]},
+        "pushed": {"type": "boolean"},
+        "merge_request": {
+          "type": ["object", "null"],
+          "required": ["number", "url"],
+          "additionalProperties": false,
+          "properties": {
+            "number": {"type": "integer"},
+            "url": {"type": "string"}
+          }
+        }
+      }
+    },
+    "bundles": {
+      "description": "Every bundle this attestation rests on, re-anchored by content. `digests_sha256` is the sha256 of that bundle's own digests.json FILE — which is what turns a path-linked chain into a content-addressed one, and what makes a self-consistently rewritten bundle (files AND record rewritten together) still fail an audit.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["role", "path", "digests_sha256", "files"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {"enum": ["run", "verdict", "delivery"]},
+          "path": {"type": "string"},
+          "digests_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "files": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

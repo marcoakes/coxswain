@@ -19,6 +19,7 @@ rather than reverse-engineer it — the point of
 | [`digests.schema.json`](digests.schema.json) | `wringer.digests.v1` — `digests.json`, a sha256 per file in a bundle |
 | [`untracked.schema.json`](untracked.schema.json) | `wringer.untracked.v1` — superseded by v2 below, still published and still valid; a bare sha256 per *untracked* file |
 | [`untracked-v2.schema.json`](untracked-v2.schema.json) | `wringer.untracked.v2` — `untracked.json`, git's *identity* (`"<mode>:<sha256>"`) per *untracked* path in the tree the gates ran against |
+| [`attestation.schema.json`](attestation.schema.json) | `wringer.attestation.v1` — `attestation.json`, the provenance claim `wring attest` writes and `wring audit` checks offline |
 | [`fleet-manifest.schema.json`](fleet-manifest.schema.json) | `wringer.fleet.v1` — `manifest.json` of a `wring fleet` bundle |
 | [`fleet-event.schema.json`](fleet-event.schema.json) | **one line** of a fleet's `fleet.jsonl` |
 | [`judge-verdict.schema.json`](judge-verdict.schema.json) | `wringer.judge.v1` — `verdict.json`, a rubric verdict over a finished bundle |

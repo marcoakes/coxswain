@@ -19,6 +19,53 @@ here, not the fixes.
 
 ### Added
 
+- **`wring attest` and `wring audit`** — tamper-evident provenance
+  ([SPEC_PROVENANCE_V0.md](SPEC_PROVENANCE_V0.md)). `attest` assembles the
+  claim: *change C, authorized by spec S, proven by gates G against tree T,
+  judged against rubric R with verdict V, delivered as branch B — and every
+  bundle backing those clauses is byte-identical to when it was written.*
+  `audit` checks it offline, with no config, by someone who trusts nobody
+  involved. **Neither calls an LLM and neither opens a socket** — a test
+  parses the module's imports rather than grepping its text, so the promise
+  cannot be satisfied by deleting the sentence that makes it.
+
+  A clause with no inputs is **absent, not invented**: an attestation over a
+  bare `wring verify` bundle carries one clause and is still worth having.
+  Bundles link by path; the attestation re-anchors them by digest, recording
+  the sha256 of each bundle's `digests.json` file, so a *self-consistently*
+  rewritten bundle — files and record edited together — still fails an audit.
+
+  The money test: change one byte in one gate log, and `audit` names that file
+  and exits 1. Captured, with the refusals, in
+  [`docs/attest-and-audit.md`](docs/attest-and-audit.md).
+
+  **It is unsigned, by decision, and says so in its own artifact.** The word
+  *attestation* sounds cryptographic; a reader who assumes it means "signed by
+  someone" has been misled by a green thing that means less than it looks
+  like. So `attestation.json` carries a `limits` array, `attest` prints the
+  first entry as a `!` line (doctor's mark for *worth knowing, not a problem*
+  — never `✗`, nothing failed), `audit` repeats it **on success**, and both
+  carry it in `--json`. Delete it and `audit` refuses the attestation.
+  A signature, if one ever arrives, is the sibling file
+  `attestation.json.sig` — never a payload field — so signing stays purely
+  additive and every v0 attestation remains valid byte-for-byte.
+
+  `commit_signature` records `git log -1 --format=%G?` verbatim plus the
+  reported signer. Wringer touches no key and consults no trust store, and
+  `audit` reports the value without re-verifying it: re-verification needs the
+  reader's own keyring, which would put a network-shaped dependency on a
+  command that must work on a plane. A repo that signs its commits gets a real
+  chain for free; one that does not records `N` and loses nothing.
+
+  Seven refusals, each exit 1 and each naming what is wrong: no `digests.json`
+  (*cannot attest what cannot be checked* — every pre-0.2 bundle, including
+  this repo's committed `.wringer.example/`), a digest mismatch in either
+  direction, a broken `prev_hash` chain (**the first code that reads that
+  field** — it has been written on every event since 0.2 and verified by
+  nothing), a `dry_run` verdict, gates that did not pass, a spec saying
+  `approved: false`, and a run recorded `gates_vacuous`. Each was verified by
+  disabling it and watching its test fail, not by assertion.
+
 - **`docs/MANUAL_CHECKS.md`** — a dated record of the checks CI structurally
   cannot run: the Apple `container` sequence, the Docker-stub check, and a
   "last passed" table naming host, OS, runtime version, date and commit. It
@@ -32,6 +79,19 @@ here, not the fixes.
   and relative paths.
 
 ### Schema notes
+
+- **`wringer.attestation.v1`** (`schema/attestation.schema.json`) — a new
+  format, so purely additive; no frozen schema is touched. Its optional
+  clauses (`authorized_by`, `judged_by`, `delivered_as`) are deliberately not
+  `required`: a schema that demanded them would force the invention the spec
+  forbids.
+
+- **Every bundle now writes `digests.json`**, not only `wring verify`'s.
+  `wring judge`, `wring deliver`, `wring run` and `wring fleet` bundles gain
+  it, written last in each path — including `deliver`'s failure path, since a
+  failed delivery is still a bundle somebody may audit. No schema moved:
+  `wringer.digests.v1` already described the file, and only the verify bundle
+  had ever produced one.
 
 - **`wringer.untracked.v2`** (`schema/untracked-v2.schema.json`) supersedes
   `wringer.untracked.v1`. Each entry becomes `"<mode>:<sha256>"` — git's mode

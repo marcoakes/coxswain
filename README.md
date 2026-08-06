@@ -189,6 +189,22 @@ needed no changes to accept one. The captured loop is
 [`docs/issue-to-mr.md`](docs/issue-to-mr.md). Contract:
 **[SPEC_GET_V0.md](SPEC_GET_V0.md)**.
 
+## And a claim you can check without trusting anyone
+
+`wring attest` assembles the provenance claim — *change C, authorized by spec
+S, proven by gates G against tree T, judged against rubric R, delivered as
+branch B, and every bundle backing that is byte-identical to when it was
+written.* `wring audit` checks it offline, with no config, by someone who
+trusts nobody involved. Neither calls an LLM and neither opens a socket.
+
+Change one byte in one gate log and `audit` names that file and exits 1. The
+attestation is **unsigned**, by decision, and says so in its own `limits`
+array — delete that sentence and `audit` refuses it, because a green artifact
+stripped of its own caveats reads as a stronger claim than it is. The captured
+transcript, including the tamper detection, is
+[`docs/attest-and-audit.md`](docs/attest-and-audit.md). Contract:
+**[SPEC_PROVENANCE_V0.md](SPEC_PROVENANCE_V0.md)**.
+
 ## The format is targetable, not just readable
 
 The bundle is the interface, so it is [published as JSON

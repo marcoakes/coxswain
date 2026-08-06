@@ -3,6 +3,7 @@
   "tag": "v0.2.0",
   "schemas": {
     "acquired-manifest.schema.json": "4eeeedceead51da2f548f49666141a7011bd5e24f641e852f3eed02cd885bd1e",
+    "attestation.schema.json": "ce37c4e1572bf75b20c55036aeaa235f41a2c743fe3f75a2295199bd7c3514dc",
     "delivery-manifest.schema.json": "46eb3fbc8be513979962213eee1c06d6783aeaea8b4afcf1ec3d155037f0aa33",
     "digests.schema.json": "ad0bd70c98149e2bc54ebf7abc1295bfbadc31a05b97e3ce92c24cccc8252ee8",
     "evidence-event.schema.json": "ddc61d7b0eaa39fd0d08cf77cd2eff64d9fc1bb959a5e8586b51543abfa5157e",

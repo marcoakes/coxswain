@@ -1130,3 +1130,84 @@ def test_response_json_is_deliberately_unschematised():
         "the absence of a response.json schema is a decision, and a decision "
         "nobody wrote down is indistinguishable from an oversight"
     )
+
+
+# --- wringer.attestation.v1 ------------------------------------------------
+
+
+def _attested(repo: Path, monkeypatch, capsys) -> dict:
+    """A real attestation over a real verified change, with a delivery so the
+    optional clauses are exercised rather than declared and never written."""
+    from test_attest import CONFIG, git
+
+    upstream = repo.parent / f"{repo.name}-schema-attest.git"
+    git(repo, "init", "--bare", "-b", "main", str(upstream))
+    git(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-m", "config")
+    git(repo, "push", "-u", "origin", "main")
+    (repo / "feature.py").write_text("def added():\n    return 1\n", "utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    assert cli.main(["deliver"]) == cli.EXIT_OK
+    assert cli.main(["attest"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    from wringer import attest
+
+    written = sorted((repo / attest.ATTESTATIONS_DIRNAME).iterdir())[0]
+    return json.loads(
+        (written / attest.ATTESTATION_FILENAME).read_text(encoding="utf-8")
+    )
+
+
+def test_a_real_attestation_matches_its_schema(repo, monkeypatch, capsys):
+    payload = _attested(repo, monkeypatch, capsys)
+    schema = load("attestation.schema.json")
+
+    check(payload, schema, "attestation.json")
+    assert payload["schema_version"] == "wringer.attestation.v1"
+    # the nested objects too — drift hides in them, not at the top level
+    for name in ("change", "proven_by", "delivered_as"):
+        check(payload[name], schema["properties"][name], f"attestation {name}")
+    check(
+        payload["change"]["commit_signature"],
+        schema["properties"]["change"]["properties"]["commit_signature"],
+        "attestation commit_signature",
+    )
+    for ref in payload["bundles"]:
+        check(ref, schema["properties"]["bundles"]["items"], "attestation bundle")
+
+
+def test_a_real_attestation_validates_against_the_real_engine(
+    repo, monkeypatch, capsys
+):
+    built = validators()
+    payload = _attested(repo, monkeypatch, capsys)
+
+    errors = [
+        f"{e.json_path} {e.message}"
+        for e in built["attestation.schema.json"].iter_errors(payload)
+    ]
+    assert not errors, "\n".join(errors)
+
+
+def test_the_attestation_schema_declares_the_clauses_that_may_be_absent():
+    """"The clauses it lacks inputs for are absent, not invented." A schema
+    that made them required would force the invention."""
+    schema = load("attestation.schema.json")
+    required = set(schema["required"])
+
+    for optional in ("authorized_by", "judged_by", "delivered_as"):
+        assert optional in schema["properties"], optional
+        assert optional not in required, f"{optional} must be allowed to be absent"
+    assert {"schema_version", "limits", "signature", "proven_by", "bundles"} <= (
+        required
+    )
+    # v0 is unsigned, and the schema says so rather than leaving a seat
+    assert schema["properties"]["signature"] == {
+        "description": schema["properties"]["signature"]["description"],
+        "type": "null",
+    }

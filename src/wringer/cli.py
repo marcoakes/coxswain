@@ -286,6 +286,40 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_doctor.set_defaults(func=cmd_doctor)
 
+    parser_attest = subparsers.add_parser(
+        "attest",
+        help="assemble the provenance claim for a verified change — offline",
+    )
+    parser_attest.add_argument(
+        "anchor",
+        nargs="?",
+        metavar="RUN_OR_DELIVERY_DIR",
+        help="what to attest; defaults to the newest delivery, else the "
+             "newest run",
+    )
+    parser_attest.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_attest.set_defaults(func=cmd_attest)
+
+    parser_audit = subparsers.add_parser(
+        "audit",
+        help="check an attestation offline — no config, no network, no LLM",
+    )
+    parser_audit.add_argument(
+        "attestation",
+        metavar="ATTESTATION_FILE",
+        help="the attestation.json to check",
+    )
+    parser_audit.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one JSON object instead of the human report",
+    )
+    parser_audit.set_defaults(func=cmd_audit)
+
     parser_explain = subparsers.add_parser(
         "explain",
         help="diagnose the latest (or a named) run — no LLM involved",
@@ -1639,6 +1673,119 @@ def _refuse_unverifiable(root: Path, command: str) -> int | None:
         )
         return EXIT_REFUSED
     return None
+
+
+def cmd_attest(args: argparse.Namespace) -> int:
+    """Assemble the provenance claim. Never opens a socket, never calls an LLM."""
+    from wringer import attest
+
+    root = git.find_root(Path.cwd())
+    if args.anchor:
+        anchor = Path(args.anchor)
+        if not anchor.is_absolute():
+            anchor = root / anchor
+        if not anchor.is_dir():
+            print(f"wring attest: no such directory: {anchor}", file=sys.stderr)
+            return EXIT_CONFIG
+    else:
+        found = attest.latest_anchor(root)
+        if found is None:
+            print(
+                "wring attest: nothing to attest — no runs and no deliveries "
+                "under .wringer/. Run 'wring verify' first",
+                file=sys.stderr,
+            )
+            return EXIT_CONFIG
+        anchor = found
+
+    try:
+        built = attest.build(root, anchor)
+    except attest.Refused as exc:
+        print(f"wring attest: {exc}", file=sys.stderr)
+        return EXIT_GATE_FAILED
+    except attest.AttestError as exc:
+        print(f"wring attest: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    bundle = attest.Bundle.create(root, built.payload["attestation_id"])
+    written = bundle.write(built.payload)
+
+    if args.json:
+        print(json.dumps({
+            "attestation_id": built.payload["attestation_id"],
+            "attestation": _relative(written, root),
+            "signature": built.payload["signature"],
+            "limits": built.payload["limits"],
+            "bundles": built.payload["bundles"],
+            "change": built.payload["change"],
+            "clauses": [
+                name for name in
+                ("authorized_by", "proven_by", "judged_by", "delivered_as")
+                if name in built.payload
+            ],
+        }))
+        return EXIT_OK
+
+    payload = built.payload
+    print(f"Attested {payload['attestation_id']}\n")
+    # The CLAUSES only. The summary renders the limits as bullets too, and
+    # scraping its "- " lines printed the whole limits list here and then
+    # again as the `!` line below — which teaches a reader to skim past the
+    # one sentence that says what this artifact is not.
+    for label, line in attest.clause_lines(payload):
+        print(f"  {label:<14} {line}")
+    # `!` — doctor's mark for "worth knowing, not a problem". NEVER `✗`:
+    # nothing failed, and a red mark here would teach people to ignore the
+    # one line that says what this artifact is not.
+    print(f"\n! {attest.UNSIGNED_LIMIT}")
+    print(f"\nWritten to {_relative(bundle.directory, root)}/")
+    print(f"Check it yourself:\n  wring audit {_relative(written, root)}")
+    return EXIT_OK
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Check an attestation. No config is read — an auditor may not have one."""
+    from wringer import attest
+
+    path = Path(args.attestation)
+    if path.is_dir():  # a directory is an easy mistake; point at the file
+        path = path / attest.ATTESTATION_FILENAME
+    if not path.is_file():
+        print(f"wring audit: no such file: {path}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    try:
+        report = attest.audit(path)
+    except attest.AttestError as exc:
+        print(f"wring audit: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if args.json:
+        print(json.dumps({
+            "ok": report.ok,
+            "attestation": report.attestation,
+            "checked": report.checked,
+            "problem": report.problem,
+            "signature": report.signature,
+            "limits": report.limits,
+        }))
+        return EXIT_OK if report.ok else EXIT_GATE_FAILED
+
+    if not report.ok:
+        print(f"✗ {path.name} does not verify\n", file=sys.stderr)
+        print(f"  {report.problem}", file=sys.stderr)
+        return EXIT_GATE_FAILED
+
+    files = sum(entry["files"] for entry in report.checked)
+    print(f"✓ {path.name} verifies")
+    for entry in report.checked:
+        print(f"  {entry['role']:<9} {entry['path']}  ({entry['files']} files)")
+    print(f"\n  {len(report.checked)} bundle(s), {files} file(s) — every digest "
+          "matches and every ledger chain is intact.")
+    # Repeated on SUCCESS, deliberately: a passing audit must not read as a
+    # stronger claim than it is.
+    print(f"\n! {attest.UNSIGNED_LIMIT}")
+    return EXIT_OK
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
