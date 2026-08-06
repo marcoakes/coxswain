@@ -31,7 +31,86 @@ here, not the fixes.
   destroy a scratch tree, defaulting to `$TMPDIR` and refusing `/`, `$HOME`
   and relative paths.
 
+### Schema notes
+
+- **`wringer.untracked.v2`** (`schema/untracked-v2.schema.json`) supersedes
+  `wringer.untracked.v1`. Each entry becomes `"<mode>:<sha256>"` — git's mode
+  for the path and the digest of the payload git would store, which for a
+  symlink is the link text rather than the referent's bytes. Mode and digest
+  are one string so a type flip is a digest change by construction.
+
+  **`wringer.untracked.v1` remains published, frozen and valid.** Its file is
+  untouched, anything that read a v1 bundle still reads one, and `wring
+  deliver` treats a v1 record the way it treats a bundle written before the
+  file existed: names compared, bytes not. Editing v1's digest pattern so the
+  new values fit would have silently reinterpreted every digest in every
+  bundle already written, which is the one thing law 7 forbids — this is the
+  first time that rule has retired a format, and `schema/README.md` carries it
+  as the worked example.
+
 ### Fixed
+
+*The first six entries close what an adversarial review of the delivery-path
+work found: fourteen defects, each reproduced twice. Three were **too loose**
+— `wring deliver` published a branch whose tree was not the tree the gates ran
+against, and refused nothing. That is the exact failure the delivery-path work
+existed to prevent, so it is fixed before anything is built on top.*
+
+- **A rename made in an editor resurrected the deleted file on the delivered
+  branch.** `_parse_status` tested the porcelain's *index* column alone, and a
+  rename wears its flag in either: `R ` from `git mv`, ` R` from a rename made
+  in an editor and then declared with `git add -N`, `RM` from `git mv` plus an
+  edit. Missing the middle shape did not merely drop a path — the source was
+  then parsed as a status line of its own, so a 3-character path sliced to the
+  empty string, which vanished from the NUL-joined pathspec. `git commit
+  --only` never named the deletion, and the branch shipped a file the gates
+  had seen removed. No refusal, no error. Both columns are tested now.
+- **`untracked.json` recorded what the gates could read, not what git would
+  commit** — and one confusion caused five defects pointing in both
+  directions. It hashed the bytes `open("rb")` returned, which *follows a
+  symlink*, while git stores mode `120000` and a blob holding the link *text*.
+  Too loose: retargeting a symlink at a file with identical bytes, replacing a
+  file with a symlink to a copy of itself, and `chmod +x` on a new script all
+  changed the committed tree and all delivered unrefused. Too strict, and
+  **unclearable**: a dangling symlink and a symlink to a directory each
+  recorded `unreadable`, which delivery refuses — and re-running `wring
+  verify` recorded `unreadable` again, so no user action lifted it. And one
+  hang: a symlink to a FIFO blocked `open()` forever, so **`wring verify`
+  never returned**. It now records git's identity for the path,
+  `"<mode>:<sha256 of the committed payload>"`, via `lstat` and `readlink`.
+- **A case-only rename stranded the user on a half-made branch.** `git mv
+  Foo.py foo.py` on a case-insensitive volume died `will not add file alias`
+  *after* `switch --create`. Measured: no path-restricted commit can express
+  it at all, and building the tree through a temporary index silently writes
+  **both** paths. So it is refused from `plan()`, before any branch exists,
+  naming both paths and the remedy.
+- **A failed commit no longer abandons the branch it created.** Any failure
+  between `switch --create` and the commit left the user standing on a branch
+  Wringer had made and walked away from — with the next `wring deliver`
+  refusing too, because condition 1 is *only a branch Wringer created* and
+  that name now existed. The branch is undone when the commit never happened,
+  and never once it has: after that it holds real work, and a failed push is a
+  state to report rather than one to delete. The rollback never uses `git
+  switch --force`, which is `--discard-changes` and would throw away the
+  uncommitted work the failure was about.
+- **The delivery pathspec no longer dies on its own size, or double-counts.**
+  `_matchable` passed every path as argv: measured, 4500 long paths went
+  through and 6000 raised `Argument list too long` — after the branch was
+  created. It batches now (`git ls-files` has no `--pathspec-from-file`,
+  checked). And `git mv a.c b.c` followed by a new file at `a.c` reports the
+  name in both of git's lists, so a two-file change was announced as "3
+  file(s)" in the terminal, in `--json`, and in the MR body.
+- **A refusal that suggested something which could not clear it.** The
+  unresolvable-default message ended "or set the branch name to something that
+  is plainly not the default" — but it fires before any branch name is
+  resolved, and `deliver.base` cannot clear it either, by design. It now names
+  `git fetch` and `git remote set-head`, and the test follows its own
+  instructions and checks the refusal is gone.
+
+  Recorded rather than amended: commit `d0f866c` said `untracked.json` closed
+  *"the last hole in this function's promise"*. It did not, and a dated note
+  in `deliver.py` says so above the function rather than the claim being
+  quietly overwritten.
 
 - **`SETUP.md`: `container image`, not `container images`** (BLOCKER). Apple
   `container` 1.2.0 spells the subcommand singular. The plural exits 64 on a
