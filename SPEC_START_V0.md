@@ -2,9 +2,10 @@
 
 *Drafted 2026-08-06 by the planning window, then revised against an
 adversarial review that found four HIGH defects in the first draft — each is
-now a ruling rather than an omission. **Rulings 1–5 decided here under Marc's
-standing delegation; §6 lists what needs his word**, with replacement wording
-drafted so the answer is yes or no. `SPEC_ACP_V0.md`, `SPEC_GET_V0.md`,
+now a ruling rather than an omission. **APPROVED by Marc 2026-08-06: rulings
+1–5 decided under his standing delegation, and both §6 questions answered by
+him directly. Binding. There are no approval pauses left in this slice.**
+`SPEC_ACP_V0.md`, `SPEC_GET_V0.md`,
 `SPEC_VERIFY_V0.md` and `SPEC_SUPERVISION_V0.md` bind; where this deviates
 from any of them, §3c-i and §3e say so by name.*
 
@@ -249,7 +250,9 @@ It never installs anything, and it never assumes.**
 **Consequence, and it is a §8 box:** `SPEC_ACP_V0.md:47-48`'s parenthetical
 must be struck or rewritten in the same commit as this ruling. A binding spec
 that still promises the deferred feature is a contradiction, not a footnote.
-Marc can overturn instead — §6.2.
+
+**Marc confirmed this ruling on 2026-08-06** (§6.2), so the two shipped error
+strings stay true and are not to be rewritten.
 
 ## 3d. What it will not overwrite — BINDING (ruling 4)
 
@@ -339,11 +342,12 @@ condition under which it opens a socket: the user asked it to clone.
    the same invocation.** Design in §3e. Reinstates `SPEC_GET_V0.md:85-87`,
    which the first draft of this spec contradicted without noticing.
 
-## 6. What needs Marc
+## 6. Marc's answers — DECIDED 2026-08-06
 
-1. **The public promise wording.** Ruling 1 requires README/SECURITY/SETUP to
-   change in the same commit as the capability (the J2 precedent,
-   `WRINGER_NORTHSTAR_PLAN.md:152-156`). Drafted, for a yes or a no:
+1. **The public promise wording — APPROVED as drafted.** This paragraph ships
+   in README, SECURITY.md and SETUP.md **in the same commit as the
+   capability**, per the J2 precedent (`WRINGER_NORTHSTAR_PLAN.md:152-156`).
+   Verbatim, and a test asserts it is present:
 
    > *Wringer never stores a credential.* `wring start` will ask for your API
    > key so it can hand it to the build it launches; it keeps it in memory
@@ -351,9 +355,16 @@ condition under which it opens a socket: the user asked it to clone.
    > bundle, and writes it nowhere. Your config records the *name* of an
    > environment variable, never a key. Nothing else in Wringer ever asks.
 
-2. **Whether to overturn §3c-i** and let `wring start` install an agent. It
-   would also mean rewriting two shipped error strings. Recommendation: do
-   not.
+   Note what changed and what did not: *"never touches a credential"* becomes
+   *"never stores a credential"*. The narrower claim is the true one, and it
+   is still the strongest claim in this category any comparable tool makes.
+
+2. **§3c-i stands — `wring start` does NOT install an agent.** Marc confirmed
+   2026-08-06. It names the agent and prints the exact install command; the
+   human runs it. The two shipped error strings promising Wringer never
+   installs one (`config.py:773-775`, `acp.py:276-277`) therefore stay true
+   and must not be rewritten. `SPEC_ACP_V0.md:47-48`'s parenthetical is
+   struck instead, per §8.
 
 ## 7. Non-goals (binding)
 
