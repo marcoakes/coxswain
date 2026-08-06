@@ -23,6 +23,7 @@ import os
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -239,11 +240,17 @@ def run_turn(
     timeout: int,
     stdout_path: Path,
     stderr_path: Path,
+    on_spawn: Callable[[int], None] | None = None,
 ) -> tuple[Turn, int]:
     """Hold one ACP session and return what it did, plus the exit status.
 
     The agent runs in its own process group, so the loop's existing kill and
     drain behaviour applies unchanged — an ACP worker is a worker.
+
+    `on_spawn` gets the agent's pid the instant it exists, which is how the
+    loop records a group to reap. It matches `gates.run`'s callback of the
+    same name deliberately: the two worker forms must be supervisable through
+    the same mechanism, or "an ACP worker is a worker" is only a comment.
     """
     env = {
         "PATH": os.environ.get("PATH", ""),
@@ -269,6 +276,13 @@ def run_turn(
             f"could not start the ACP agent {command!r}: {exc}. Wringer never "
             "installs an agent — install the one you declared"
         ) from exc
+
+    if on_spawn is not None:
+        # Before the handshake, not after it: an agent that hangs during
+        # `initialize` is precisely the one somebody will SIGKILL the loop
+        # over, and reporting the pid only once the session was healthy would
+        # miss every case worth reaping.
+        on_spawn(proc.pid)
 
     turn = Turn()
     connection = Connection(proc, deadline=time.monotonic() + timeout)

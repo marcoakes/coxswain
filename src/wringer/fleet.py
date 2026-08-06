@@ -457,6 +457,24 @@ def _spawn(
 
 
 def _stop(child: _Child) -> None:
+    """Kill the child `wring run` **and the worker it is supervising**.
+
+    Killing the child's process group is not enough, and that was the hole.
+    The worker runs in its OWN group — `gates.run` uses `start_new_session`,
+    which is how a gate timeout kills a shell and everything it spawned — so
+    signalling the supervisor's group leaves the worker running. A fleet
+    deadline that stops the supervisor and not the work it started does not
+    bound anything, which is the one thing a deadline is for. `_spawn`'s own
+    comment has said so about child budgets since it was written.
+
+    The worker's group is on disk: `loop._run_worker` and `_run_acp_worker`
+    write `worker.pgid` the instant the worker exists, precisely so that
+    something outside the loop can reap it. `wring resume` already reads those
+    files; this reads the same ones.
+
+    Order matters. The supervisor goes FIRST, so it cannot start another
+    worker between the two kills.
+    """
     import signal
 
     try:
@@ -467,9 +485,24 @@ def _stop(child: _Child) -> None:
         except OSError:
             pass
 
+    loop_dir = _child_loop_dir(_child_root(child))
+    if loop_dir is not None:
+        loop.reap_orphans(loop.worker_pgids(loop_dir))
+
+
+def _child_root(child: _Child) -> Path:
+    """Where the child was run — its worktree, or the task's own directory."""
+    if child.state.worktree:
+        return Path(child.state.worktree)
+    return Path(child.state.task.dir).resolve()
+
+
+def _child_loop_dir(root_dir: Path) -> Path | None:
+    return loop.latest_loop(root_dir / loop.LOOPS_DIRNAME)
+
 
 def _child_ledger(root_dir: Path) -> Path | None:
-    found = loop.latest_loop(root_dir / loop.LOOPS_DIRNAME)
+    found = _child_loop_dir(root_dir)
     return found / loop.EVENTS_FILENAME if found is not None else None
 
 

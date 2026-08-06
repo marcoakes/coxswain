@@ -605,3 +605,122 @@ def test_on_exhausted_fail_records_the_third_task_finished_shape(
     assert exhausted, finished
     assert "status" not in exhausted[0]
     assert "reason" not in exhausted[0]
+
+
+# --- E2: the deadline must reach the WORKER, not just the supervisor -------
+#
+# `_stop` killpg'd the child `wring run`'s process group. The worker runs in
+# its OWN group — that is how gate timeouts kill a shell and everything it
+# spawned — so it survived the fleet that was supposed to bound it. The
+# comment at `_spawn` already said as much about child budgets: "the fleet's
+# own deadline is no substitute, because it kills the supervisor rather than
+# the worker burning the budget." This closes it, using the same pgid files
+# `wring resume` already reads.
+
+SLOW_FLEET = """\
+version: 1
+gates:
+  - id: noop
+    run: "true"
+fleet:
+  concurrency: 1
+  deadline: 3
+  progress_window: 600
+  retries: 0
+"""
+
+
+def _alive(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def test_the_fleet_deadline_reaps_the_worker_not_just_the_supervisor(
+    repo, monkeypatch, capsys
+):
+    """A worker that outlives the deadline must not outlive the fleet."""
+    import os
+    import signal
+    import time
+
+    marker = repo / "worker.pid"
+    task = make_task(
+        repo, "slow",
+        f"sh -c 'echo $$ > {marker}; sleep 300'",
+    )
+    (repo / ".wringer.yaml").write_text(SLOW_FLEET, encoding="utf-8")
+    (repo / "tasks.jsonl").write_text(json.dumps(task) + "\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    cli.main(["fleet", "tasks.jsonl"])
+    capsys.readouterr()
+
+    assert marker.exists(), "the worker never started, so this proves nothing"
+    worker_pid = int(marker.read_text(encoding="utf-8").strip())
+    try:
+        # give the OS a moment to finish tearing the group down
+        deadline = time.monotonic() + 10
+        while _alive(worker_pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not _alive(worker_pid), (
+            f"worker {worker_pid} outlived the fleet deadline — the fleet "
+            "killed the supervisor's process group and left the worker in its "
+            "own group running"
+        )
+    finally:
+        if _alive(worker_pid):
+            try:
+                os.killpg(os.getpgid(worker_pid), signal.SIGKILL)
+            except OSError:
+                try:
+                    os.kill(worker_pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+
+def test_a_reaped_silent_child_loses_its_worker_too(repo, monkeypatch, capsys):
+    """The other call site. `_stop` is used for both the deadline and the
+    no-progress reaper, and an orphan from either is the same orphan."""
+    import os
+    import signal
+    import time
+
+    marker = repo / "worker.pid"
+    task = make_task(
+        repo, "silent",
+        f"sh -c 'echo $$ > {marker}; sleep 300'",
+    )
+    (repo / ".wringer.yaml").write_text(
+        SLOW_FLEET.replace("deadline: 3", "deadline: 120").replace(
+            "progress_window: 600", "progress_window: 2"
+        ),
+        encoding="utf-8",
+    )
+    (repo / "tasks.jsonl").write_text(json.dumps(task) + "\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    cli.main(["fleet", "tasks.jsonl"])
+    capsys.readouterr()
+
+    assert marker.exists()
+    worker_pid = int(marker.read_text(encoding="utf-8").strip())
+    try:
+        deadline = time.monotonic() + 10
+        while _alive(worker_pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not _alive(worker_pid), (
+            f"worker {worker_pid} survived being reaped for no progress"
+        )
+    finally:
+        if _alive(worker_pid):
+            try:
+                os.killpg(os.getpgid(worker_pid), signal.SIGKILL)
+            except OSError:
+                pass

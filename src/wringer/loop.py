@@ -272,12 +272,19 @@ def inspect_for_resume(loop_dir: Path) -> Resumable | None:
             e["failure_signature"] for e in verifies if e.get("failure_signature")
         ),
         started_at=started.get("ts"),
-        orphan_pgids=_orphan_pgids(loop_dir),
+        orphan_pgids=worker_pgids(loop_dir),
     )
 
 
-def _orphan_pgids(loop_dir: Path) -> tuple[int, ...]:
-    """Worker groups this loop left running, from the files it wrote."""
+def worker_pgids(loop_dir: Path) -> tuple[int, ...]:
+    """Worker process groups this loop left behind, from the files it wrote.
+
+    Public because `wring resume` is no longer the only caller: a fleet
+    stopping a child has to reap the child's WORKER too — killing the
+    supervisor's group leaves the worker in its own one, still running —
+    and it reads exactly these files rather than inventing a second way to
+    find the same processes.
+    """
     found = []
     for path in sorted((loop_dir / ITERATIONS_DIRNAME).glob(f"*/{PGID_FILENAME}")):
         try:
@@ -703,8 +710,20 @@ def _run_acp_worker(
     directory = bundle.iteration_dir(iteration)
     stdout_path = directory / "worker.stdout.log"
     stderr_path = directory / "worker.stderr.log"
+    pgid_file = directory / PGID_FILENAME
     started = time.monotonic()
     extras: dict[str, Any] = {"worker_kind": "acp"}
+
+    def remember(pid: int) -> None:
+        # Exactly what `_run_worker` does, and it was missing here. The ACP
+        # agent runs in its own process group — `run_turn` starts a new
+        # session — so a SIGKILL of this loop cannot signal it, and without
+        # this file `wring resume` had nothing to reap: a real agent process,
+        # holding a real session and editing a real repo, outliving its
+        # supervisor with no record that it ever existed. `wring resume`
+        # exists FOR the killed loop, which made this the one path where the
+        # supervision promise did not hold.
+        pgid_file.write_text(str(pid), encoding="utf-8")
 
     try:
         turn, exit_code = acp.run_turn(
@@ -716,8 +735,12 @@ def _run_acp_worker(
             timeout=timeout,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
+            on_spawn=remember,
         )
     except acp.AcpError as exc:
+        # It is over either way, so the pgid goes: a stale one names a process
+        # the OS may since have given to somebody else.
+        pgid_file.unlink(missing_ok=True)
         # Not a verdict about the code — a failed worker turn, which the
         # evidence will judge on the next lap like any other.
         timed_out = "deadline" in str(exc)
@@ -734,6 +757,9 @@ def _run_acp_worker(
         )
         object.__setattr__(result, "acp_extras", {**extras, "acp_error": str(exc)})
         return result
+
+    # The session is over, so the group is gone with it.
+    pgid_file.unlink(missing_ok=True)
 
     for permission in turn.permissions:
         bundle.event(

@@ -452,3 +452,126 @@ run:
     assert failed["status"] == "failed" and "failure_signature" in failed
     # absent when nothing failed — the house convention for optional keys
     assert passed["status"] == "passed" and "failure_signature" not in passed
+
+
+# --- E1: an ACP worker is a worker, including when it is orphaned ----------
+#
+# `_run_worker` writes `worker.pgid` the instant the shell worker exists, so a
+# SIGKILL of the loop still leaves `wring resume` a group to reap.
+# `_run_acp_worker` wrote nothing, so an orphaned ACP agent — a real agent
+# process, holding a real session, editing a real repo — survived its
+# supervisor with nothing recording that it existed. The whole point of
+# `wring resume` is the loop that was killed; that is exactly the case where
+# the ACP path left no trace.
+
+
+ACP_HANG = """\
+version: 1
+gates:
+  - id: test
+    run: "grep -q FIXED calc.py"
+run:
+  worker:
+    acp:
+      command: {command}
+      args: [{agent}, "hang"]
+  max_iterations: 2
+  worker_timeout: 45
+"""
+
+
+def test_an_orphaned_acp_worker_leaves_a_pgid_to_reap(repo):
+    """Really SIGKILL a loop whose ACP agent is mid-turn, then check the
+    supervisor left something to clean up with."""
+    import json as _json
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    agent = Path(__file__).resolve().parent / "fake_acp_agent.py"
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        ACP_HANG.format(
+            command=_json.dumps(sys.executable), agent=_json.dumps(str(agent))
+        ),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "wringer", "run"],
+        cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    # wait for the agent to be mid-turn: the pgid file is written the instant
+    # the process exists, which is the property under test
+    deadline = time.monotonic() + 30
+    written: Path | None = None
+    while time.monotonic() < deadline:
+        found = sorted(
+            (repo / loop.LOOPS_DIRNAME).glob(f"*/iterations/*/{loop.PGID_FILENAME}")
+        )
+        if found:
+            written = found[0]
+            break
+        time.sleep(0.05)
+
+    try:
+        assert written is not None, (
+            "an ACP worker was running and the loop recorded no process group "
+            "for it — a SIGKILL here leaves an orphaned agent nothing can reap"
+        )
+        pgid = int(written.read_text(encoding="utf-8").strip())
+        assert pgid > 0
+
+        proc.send_signal(signal.SIGKILL)
+        proc.wait(timeout=30)
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+
+        resumable = loop.inspect_for_resume(only_loop(repo))
+        assert resumable is not None
+        assert pgid in resumable.orphan_pgids, (
+            f"{pgid} is not in {resumable.orphan_pgids}"
+        )
+        loop.reap_orphans(resumable.orphan_pgids)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+        if written is not None and written.exists():
+            try:
+                os.killpg(
+                    int(written.read_text(encoding="utf-8").strip()), signal.SIGKILL
+                )
+            except (OSError, ValueError):
+                pass
+
+
+def test_a_finished_acp_worker_leaves_no_stale_pgid(repo, monkeypatch, capsys):
+    """The other half of the shell worker's contract: the file goes when the
+    worker does, because a stale pgid names a process the OS may since have
+    given to somebody else."""
+    import json as _json
+    import sys
+
+    agent = Path(__file__).resolve().parent / "fake_acp_agent.py"
+    (repo / "calc.py").write_text("BROKEN\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(
+        ACP_HANG.format(
+            command=_json.dumps(sys.executable), agent=_json.dumps(str(agent))
+        ).replace('"hang"', '"fix"'),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["run"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    left = sorted(
+        (repo / loop.LOOPS_DIRNAME).glob(f"*/iterations/*/{loop.PGID_FILENAME}")
+    )
+    assert left == [], f"stale pgid files: {left}"

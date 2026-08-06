@@ -214,6 +214,25 @@ existed to prevent, so it is fixed before anything is built on top.*
   in `deliver.py` says so above the function rather than the claim being
   quietly overwritten.
 
+- **An orphaned ACP worker had nothing to reap it.** `_run_worker` writes
+  `worker.pgid` the instant the shell worker exists, so a SIGKILL of the loop
+  still leaves `wring resume` a process group to clean up. `_run_acp_worker`
+  wrote nothing — and the ACP agent runs in its own process group, so a real
+  agent, holding a real session and editing a real repo, could outlive its
+  supervisor with no record that it had ever existed. `wring resume` exists
+  *for* the killed loop, which made this the one path where the supervision
+  promise did not hold. `acp.run_turn` now reports its pid the instant the
+  process exists — before the handshake, because an agent that hangs during
+  `initialize` is exactly the one somebody kills the loop over.
+- **The fleet deadline killed the supervisor and left the worker running.**
+  `_stop` signalled the child `wring run`'s process group; the worker runs in
+  its *own* group — that is how a gate timeout kills a shell and everything it
+  spawned — so it survived. A deadline that stops the supervisor and not the
+  work it started does not bound anything, which is the one thing a deadline
+  is for; `_spawn`'s own comment had said as much about child budgets since it
+  was written. Both call sites are fixed, the deadline and the no-progress
+  reaper, using the same `worker.pgid` files `wring resume` already reads
+  rather than a second way to find the same processes.
 - **`SETUP.md`: `container image`, not `container images`** (BLOCKER). Apple
   `container` 1.2.0 spells the subcommand singular. The plural exits 64 on a
   pull with a misleading "missing plugin" diagnosis, and fails *silently*
