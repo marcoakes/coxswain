@@ -503,11 +503,23 @@ def plan(
     # The delivered set, honestly: `.wringer/` is excluded at `git add` time,
     # so counting it here would make the plan describe a commit that will not
     # happen. A repo that gitignored it never sees these paths at all.
+    #
+    # Deduplicated, because one path can arrive from both lists. `git mv a.c
+    # b.c` followed by a NEW file at `a.c` reports `R a.c -> b.c` AND `?? a.c`
+    # — the source is a deletion git is tracking and the new file is one it
+    # has never seen, both true of the same name. Counted twice, a two-file
+    # change was announced as "3 file(s)" on the terminal, in `--json`, and in
+    # the MR body a human reads before approving a push.
+    #
+    # First occurrence wins so the order still follows git's, which is what
+    # the patch and the plan display.
     carried = tuple(
-        path
-        for path in tuple(state.changed_files) + tuple(state.untracked)
-        if not path.startswith(f"{EVIDENCE_DIRNAME}/")
-        and path != EVIDENCE_DIRNAME
+        dict.fromkeys(
+            path
+            for path in tuple(state.changed_files) + tuple(state.untracked)
+            if not path.startswith(f"{EVIDENCE_DIRNAME}/")
+            and path != EVIDENCE_DIRNAME
+        )
     )
     if not carried:
         raise Refused("there is nothing to deliver — the working tree is clean", 1)
@@ -939,6 +951,35 @@ def _commit(root: Path, bundle: Bundle, planned: Plan) -> str | None:
     return _read(root, ["rev-parse", "HEAD"])
 
 
+# How many bytes of pathspec one `ls-files` call may carry. ARG_MAX is
+# 1048576 on the machine this was measured on, and both the environment and
+# git's own arguments come out of the same allowance; a few tens of kilobytes
+# is comfortably under every modern platform's limit while keeping the number
+# of subprocesses small. The count cap is for the other shape — tens of
+# thousands of two-character paths, which no byte budget would ever stop.
+_PATHSPEC_BYTES = 64 * 1024
+_PATHSPEC_COUNT = 1000
+
+
+def _batched(paths: tuple[str, ...]) -> list[list[str]]:
+    """`paths` split into chunks each safe to pass as argv."""
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for path in paths:
+        cost = len(path.encode("utf-8", "surrogateescape")) + 1
+        if current and (
+            size + cost > _PATHSPEC_BYTES or len(current) >= _PATHSPEC_COUNT
+        ):
+            chunks.append(current)
+            current, size = [], 0
+        current.append(path)
+        size += cost
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _matchable(root: Path, paths: tuple[str, ...]) -> list[str]:
     """The subset of `paths` that `git add` can resolve to something.
 
@@ -946,9 +987,23 @@ def _matchable(root: Path, paths: tuple[str, ...]) -> list[str]:
     a rename source, already removed from both by `git mv` — makes it exit
     128 for the whole pathspec list, so those are filtered out here rather
     than allowed to abort a delivery that is otherwise correct.
+
+    **Batched, because the pathspec used to be one argv.** Measured: 4500
+    paths of ~200 characters went through and 6000 raised `[Errno 7] Argument
+    list too long`, which arrived as a failed delivery AFTER the branch had
+    been created. A generated tree, a vendored dependency, a `dist/` nobody
+    gitignored — none of those are exotic.
+
+    `add` and `commit` avoid this by taking their pathspecs on stdin, and the
+    obvious fix was to do the same here. `git ls-files` has no
+    `--pathspec-from-file`: git 2.50.1 answers ``unknown option
+    `pathspec-from-file=-'`` and exits 129. So this batches instead.
     """
-    code, listed = _git(root, ["ls-files", "-z", "--", *paths])
-    indexed = set(listed.split("\0")) if code == 0 else set()
+    indexed: set[str] = set()
+    for chunk in _batched(paths):
+        code, listed = _git(root, ["ls-files", "-z", "--", *chunk])
+        if code == 0:
+            indexed.update(listed.split("\0"))
     return [path for path in paths if path in indexed or (root / path).exists()]
 
 

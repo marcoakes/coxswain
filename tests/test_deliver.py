@@ -1598,6 +1598,89 @@ def test_paths_differing_by_case_but_not_aliases_still_deliver(
     assert set(planned.changed_files) == {"Notes.md", "notes.txt"}
 
 
+# --- the pathspec must survive its own size, and say the right number -------
+
+
+def test_the_pathspec_survives_more_paths_than_argv_can_hold(repo: Path):
+    """`_matchable` passed every path as argv and died E2BIG.
+
+    Measured on this machine (ARG_MAX 1048576): 4500 paths of ~200 characters
+    went through, 6000 raised `[Errno 7] Argument list too long`. A generated
+    tree, a vendored dependency, a `dist/` nobody ignored — none of them are
+    exotic, and it failed AFTER `switch --create`.
+
+    The paths need not exist: a pathspec is matched, not opened, so this
+    exercises the real limit without writing six thousand files.
+
+    Note `git ls-files` has no `--pathspec-from-file` — checked on git 2.50.1,
+    which answers ``unknown option `pathspec-from-file=-'`` — so the fix is to
+    batch, not to move the list to stdin the way `add` and `commit` do.
+    """
+    paths = tuple(
+        f"generated/{'seg' * 20}/{'name' * 30}_{index:06d}.py"
+        for index in range(6000)
+    )
+    assert sum(len(p) + 1 for p in paths) > 1_000_000, "not actually over ARG_MAX"
+
+    assert deliver._matchable(repo, paths) == []
+
+
+def test_batching_the_pathspec_still_finds_every_real_path(repo: Path, git_run):
+    """The control: batching must not lose a path at a chunk boundary."""
+    real = []
+    for index in range(40):
+        name = f"{'long' * 50}_{index:03d}.txt"
+        (repo / name).write_text("x\n", encoding="utf-8")
+        real.append(name)
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-qm", "many")
+    absent = tuple(f"{'gone' * 50}_{i:03d}.txt" for i in range(40))
+
+    found = deliver._matchable(repo, tuple(real) + absent)
+
+    assert found == real, "a real path was lost between batches"
+
+
+def test_a_path_that_is_both_a_rename_source_and_untracked_counts_once(
+    delivery_repo, monkeypatch, capsys
+):
+    """`git mv a.c b.c` and then a NEW file at `a.c`.
+
+    git reports both `R a.c -> b.c` and `?? a.c`, so the path arrived once
+    from `changed_files` and once from `untracked` and the delivery said "3
+    file(s)" about a two-file change — in the terminal, in `--json`, and in
+    the MR body a human reads before approving.
+    """
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "a.c").write_text("original\n", encoding="utf-8")
+    git(delivery_repo, "add", "-A")
+    git(delivery_repo, "commit", "-m", "add a.c")
+    git(delivery_repo, "mv", "a.c", "b.c")
+    (delivery_repo / "a.c").write_text("a brand new file at the old name\n", "utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "bothways")
+
+    assert sorted(planned.changed_files) == ["a.c", "b.c"], planned.changed_files
+    assert len(planned.changed_files) == 2
+    # the number a human reads before approving a push
+    assert "files changed: 2" in planned.mr_body, planned.mr_body
+
+    # and the delivery itself is still correct — both paths land
+    bundle = deliver.Bundle.create(delivery_repo / deliver.DELIVERIES_DIRNAME)
+    bundle.write_plan(planned)
+    deliver.send(delivery_repo, bundle, planned, push=False)
+    shipped = set(
+        git(delivery_repo, "ls-tree", "-r", "--name-only", "wringer/bothways").split()
+    )
+    assert {"a.c", "b.c"} <= shipped
+    assert (
+        git(delivery_repo, "show", "HEAD:a.c") == "a brand new file at the old name"
+    )
+
+
 def test_an_unreachable_remote_refuses_rather_than_assuming_no_branch(
     delivery_repo, monkeypatch, capsys
 ):
