@@ -1737,3 +1737,57 @@ def test_base_does_not_smuggle_past_the_default_branch_check(
     with pytest.raises(deliver.Refused) as refusal:
         deliver.plan(repo, cfg, run_dir, "smuggled")
     assert "default branch" in str(refusal.value)
+
+
+def test_the_unresolvable_default_refusal_offers_a_remedy_that_works(
+    repo, monkeypatch, capsys, git_run
+):
+    """A refusal that suggests something which cannot clear it is worse than
+    one that says only "no": it sends the reader off to do work that changes
+    nothing.
+
+    This message used to end "or set the branch name to something that is
+    plainly not the default". The refusal fires from `resolve_base`, BEFORE
+    `resolve_branch` is called — no branch name reaches it, so no branch name
+    can clear it. `deliver.base` cannot clear it either, and that is
+    deliberate: the default is resolved whatever `base` says, which is the
+    whole point of the sibling test above.
+
+    So the test is not "the wording changed". It is: follow what the message
+    tells you, and the refusal goes away.
+    """
+    upstream = repo.parent / f"{repo.name}-remedy-upstream.git"
+    git_run(repo, "init", "--bare", "-b", "trunk", str(upstream))
+    git_run(repo, "remote", "add", "origin", f"file://{upstream}")
+    (repo / ".wringer.yaml").write_text(
+        'version: 1\ngates:\n  - id: check\n    run: "true"\n'
+        'deliver:\n  branch: "wringer/{run}"\n  base: develop\n'
+        '  remote: origin\n',
+        encoding="utf-8",
+    )
+    (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-m", "config")
+    git_run(repo, "push", "-q", "-u", "origin", "main:trunk")
+    (repo / "feature.py").write_text("def added():\n    return 1\n", "utf-8")
+
+    verified(repo, monkeypatch, capsys)
+    run_dir = sorted((repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(repo / ".wringer.yaml")
+
+    # unreachable: no local HEAD ref, and `remote show` cannot ask
+    git_run(repo, "remote", "set-url", "origin",
+            f"file://{repo.parent}/nowhere-at-all.git")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(repo, cfg, run_dir, "remedy")
+    message = str(refusal.value)
+
+    # it must not send the reader after either thing that cannot help
+    assert "set the branch name" not in message, message
+    assert "remote set-head" in message, message
+
+    # now do what it says, and the refusal is gone
+    git_run(repo, "remote", "set-url", "origin", f"file://{upstream}")
+    git_run(repo, "remote", "set-head", "origin", "-a")
+    planned = deliver.plan(repo, cfg, run_dir, "remedy")
+    assert planned.base == "develop"  # `base` still names the MR's target

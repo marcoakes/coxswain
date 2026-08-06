@@ -462,11 +462,23 @@ def resolve_base(root: Path, settings: config.Deliver) -> tuple[str, str | None]
     # branch the MR targets; it has never said "skip the safety check", and
     # this function's own docstring already promised it did not.
     if not default:
+        # The remedy has to be one that can actually clear THIS refusal. The
+        # message used to end "or set the branch name to something that is
+        # plainly not the default", which cannot: this fires from here, and
+        # `resolve_branch` has not run yet — no branch name has reached the
+        # code, so no branch name can change its mind. Nor can `deliver.base`,
+        # deliberately, per the check just above. Sending a reader off to do
+        # work that changes nothing is worse than saying only "no".
         raise Refused(
-            "the remote's default branch could not be determined, so Wringer "
-            "cannot be sure it is avoiding it. Fetch the remote (try "
-            f"'git remote set-head {settings.remote} -a') or set the branch "
-            "name to something that is plainly not the default",
+            f"the remote's default branch could not be determined, so Wringer "
+            f"cannot be sure it is avoiding it. Make '{settings.remote}' "
+            f"answer, then record its default locally:\n"
+            f"  git fetch {settings.remote}\n"
+            f"  git remote set-head {settings.remote} -a\n"
+            "Setting 'deliver.base' does not clear this, and neither does the "
+            "branch name: the default is resolved whatever 'base' says, "
+            "because 'base' names the branch the merge request targets and "
+            "has never meant 'skip the check'",
             3,
         )
     if settings.base:
