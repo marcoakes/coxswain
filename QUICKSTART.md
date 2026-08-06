@@ -45,8 +45,8 @@ dependencies into the same environment, or edit `.wringer.yaml`.
 ## Or let it walk you through it
 
 > **`wring start` is on `main` and is not in 0.2.0 yet.** `pipx install
-> wringer` gets you the thirteen commands above; this one arrives in the next
-> release. To try it now:
+> wringer` gets you thirteen of the sixteen commands; this one arrives in the
+> next release. To try it now:
 > `pipx install "git+https://github.com/marcoakes/wringer"`.
 
 `wring start` does the next four sections for you: preflight, the gates your
@@ -97,10 +97,11 @@ a repository, records where it came from, and **stops** — a stranger's
 `.wringer.yaml` is code, and running it in the same breath as downloading it is
 the one thing a guided launch must not do.
 
-## The fourteen commands
+## The sixteen commands
 
 This page walks five of them in order. The rest exist and are documented
-where they are used; nothing here is a preview.
+where they are used; nothing here is a preview. **Thirteen are in 0.2.0 on
+PyPI; the three marked `main` only arrive in the next release.**
 
 | command | does | proves? | network |
 |---|---|---|---|
@@ -118,6 +119,8 @@ where they are used; nothing here is a preview.
 | `issue` | write a forge issue to a local markdown file | — | fetches |
 | `deliver` | a verified change becomes a branch, a commit and a merge request | — | `--send` |
 | `doctor` | check this machine's preconditions; exit 1 on anything blocking | — | no |
+| `attest` | assemble the provenance claim for a verified change (**`main` only**) | — | no |
+| `audit` | check an attestation offline — no config, no network, no LLM (**`main` only**) | — | no |
 
 **Nothing in the "proves" column can reach a network.** That is the line
 that matters: the commands that decide whether a change is good run offline,

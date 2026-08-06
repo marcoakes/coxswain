@@ -686,3 +686,87 @@ def test_the_module_map_covers_every_module():
         and f"`{path.name}`" not in text
     ]
     assert not missing, f"AGENTS.md's module map omits {missing}"
+
+
+# --- the roadmap must describe the repository that exists ------------------
+#
+# A roadmap is the easiest document here to lie with: written once, never run,
+# and nothing fails when it drifts. These run the picture's own probes, so a
+# milestone that stops being true fails the suite instead of ageing quietly.
+
+
+def roadmap_module():
+    import importlib.util
+    import sys
+
+    if "roadmap_render" in sys.modules:
+        return sys.modules["roadmap_render"]
+    path = repo_root() / "scripts" / "roadmap_render.py"
+    spec = importlib.util.spec_from_file_location("roadmap_render", path)
+    module = importlib.util.module_from_spec(spec)
+    # Registered BEFORE exec: `@dataclass` resolves annotations through
+    # `sys.modules[cls.__module__]`, so a module executed outside it raises
+    # AttributeError on the first frozen dataclass it meets.
+    sys.modules["roadmap_render"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_every_milestone_the_roadmap_draws_green_is_really_shipped():
+    require_checkout("scripts/roadmap_render.py", "docs/roadmap.svg")
+    module = roadmap_module()
+    root = repo_root()
+
+    drawn = (root / "docs" / "roadmap.svg").read_text(encoding="utf-8")
+    wrong = []
+    for milestone in module.MILESTONES:
+        probed = milestone.done(root)
+        # The rendered node carries a ✓ only when its probe passed. Matched on
+        # the label's own text element so a caption cannot satisfy it.
+        marked = f'>{milestone.label}</text>' in drawn and probed
+        if probed != marked:
+            wrong.append(f"{milestone.label}: probe={probed} drawn={marked}")
+    assert not wrong, (
+        "docs/roadmap.svg disagrees with this checkout — regenerate it:\n"
+        "  python3 scripts/roadmap_render.py docs/roadmap.svg <YYYY-MM-DD>\n"
+        + "; ".join(wrong)
+    )
+
+
+def test_the_roadmaps_probes_read_the_real_parser():
+    """A milestone claiming a command must be checked against `wring --help`,
+    not against a string that happens to appear in the source."""
+    module = roadmap_module()
+    from wringer import cli
+
+    registered = {
+        name
+        for action in cli.build_parser()._actions
+        if getattr(action, "choices", None)
+        for name in action.choices
+    }
+    assert module.registered_commands() == frozenset(registered)
+
+
+def test_every_registered_command_appears_on_some_milestone():
+    """The other direction: a command that shipped under no milestone is work
+    the roadmap cannot account for. `attest` and `audit` shipped in P5 and
+    were missing from QUICKSTART's table for three days because nothing
+    checked this."""
+    module = roadmap_module()
+    claimed = {name for m in module.MILESTONES for name in m.commands}
+    missing = sorted(module.registered_commands() - claimed)
+    assert not missing, f"no milestone accounts for {missing}"
+
+
+def test_the_command_table_lists_every_command_that_exists():
+    """QUICKSTART's table is what a reader counts. It listed thirteen while
+    the parser registered sixteen."""
+    require_checkout("QUICKSTART.md")
+    text = (repo_root() / "QUICKSTART.md").read_text(encoding="utf-8")
+    module = roadmap_module()
+    missing = [
+        name for name in sorted(module.registered_commands())
+        if f"| `{name}` |" not in text
+    ]
+    assert not missing, f"QUICKSTART's command table omits {missing}"

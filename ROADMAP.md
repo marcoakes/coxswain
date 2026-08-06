@@ -10,6 +10,51 @@ and pulled by demand rather than pushed by plan.*
 
 **Hard deadline: `v0.1.0`, first installable release, September 30, 2026.**
 
+## Where this actually is
+
+<div align="center">
+
+<img src="docs/roadmap.svg" alt="Wringer roadmap: nine of ten milestones shipped, P6 remaining" width="900">
+
+</div>
+
+**Nine of ten shipped, on day 9 of 63.** `v0.1.0` cleared its own release bar
+on July 31 — two months early — so the deadline above is met and the arc has
+kept going: the loop, the fleet, the judge, the box, the ACP seam, the front
+door, issue→MR, provenance, and the guided launch. **`wring bench` (P6) is the
+one node still hollow.**
+
+| # | milestone | what it shipped |
+|---|---|---|
+| 1 | **v0.1** | `wring init` · `verify` · `explain` — the standalone evidence compiler |
+| 2 | **v0.2** | `run` · `resume` · `fleet` · `judge` — the loop, supervised |
+| 3 | **ship** | `v0.1.0` and `v0.2.0` on PyPI, published by OIDC; no token was ever held |
+| 4 | **P0** | the OCI image, `wring doctor`, and SETUP.md as a runbook an agent follows |
+| 5 | **P1** | the ACP worker seam — Wringer is the client, never the agent |
+| 6 | **P2** | `wring spec` · `plan` — a PRD in, a spec a human approves |
+| 7 | **P3** | `wring get` · `issue` · `deliver` — the amended law 6 and its five refusals |
+| 8 | **P4** | `wring start` — the guided launch, and the credential ruling |
+| 9 | **P5** | `wring attest` · `audit` · `verify --prove` — provenance and vacuity |
+| 10 | **P6** | `wring bench` — **not built**: same brief, N workers, judged and cost-ledgered |
+
+**That picture is generated, not drawn.** Every node carries a probe — the
+commands it claims must be registered in the parser, the files it claims must
+be committed, the tags it claims must exist — and `tests/test_docs.py` runs
+those same probes, so a milestone that stops being true fails the suite rather
+than ageing quietly on an image. A roadmap is the easiest document in a
+repository to lie with, and this is a repository whose product is evidence.
+
+```bash
+python3 scripts/roadmap_render.py docs/roadmap.svg 2026-08-06
+```
+
+The date is an argument rather than `date.today()`: a file that rewrites
+itself on every run has a diff nobody can read.
+
+**Outside the rail, and Marc's own:** the launch assets — a demo GIF and the
+Show HN write-up of the eight-hour unsupervised-fleet incident that produced
+[SPEC_SUPERVISION_V0.md](SPEC_SUPERVISION_V0.md). Neither is blocked on code.
+
 ## The 90-day arc
 
 ### Days 1–30 — v0.1.0, the standalone evidence compiler
