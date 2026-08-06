@@ -31,6 +31,7 @@ from wringer import (
     redact,
     rubric,
     spec,
+    start,
     summary,
     verify,
 )
@@ -65,6 +66,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"wring {__version__}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    parser_start = subparsers.add_parser(
+        "start",
+        help="the guided launch: preflight, config, and your first build",
+    )
+    parser_start.add_argument(
+        "--repo",
+        metavar="DIR",
+        help="the repository to launch in; defaults to the current directory",
+    )
+    parser_start.add_argument(
+        "--workspace",
+        metavar="DIR",
+        help=f"where `wring get` clones. Written to {config.CONFIG_FILENAME}; "
+             "there is no default",
+    )
+    parser_start.add_argument(
+        "--accept-gates",
+        action="store_true",
+        help=(
+            "confirm the gates this repo declares, or the ones detection "
+            "proposes, without being asked. There is deliberately no flag for "
+            "the API key: a key on a command line is a process listing"
+        ),
+    )
+    parser_start.set_defaults(func=cmd_start)
 
     parser_init = subparsers.add_parser(
         "init", help=f"write a commented {config.CONFIG_FILENAME} template"
@@ -354,6 +381,150 @@ def build_parser() -> argparse.ArgumentParser:
     parser_explain.set_defaults(func=cmd_explain)
 
     return parser
+
+
+# The steps of the guided launch, in SPEC_START_V0.md §1's order. Printed as
+# `[n/7]` so a reader can see how far in they are — a wizard that gives no
+# sense of length is one people abandon halfway.
+START_STEPS = 7
+
+
+def _start_step(number: int, title: str) -> None:
+    print(f"\n[{number}/{START_STEPS}] {title}")
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    """The guided launch (SPEC_START_V0.md).
+
+    Calls the other commands' machinery and reimplements none of it: doctor's
+    checks, detection's proposal, and — from S5 — verify, the loop and attest.
+    """
+    here = Path(args.repo).expanduser() if args.repo else Path.cwd()
+    if not here.is_dir():
+        print(
+            f"wring start: no directory at {args.repo} — --repo names a "
+            "repository that is already on disk",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    print("wring start — set this up and start your first build")
+
+    # [1/7] preflight. Diagnose, never repair: `wring doctor`'s own checks,
+    # inline, so a launch does not send a new user to a second command first.
+    _start_step(1, "preflight")
+    checks = doctor.run_checks(here)
+    print(doctor.report(checks))
+    # On the statuses, NOT on doctor's exit code. WARN and SKIP both count as
+    # passed there, and outside a repo the repo checks SKIP — so an empty
+    # directory reports "machine ready" and exits 0. Branching on that alone
+    # is how a wizard walks into a machine that cannot run a gate.
+    if any(check.status == doctor.FAIL for check in checks):
+        print(
+            "\nwring start: fix the ✗ lines above and run this again. This "
+            "command diagnoses and never repairs.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    # [2/7] workspace. No default, ever — Wringer does not choose where to put
+    # someone's code. It is written when given and asked for when needed.
+    _start_step(2, "workspace")
+    if args.workspace:
+        print(f"  {args.workspace}")
+    else:
+        print(
+            "  not declared — nothing here needs one yet. `wring get` will "
+            "ask\n  for one before it clones."
+        )
+
+    # [3/7] repo in. A directory already on disk: the human put it there, and
+    # every other Wringer command already trusts that.
+    _start_step(3, "repo")
+    root = git.find_root(here.resolve())
+    if not git.is_repo(root):
+        print(
+            f"\nwring start: {root} is not a git repository — the launch ends "
+            "on a\nreceipt, and a receipt records which commit was proven. Run "
+            "'git init'\nhere first, or point --repo at your repo.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+    print(f"  {root}")
+
+    # [4/7] gates. Detection's proposal, or what the repo already declares —
+    # shown before it is written, because `.wringer.yaml` is code.
+    _start_step(4, "gates")
+    refused = _start_gates(root, args.accept_gates)
+    if refused is not None:
+        return refused
+
+    try:
+        emission = start.emit(root, workspace=args.workspace)
+    except start.StartError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    except start.Refused as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
+    emission.write()
+
+    _report_start(emission, root)
+    return EXIT_OK
+
+
+def _start_gates(root: Path, accepted: bool) -> int | None:
+    """Show what will be declared and run, or refuse for want of consent."""
+    path = root / config.CONFIG_FILENAME
+    if path.is_file():
+        try:
+            cfg = config.load(path)
+        except config.ConfigError as exc:
+            print(f"wring start: {exc}", file=sys.stderr)
+            return EXIT_CONFIG
+        print(f"  {path.name} already declares: {start.gate_summary(cfg)}")
+        if detect.is_untouched_template(cfg.gates):
+            print(f"\n  ! {detect.TEMPLATE_WARNING}")
+    else:
+        detection = detect.detect(root)
+        if detection.found:
+            print(
+                f"  detected from {', '.join(detection.sources)}: "
+                + ", ".join(candidate.id for candidate in detection.candidates)
+            )
+        else:
+            print(
+                "  nothing here declares a command Wringer recognises, so the\n"
+                "  config will carry the placeholder gate — which proves "
+                "nothing\n  about your code until you replace it."
+            )
+
+    if not accepted:
+        # Exit 2 naming the answer, per §3b. Not a default, and not a guess:
+        # these commands run through a shell with the user's privileges, and
+        # a wizard that assumed consent to that would be the worst thing here.
+        print(
+            "\nwring start: this repository's gates are commands that will run "
+            "on\nthis machine, so nothing is written or run until you say so. "
+            "Re-run\nwith --accept-gates once you have read the list above.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+    return None
+
+
+def _report_start(emission: start.Emission, root: Path) -> None:
+    name = emission.path.name
+    if emission.created:
+        print(f"\nWrote {name}.")
+    elif emission.added:
+        print(f"\nAdded to {name}: {', '.join(emission.added)}.")
+    else:
+        print(f"\n{name} already says everything this launch would have added.")
+    for section in emission.already:
+        print(f"  '{section}' was already declared — left exactly as it was.")
+
+    print(f"\nNext:\n  read {name}, then: wring verify")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
