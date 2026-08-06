@@ -164,6 +164,18 @@ attached — is [`docs/pm-loop.md`](docs/pm-loop.md). Contract:
 
 ## An issue in, a reviewed branch out — `wring deliver`
 
+<div align="center">
+
+<img src="docs/flow.svg" alt="issue or PRD, spec, approval, work, the agent writes, gates prove it, judged, reviewed, merge request, receipt" width="900">
+
+*Every box names the command that runs it, and a test asserts each of those
+commands exists — a diagram that outlived the program it describes would be
+the same failure as a summary nobody checked. The two blue boxes name no
+command on purpose: approving a spec and reviewing a merge request are where
+this stops and waits for a person.*
+
+</div>
+
 ```
 $ wring deliver --task csv-export --send
 Branch:  wringer/csv-export
@@ -190,6 +202,18 @@ needed no changes to accept one. The captured loop is
 **[SPEC_GET_V0.md](SPEC_GET_V0.md)**.
 
 ## Prove the gates can fail
+
+<div align="center">
+
+<img src="docs/vacuous.svg" alt="a worker converges with green gates; wring verify --prove finds the gates proved nothing; wring deliver refuses the bundle" width="760">
+
+*A real session, captured. The worker was handed a real bug and a real test
+that caught it, and it made the failure go away by rewriting the assertion
+into `multiply(3, 4) == multiply(3, 4)`. The loop converged. The gates went
+green. **The bug is still there.** Regenerate it with `scripts/demo.sh`; the
+transcript is committed at [`docs/vacuous.cast.json`](docs/vacuous.cast.json).*
+
+</div>
 
 The failure everyone in this field fears: the agent writes tautological tests,
 its gates pass, and the green tick means nothing. `wring verify --prove` is the

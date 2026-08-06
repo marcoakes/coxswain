@@ -791,3 +791,133 @@ def test_the_command_table_lists_every_command_that_exists():
         if f"| `{name}` |" not in text
     ]
     assert not missing, f"QUICKSTART's command table omits {missing}"
+
+
+# --- the flow diagram must describe the program that exists ----------------
+
+
+def flow_module():
+    import importlib.util
+    import sys
+
+    if "flow_render" in sys.modules:
+        return sys.modules["flow_render"]
+    path = repo_root() / "scripts" / "flow_render.py"
+    spec = importlib.util.spec_from_file_location("flow_render", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["flow_render"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_every_command_the_flow_diagram_names_is_registered():
+    """A diagram is the second easiest document here to lie with, after a
+    roadmap: drawn once, never run, and authoritative-looking while it rots.
+    Every box names the command that performs it, and this is what keeps that
+    honest."""
+    require_checkout("scripts/flow_render.py")
+    module = flow_module()
+    from wringer import cli
+
+    registered = {
+        name
+        for action in cli.build_parser()._actions
+        if getattr(action, "choices", None)
+        for name in action.choices
+    }
+    unknown = sorted(module.commands_named() - registered)
+    assert not unknown, f"the flow diagram names commands that do not exist: {unknown}"
+
+
+def test_the_flow_diagram_keeps_the_human_steps():
+    """Two stages name no command on purpose — approving a spec and reviewing
+    a merge request are where this program stops and waits. A diagram showing
+    only the automated steps would be selling the wrong thing, and deleting
+    those boxes is the easiest way to make the picture look slicker."""
+    require_checkout("scripts/flow_render.py")
+    module = flow_module()
+
+    human = [stage.title for stage in module.STAGES if not stage.commands]
+    assert len(human) >= 2, (
+        f"only {human} are marked as human steps — approval and review are "
+        "both interlocks this program refuses to automate"
+    )
+
+
+def test_the_rendered_flow_matches_the_stages():
+    require_checkout("scripts/flow_render.py", "docs/flow.svg")
+    module = flow_module()
+    drawn = (repo_root() / "docs" / "flow.svg").read_text(encoding="utf-8")
+
+    missing = [s.title for s in module.STAGES if f">{s.title}</text>" not in drawn]
+    assert not missing, (
+        "docs/flow.svg is out of date — regenerate it:\n"
+        "  python3 scripts/flow_render.py docs/flow.svg\n"
+        f"missing stages: {missing}"
+    )
+
+
+# --- the Actions recipe must stay runnable ---------------------------------
+#
+# A workflow committed under `examples/` is never executed by anything, so it
+# rots in total silence — the exact failure mode SETUP.md had twice. These
+# parse every `wring` line in it against the real CLI.
+
+RECIPE = "examples/github-actions/wringer.yml"
+
+
+def recipe_wring_lines() -> list[str]:
+    """Every `wring …` the recipe would actually execute.
+
+    Both shapes YAML allows — `run: wring verify` on one line, and a bare
+    `wring verify` inside a `run: |` block — and comments in neither, since
+    the header explains the commands as prose and those are not invocations.
+    """
+    found = []
+    for raw in (repo_root() / RECIPE).read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            continue
+        if line.startswith("run: wring "):
+            found.append(line[len("run: "):])
+        elif line.startswith("wring "):
+            found.append(line)
+    return found
+
+
+def test_every_wring_command_in_the_actions_recipe_parses():
+    require_checkout(RECIPE)
+    from wringer import cli
+
+    lines = recipe_wring_lines()
+    assert lines, f"{RECIPE} invokes wring nowhere — it is not a recipe"
+
+    parser = cli.build_parser()
+    for line in lines:
+        argv = line.replace("- run:", "").strip().split()
+        assert argv[0] == "wring", argv
+        # SystemExit here means an unknown subcommand or an unknown flag: the
+        # recipe would fail on someone's PR with `invalid choice`.
+        parser.parse_args(argv[1:])
+
+
+def test_the_recipe_never_sends_anything():
+    """`--send` is what writes git history and opens merge requests. A recipe
+    that ran it would push branches from every pull request, and it would do
+    so in the document people copy without reading."""
+    require_checkout(RECIPE)
+    text = (repo_root() / RECIPE).read_text(encoding="utf-8")
+    offenders = [line.strip() for line in text.splitlines()
+                 if "--send" in line and not line.strip().startswith("#")]
+    assert not offenders, f"the recipe sends: {offenders}"
+
+
+def test_the_recipe_blocks_the_merge_on_a_vacuous_bundle():
+    """The claim the recipe makes in its own header. `wring deliver` is what
+    refuses a `gates_vacuous` bundle, so the step has to actually be there —
+    a recipe that promised the block and omitted the command would be worse
+    than one that never mentioned it."""
+    require_checkout(RECIPE)
+    assert any(
+        line.endswith("wring deliver") for line in recipe_wring_lines()
+    ), "the recipe claims to block on vacuous gates but never runs wring deliver"

@@ -1,0 +1,97 @@
+
+# Wringer on an AI-authored pull request.
+#
+# Copy this to `.github/workflows/wringer.yml`. It is the same shape this
+# repository runs on itself (`.github/workflows/tests.yml`), because a recipe
+# that used a second idiom would be a recipe nobody here tests.
+#
+# What it enforces, in the order the reviewer meets it:
+#
+#   1. the change produces an evidence bundle, or the job fails
+#   2. the bundle is uploaded, so a reviewer reads what was proven rather
+#      than trusting a green tick
+#   3. gates that could not have failed BLOCK THE MERGE — `wring deliver`
+#      exits 1 on a `gates_vacuous` bundle, and there is no flag to disable it
+#   4. the run's own summary is posted to the PR
+#
+# None of that is aspirational: every command below ships today, and
+# `tests/test_docs.py` asserts each one parses against the real CLI.
+
+name: wringer
+
+on:
+  pull_request:
+
+# The bundle is the product of this job, so nothing else may race it.
+concurrency:
+  group: wringer-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Only to post the summary comment. Wringer itself never needs a token:
+  # it writes no git history without `--send`, which this workflow never uses.
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The PR head, and enough history for `--prove` to build the
+          # pre-change tree. A shallow clone cannot check out HEAD~ and the
+          # prove pass would be inconclusive rather than wrong — but
+          # inconclusive is not what you want gating a merge.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Wringer and the project's own dependencies
+        run: |
+          pip install wringer
+          # Your gates run YOUR commands. If `.wringer.yaml` declares
+          # `pytest -q`, pytest has to be installed here or the gate fails
+          # with `command not found` — which is Wringer working correctly.
+          pip install -e '.[dev]'
+
+      # The gates the repository declares, and nothing this workflow invented.
+      # `--prove` re-runs them against the pre-change tree: a gate that passes
+      # on both proved nothing about the change.
+      - name: Verify, and prove the gates can fail
+        run: wring verify --prove
+
+      - name: Upload the evidence bundle
+        if: always() # a failed run's evidence is the evidence worth having
+        uses: actions/upload-artifact@v4
+        with:
+          name: wringer-evidence
+          path: .wringer/runs/
+
+      # THE MERGE BLOCK. `wring deliver` refuses a bundle whose gates proved
+      # nothing — exit 1, naming the insensitive gates and the fix. This is a
+      # dry run: it writes the patch, the message and the MR body, and touches
+      # no git history, because `--send` is absent. The refusal is the point.
+      - name: Refuse a change whose gates could not have failed
+        run: wring deliver
+
+      - name: Post the evidence summary to the pull request
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const runs = '.wringer/runs';
+            if (!fs.existsSync(runs)) return;
+            const newest = fs.readdirSync(runs).sort().pop();
+            const summary = path.join(runs, newest, 'summary.md');
+            if (!fs.existsSync(summary)) return;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: fs.readFileSync(summary, 'utf8'),
+            });
