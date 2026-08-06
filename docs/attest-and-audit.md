@@ -119,7 +119,32 @@ Wringer touches no key and consults no trust store: it records `git log -1
 `audit` reports it without re-verifying. A repo that signs its commits gets a
 genuine chain for nothing; one that does not records `N` and loses nothing.
 
-## 4. Audit
+## 4. Between the two: `wring doctor`
+
+Nothing about `attest` or `audit` needs a container, a key, or a network, and
+`doctor` is where you see that stated rather than assumed. The two `!` lines
+below are the only things this machine lacks, and neither is on the path:
+
+```console
+$ wring doctor
+✓ python                Python 3.12.13
+✓ wring                 wring 0.2.0 at /Users/marc/.local/bin/wring
+✓ git                   git version 2.50.1 (Apple Git-155)
+! container runtime     no container runtime found (Apple silicon detected)
+                        → Install apple/container (needs macOS 26) or Docker Desktop — or skip the container and run wring directly
+✓ git repository        …/wringer-capture-attest/repo
+✓ gates                 1 gate(s): test
+✓ workspace writable    …/repo/.wringer is writable
+! llm key               no LLM API key in the environment
+                        → Only needed for `wring judge --send`. Provide it when you launch, and never paste it to an agent
+
+Ready. The ! lines are optional extras, not problems.
+```
+
+Exit 0. The same `!` mark `attest` uses for its own limits line, and for the
+same reason: worth knowing, not a problem.
+
+## 5. Audit
 
 ```console
 $ wring audit .wringer/attestations/20260806-093146-258e/attestation.json
@@ -135,7 +160,7 @@ $ wring audit .wringer/attestations/20260806-093146-258e/attestation.json
 The limit is repeated **on success**, deliberately. A passing audit must not
 read as a stronger claim than it is.
 
-## 5. The money test — change one byte
+## 6. The money test — change one byte
 
 Append two characters to a gate's stdout log. Nothing else reads that file
 back; nothing else would ever notice.

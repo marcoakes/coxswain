@@ -825,3 +825,49 @@ def test_attest_refuses_a_really_vacuous_run_end_to_end(
 
     assert cli.main(["attest"]) == cli.EXIT_GATE_FAILED
     assert "gates_vacuous" in capsys.readouterr().err
+
+
+def test_a_signed_commit_records_what_git_says_verbatim(monkeypatch, tmp_path):
+    """§1c: `G` and the reported signer, recorded exactly as git states them.
+
+    Driven through a stubbed `git log` rather than a real signed commit,
+    because signing one means generating and holding a key and Wringer's most
+    distinctive promise is that it never touches a credential. What is under
+    test here is entirely ours: that whatever git says is carried through
+    verbatim and glossed, never judged and never re-derived. The unsigned half
+    (`N`) is exercised against real git above, and
+    `docs/MANUAL_CHECKS.md` records the signed case as unverified on this
+    machine rather than claimed.
+    """
+    answers = {"%G?": "G", "%GS": "A Developer <dev@example.invalid>"}
+
+    def fake_git(root, args):
+        for key, value in answers.items():
+            if f"--format={key}" in args:
+                return value
+        return None
+
+    monkeypatch.setattr(attest, "_git", fake_git)
+
+    recorded = attest.commit_signature(tmp_path, "abc123")
+
+    assert recorded["status"] == "G"
+    assert recorded["signer"] == "A Developer <dev@example.invalid>"
+    assert recorded["means"] == "a good signature"
+    assert recorded["commit"] == "abc123"
+
+    # a BAD signature is recorded just as plainly — attest does not judge it,
+    # and refusing here would be Wringer deciding somebody else's trust
+    answers["%G?"] = "B"
+    bad = attest.commit_signature(tmp_path, "abc123")
+    assert bad["status"] == "B"
+    assert bad["means"] == "a BAD signature"
+
+
+def test_no_commit_means_no_signature_claim(tmp_path):
+    """A bundle with no commit records nulls rather than inventing `N`."""
+    recorded = attest.commit_signature(tmp_path, None)
+
+    assert recorded == {
+        "commit": None, "status": None, "signer": None, "means": None
+    }

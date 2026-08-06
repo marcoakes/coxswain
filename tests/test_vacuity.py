@@ -673,3 +673,38 @@ def test_prove_cannot_see_a_neutered_failing_test(repo, monkeypatch, capsys):
     )
     # and the citation is what a reader has to catch it with
     assert recorded["gates"][0]["cites"]
+
+
+def test_the_scratch_worktree_is_gone_after_a_ctrl_c(changed, monkeypatch,
+                                                      capsys):
+    """"pass or fail or Ctrl-C." The third one, which the other two tests
+    cannot reach: a KeyboardInterrupt during the pre-change gates must still
+    leave the checkout removed, or an interrupted prove pass accumulates
+    worktrees until a human notices."""
+    from wringer import gates
+
+    (changed / ".wringer.yaml").write_text(SENSITIVE, encoding="utf-8")
+    monkeypatch.chdir(changed)
+
+    real = gates.run
+    seen: list[str] = []
+
+    def interrupt_the_prove_pass(gate, cwd, *args, **kwargs):
+        # the pre-change run is the one in the scratch worktree
+        if ".wringer/worktrees" in str(cwd):
+            seen.append(gate.id)
+            raise KeyboardInterrupt
+        return real(gate, cwd, *args, **kwargs)
+
+    monkeypatch.setattr(gates, "run", interrupt_the_prove_pass)
+
+    # the CLI turns Ctrl-C into exit 4 rather than a traceback, so the
+    # interrupt is observed there
+    assert cli.main(["verify", "--prove"]) == cli.EXIT_INTERRUPTED
+    capsys.readouterr()
+
+    assert seen, "the prove pass never reached the worktree"
+    assert "prove" not in git(changed, "worktree", "list")
+    assert not (changed / ".wringer" / "worktrees").exists() or not list(
+        (changed / ".wringer" / "worktrees").iterdir()
+    )

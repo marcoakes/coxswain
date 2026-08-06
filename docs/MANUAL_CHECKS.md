@@ -161,6 +161,38 @@ have it or you do not.
 
 ---
 
+## Sequence D — an attestation over a *signed* commit
+
+**Status: unverified. Never run by anyone.**
+
+`wring attest` records what `git log -1 --format=%G?` says about the delivered
+commit's signature (`G` good, `B` bad, `U` untrusted, `N` none) plus the
+reported signer, verbatim, and `wring audit` reports it without re-verifying.
+The unsigned half is covered by real git in `tests/test_attest.py` — a normal
+commit records `N`. **The signed half is not**, because signing a commit means
+generating and holding a key, and never touching a credential is the product's
+most distinctive promise. `test_a_signed_commit_records_what_git_says_verbatim`
+drives a stubbed `git log` instead, which tests the part that is ours (carry it
+through verbatim, gloss it, never judge it) and not git's answer.
+
+What a run would need, on a machine whose owner already signs commits:
+
+1. In a scratch repo with signing configured (`git config gpg.format ssh`,
+   `git config user.signingkey ~/.ssh/id_ed25519.pub`, `commit.gpgsign true`),
+   make a signed commit and confirm `git log -1 --format=%G?` prints `G`.
+2. `wring verify && wring deliver --send && wring attest`.
+3. Confirm `attestation.json`'s `change.commit_signature` reads
+   `{"status": "G", "signer": "<your key>", "means": "a good signature"}`.
+4. `wring audit` — it must report that value and must **not** attempt to
+   verify it, so the audit still passes on a machine holding no keyring.
+5. Repeat with a commit signed by a key the machine does not trust: the status
+   should be `U`, recorded and not refused. Wringer does not decide anybody
+   else's trust.
+
+**Do not add a signing key to CI to close this.** That is the exact thing
+SPEC_PROVENANCE_V0 ruling 1 refused, and a test is not worth contradicting the
+promise it exists to protect.
+
 ## What is *not* here, and why
 
 These are covered by automated tests and do not belong on a manual list.
