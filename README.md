@@ -206,6 +206,32 @@ increasingly the agent itself. `--prove` tightens for one run; there is no
 [`docs/prove-the-gates-can-fail.md`](docs/prove-the-gates-can-fail.md).
 Contract: **[SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md)**.
 
+## Set this up and start your first build
+
+> **On `main`, not in 0.2.0.** `pip install wringer` gets you the thirteen
+> commands above; `wring start` is the fourteenth and arrives in the next
+> release. `pip install "git+https://github.com/marcoakes/wringer"` to try it.
+
+`wring start` is the guided launch: preflight, the gates your repo already
+declares, the agent that will drive the loop, and a first build that ends on a
+receipt. Every answer has a flag, so an agent can run the whole thing
+non-interactively — and with no terminal and a missing answer it exits 2
+naming what it wanted, rather than guessing.
+
+*Wringer never stores a credential.* `wring start` will ask for your API key
+so it can hand it to the build it launches; it keeps it in memory for that
+session, folds it into the redactor so it cannot reach a bundle, and writes it
+nowhere. Your config records the *name* of an environment variable, never a
+key. Nothing else in Wringer ever asks.
+
+Two things it refuses, both on purpose. It **never installs an agent** — it
+names the one you chose and prints the command for you to run. And
+`wring start --clone` fetches a repository, records where it came from, and
+**stops**: a fresh clone is untrusted input, its `.wringer.yaml` is code, and
+running a stranger's gates in the same breath as downloading them is the one
+thing a guided launch must not do. Read the file, then run `wring start`
+inside it. Contract: **[SPEC_START_V0.md](SPEC_START_V0.md)**.
+
 ## And a claim you can check without trusting anyone
 
 `wring attest` assembles the provenance claim — *change C, authorized by spec

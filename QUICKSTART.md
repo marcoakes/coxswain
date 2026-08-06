@@ -2,7 +2,9 @@
 
 > **Every transcript on this page is real** — one session in a scratch Python
 > repo on 2026-07-30, captured and pasted unedited, in the order shown. The
-> single clearly-marked block at the bottom is not built yet and says so.
+> single clearly-marked block at the bottom is not built yet and says so, and
+> the one command here that is on `main` rather than in the release is marked
+> where it appears.
 >
 ## Install
 
@@ -40,13 +42,69 @@ reports `pytest: command not found` and a failing gate. That is Wringer
 working correctly — it ran what your repo declared. Install your project's
 dependencies into the same environment, or edit `.wringer.yaml`.
 
-## The thirteen commands
+## Or let it walk you through it
 
-This page walks the first five in order. The rest exist and are documented
+> **`wring start` is on `main` and is not in 0.2.0 yet.** `pipx install
+> wringer` gets you the thirteen commands above; this one arrives in the next
+> release. To try it now:
+> `pipx install "git+https://github.com/marcoakes/wringer"`.
+
+`wring start` does the next four sections for you: preflight, the gates your
+project already declares, the agent that will drive the repair loop, and a
+first build that ends on a receipt.
+
+<div align="center">
+
+<img src="docs/start.svg" alt="wring start: preflight, detected gates, the agent, and a receipt" width="700">
+
+*A real session, captured — [`docs/start.cast.json`](docs/start.cast.json) is
+the transcript, and `scripts/demo.sh` regenerates both.*
+
+</div>
+
+**Two things that recording cannot honestly show, so they are written here
+instead.**
+
+*The key step is not in the recording.* `wring start` asks for your API key at
+a prompt that does not echo — and a prompt is the one thing this capture
+method cannot film. It records a real process through a pty and Python's
+`getpass` reads `/dev/tty` rather than stdin, so a filmed prompt would block
+on the operator's own terminal and never return. The recorded run therefore
+has the variable already set, which is the non-interactive form of that
+answer, and the terminal says so on the `[6/7] key` line. A recording that
+staged the typing would be a transcript of a session nobody had.
+
+*The agent in the recording is a stub.* A file named `claude-code-acp` on
+`PATH` that does nothing. Detection is `shutil.which` and nothing cleverer, so
+a stub is all it takes to film the step — and Wringer neither bundles nor
+installs an agent, so putting a real vendor binary in anyone's regeneration
+path would contradict the thing being demonstrated. The launch never runs it:
+the gates pass on the first try, so there is no failure to hand to a repair
+loop. What the recording shows is detection and consent, which is all that
+step does.
+
+*Wringer never stores a credential.* `wring start` will ask for your API key
+so it can hand it to the build it launches; it keeps it in memory for that
+session, folds it into the redactor so it cannot reach a bundle, and writes it
+nowhere. Your config records the *name* of an environment variable, never a
+key. Nothing else in Wringer ever asks.
+
+Everything it does has a flag, so an agent can run the whole thing without a
+terminal — and with no terminal and a missing answer it exits 2 naming what it
+wanted rather than guessing. Two refusals are deliberate: it never installs an
+agent (it prints the command for you to run), and `wring start --clone` fetches
+a repository, records where it came from, and **stops** — a stranger's
+`.wringer.yaml` is code, and running it in the same breath as downloading it is
+the one thing a guided launch must not do.
+
+## The fourteen commands
+
+This page walks five of them in order. The rest exist and are documented
 where they are used; nothing here is a preview.
 
 | command | does | proves? | network |
 |---|---|---|---|
+| `start` | the guided launch: preflight, config, agent, first build, receipt (**`main` only, not in 0.2.0**) | **yes** | `--clone` fetches |
 | `init` | write a `.wringer.yaml` from what your project already declares | — | no |
 | `verify` | run the declared gates, write an evidence bundle | **yes** | no |
 | `explain` | diagnose a finished run, without an LLM | — | no |

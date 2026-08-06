@@ -19,6 +19,50 @@ here, not the fixes.
 
 ### Added
 
+- **`wring start`** — the guided launch, and the program's first interactive
+  surface ([SPEC_START_V0.md](SPEC_START_V0.md)). One command from an
+  installed binary to a verified change with a receipt: `wring doctor`'s
+  checks inline, the gates your repo already declares shown before anything is
+  written, ACP agent detection, the API key, and a first build that ends on
+  `wring attest`.
+
+  **Every answer has a flag except the key**, whose non-interactive form is
+  the named variable already being set. `--key <value>` does not exist and
+  will not: a value on a command line is a process listing. With no terminal
+  and a missing answer it exits 2 naming what it wanted — never a guess, never
+  a hang. The `stdin.isatty()` gate is a safety property rather than a style,
+  because CPython's `getpass` opens `/dev/tty` rather than stdin and would
+  otherwise block on a terminal nobody is watching; a test forks a pty to
+  prove the gate holds.
+
+  *Wringer never stores a credential.* The key is held in memory for the
+  process it launches, folded into the redactor before anything can write, and
+  written nowhere. The config records the *name* of an environment variable,
+  in `run.worker.acp.env_passthrough` and nowhere else — never
+  `judge.api_key_env`, because that section hard-requires three values law 5
+  forbids guessing. The command to make it durable is printed and not run.
+
+  **Three refusals, each with a test.** It never installs an agent — it names
+  the absent one and prints the install command
+  ([SPEC_ACP_V0.md](SPEC_ACP_V0.md)'s "consent-based install belongs to
+  `wring start`" parenthetical is struck rather than kept, since two shipped
+  error strings already promise the opposite). It never overwrites a section
+  you wrote: an existing `.wringer.yaml` is appended to, comments intact, and
+  a clash is exit 3. And `--clone` fetches, records provenance, and **stops** —
+  a fresh clone is untrusted input and a guided launch that ran a stranger's
+  gates would be the most dangerous command in the program aimed at the least
+  technical user it has.
+
+  A launch whose first build ran against the placeholder gate **says so and
+  writes no receipt** — a vacuous green produced by the onboarding flow is the
+  failure this project exists to prevent.
+
+- **`docs/start.svg`** — a second captured recording, beside the existing one
+  rather than replacing it, with `docs/start.cast.json` as its transcript. The
+  key step is deliberately off-camera and the documentation says so in words:
+  a prompt is the one thing this capture method cannot honestly film. The
+  agent in it is a stub on `PATH`, and the documentation says that too.
+
 - **`wring verify --prove`** — vacuity detection
   ([SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md)). After the gates pass, re-run
   them against the *pre-change* tree in a scratch worktree detached at HEAD. A
@@ -152,7 +196,29 @@ here, not the fixes.
 
 ### Fixed
 
-*The first six entries close what an adversarial review of the delivery-path
+- **An ACP agent's output reached the evidence bundle unscrubbed.** `acp.py`
+  handed the child a raw file handle for its stderr and wrote its session
+  updates untouched — unlike `gates.py`, which captures through a pipe
+  precisely so redaction happens *before* the write. Since an agent is handed
+  a credential by name through `env_passthrough`, an agent that echoed one put
+  it straight into a bundle. stderr is now a pipe, drained on its own thread,
+  and both logs are scrubbed then capped.
+
+- **`env_passthrough` values were not folded into the redactor**, though
+  `config.py`'s own comment and `AcpWorker`'s docstring both promised they
+  were. `loop.run` built its redactor from `evidence:` alone, so a passthrough
+  variable was protected only if its name happened to match `*TOKEN*`,
+  `*SECRET*` or `*KEY*`. `config.declared_secret_names` is now the single
+  answer to "what does this config say holds a credential", and both
+  `verify.run` and `loop.run` fold it in.
+
+- **`wring doctor`'s key check was hardcoded to two variable names.** It read
+  neither `judge.api_key_env` nor `run.worker.acp.env_passthrough`, so a repo
+  whose agent wants a differently-named variable was told "no LLM API key"
+  with the key correctly set. It now reads what the config declares, falls
+  back to the well-known pair, and says which name it looked for.
+
+*The next six entries close what an adversarial review of the delivery-path
 work found: fourteen defects, each reproduced twice. Three were **too loose**
 — `wring deliver` published a branch whose tree was not the tree the gates ran
 against, and refused nothing. That is the exact failure the delivery-path work

@@ -595,12 +595,31 @@ The key reaches the container as an environment variable, where Wringer's
 redactor folds it into the set of values scrubbed out of every evidence
 bundle *before* anything is written to disk. See [SECURITY.md](SECURITY.md).
 
-> **On `wring start`.** Earlier drafts of this runbook ended by telling the
-> human to run `wring start`. That command is **not built yet** — it is P4 —
-> and typing it gets `invalid choice: 'start'`. The two commands above are
-> what the guided launch will eventually wrap. When `wring start` ships, this
-> step becomes it; until then, the key is still the human's to type and this
-> is still their command, not the agent's.
+> **On `wring start`.** It ships now, and it is what the two commands above
+> wrap. The human can run it instead:
+>
+> ```
+> wring start --accept-gates --agent <id>
+> ```
+>
+> It runs `wring doctor`'s checks inline, shows the gates your repo already
+> declares before writing anything, detects which ACP agents are installed,
+> asks for the API key at a prompt that does not echo, and ends on a real
+> `wring attest` receipt.
+>
+> **The credential rule above is unchanged, and `wring start` is built to
+> keep it.** *Wringer never stores a credential.* `wring start` will ask for
+> your API key so it can hand it to the build it launches; it keeps it in
+> memory for that session, folds it into the redactor so it cannot reach a
+> bundle, and writes it nowhere. Your config records the *name* of an
+> environment variable, never a key. Nothing else in Wringer ever asks.
+>
+> So this step is still the human's. An agent following this runbook does not
+> run `wring start` either — it is the command that asks for the key, and the
+> stop condition is about the key, not about which command holds the prompt.
+> There is no `--key` flag, deliberately: a value on a command line is a
+> process listing. If the variable is already set, `wring start` says so and
+> never asks.
 
 ## What good looks like
 

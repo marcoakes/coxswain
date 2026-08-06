@@ -27,6 +27,12 @@ no network, no uploads — ever.
 | [SPEC_RUN_V0.md](SPEC_RUN_V0.md) | **binding** for v0.2 slice 1 — `wring run`, the `run:` config section, the loop's rulings and `wringer.loop.v1` |
 | [SPEC_INTENT_V0.md](SPEC_INTENT_V0.md) | **binding** for `wring spec` / `wring plan` — `wringer.spec.v1`, the approval interlock, and why there is no `--yes`. The captured loop is [docs/pm-loop.md](docs/pm-loop.md) |
 | [SPEC_GET_V0.md](SPEC_GET_V0.md) | **binding** for `wring get` / `wring issue` / `wring deliver` — and for the amended law 6: the five conditions that buy the power to write git history |
+| [SPEC_ACP_V0.md](SPEC_ACP_V0.md) | **binding** for the `acp:` worker form — Wringer is the ACP *client* and never the agent, and it neither bundles nor installs one |
+| [SPEC_JUDGE_V0.md](SPEC_JUDGE_V0.md) | **binding** for `wring judge` — the closed-list packet, the rubric, exit 5, and why a dry run is the default |
+| [SPEC_SUPERVISION_V0.md](SPEC_SUPERVISION_V0.md) | **binding** for `wring fleet` and the supervision invariants — every budget nests, every child is reapable |
+| [SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md) | **binding** for `wring verify --prove` and `run.prove` — a green tick that could not have been red is worth nothing |
+| [SPEC_PROVENANCE_V0.md](SPEC_PROVENANCE_V0.md) | **binding** for `wring attest` / `wring audit` — what an unsigned attestation does and does not claim |
+| [SPEC_START_V0.md](SPEC_START_V0.md) | **binding** for `wring start` — the guided launch: the credential ruling, the non-interactive contract, and why a clone stops before any gate runs |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
@@ -47,8 +53,10 @@ resume` continues a killed one, `wring fleet` supervises hundreds, `wring
 judge` weighs a finished bundle against a rubric, `wring doctor` checks this
 machine's preconditions, the `acp:` worker form talks to any agent that speaks
 the protocol, and `wring spec` / `wring plan` are the front door — a PRD in,
-a spec a human approves, work a fleet can run; and P3 brings work in as a URL and sends it back out as a reviewed branch. 536 tests on Python 3.11–3.13
-plus macOS in CI.
+a spec a human approves, work a fleet can run; P3 brings work in as a URL and
+sends it back out as a reviewed branch; P5 turns a finished run into an
+attestation `wring audit` checks offline; and P4's `wring start` is the guided
+launch a new user meets first. 830+ tests on Python 3.11–3.13 plus macOS in CI.
 
 **Wringer verifies Wringer**: [`.wringer.yaml`](.wringer.yaml) declares this
 repo's own gates, CI runs `wring verify` and uploads the bundle, and a real
@@ -65,6 +73,7 @@ one is committed at [`.wringer.example/`](.wringer.example/).
 | v0.2 slice 1 — the loop | — | ✅ `wring run`: `run:` config, verify→brief→worker→verify, plateau fingerprint, `wringer.loop.v1` bundle, loop schemas ([SPEC_RUN_V0.md](SPEC_RUN_V0.md)) |
 | 5.5 — pre-publish hardening | — | ✅ interrupted runs named in `summary.md` and diagnosed by `explain`, `latest_run` ordered by time not name, reused `--output` cleared before writing, post-kill drain bounded, event lists scrubbed, `evidence.include` shape-checked |
 | P3 — repos in, changes out | — | ✅ `wring get` · `wring issue` · `wring deliver`: the amended law 6 and its five refusals, `wringer.delivery.v1` and `wringer.acquired.v1` ([SPEC_GET_V0.md](SPEC_GET_V0.md)) |
+| P4 — the guided launch | — | ✅ `wring start`: preflight, the first config WRITER in the program, agent detection that never installs, the credential ruling, the clone that stops before any gate, and a launch that refuses to call a placeholder gate a pass ([SPEC_START_V0.md](SPEC_START_V0.md)) |
 | P2 — the front door | — | ✅ `wring spec` / `wring plan`: `wringer.spec.v1`, the approval interlock, questions instead of guesses, gates proposed as a diff, `human: true` criteria a judge is never asked ([SPEC_INTENT_V0.md](SPEC_INTENT_V0.md), [docs/pm-loop.md](docs/pm-loop.md)) |
 
 The `v0.1.0` tag is gated on the spec's
@@ -95,6 +104,7 @@ Then:
 ```bash
 .venv/bin/pytest                # the gate: all tests, ~10s, must be green
 .venv/bin/wring --help
+.venv/bin/wring start             # the guided launch: preflight, config, first build
 .venv/bin/wring init              # writes .wringer.yaml (refuses to overwrite)
 .venv/bin/wring verify            # runs every gate, writes .wringer/runs/<run_id>/
 .venv/bin/wring verify --gate ID  # one gate, numbered as if the full run happened
@@ -157,6 +167,10 @@ block first — the clean console is the product.
 | `acp.py` | the Agent Client Protocol client: spawn the agent, JSON-RPC over stdio, one session per iteration, kill on timeout through the same process-group machinery. Wringer is the ACP *client*, never the agent (SPEC_ACP_V0.md) | bundle, install or recommend an agent |
 | `doctor.py` | `wring doctor`: machine-checkable preconditions, one line per check, `--json`, exit 1 on anything blocking | repair anything — it diagnoses and stops |
 | `spec.py` | `wring spec` / `wring plan`: `wringer.spec.v1`, the drafting request, the strict reply parser, the file renderer, and what `wring plan` compiles out of an approved spec — `tasks.jsonl`, the briefs, `wringer.rubric.yaml`, and the proposed gate diff | open a socket (it calls `judge.send`), install a gate, touch git, run anything, or read `approved` from a reply |
+| `vacuity.py` | `wring verify --prove` / `run.prove`: re-run the gates against the pre-change tree in a scratch worktree, and record the verdict — a gate that passes on both proved nothing about the change | decide what the caller does about a vacuous verdict; `attest` refuses over one |
+| `attest.py` | `wring attest` / `wring audit`: assemble the provenance claim from bundles that re-verify against their own digests and ledger chains, and check one offline — no config, no network, no LLM | sign anything, or let a passing audit read as a stronger claim than "unaltered since written" |
+| `start.py` | `wring start`: **the only config WRITER in the program** — an existing `.wringer.yaml` is read and appended to, never replaced, and every emission round-trips through `config.parse` before it can be written. Also the prompt seam and the console width the demo canvas needs | store a credential, write a shell worker, keep state of its own in `.wringer.yaml`, or run a gate in a repo it just cloned |
+| `agents.py` | the ACP agent table: **every coding-agent vendor string in Wringer**, behind one mapping — id, binary, args, the variable its credential lives in, its install command | run anything; it imports nothing that could start a process, so the install command it holds cannot be executed |
 
 Every module in the spec's layout now exists.
 
@@ -190,16 +204,31 @@ everything under `wring verify`. `wring run` now exists, but only the slice
 creation, no commits or pushes, no Temporal, no OpenTelemetry, no multi-agent
 anything**, and no anti-thrash beyond the plateau fingerprint.
 
-**Three commands may reach a network, and only three**: `wring judge --send`,
-`wring spec --send` and `wring deliver --send` (plus `wring issue`, which is
-the forge read the last of those writes back to). Each requires a section the
-repo wrote down — `judge:` or `forge:` — each writes the exact bytes to disk
-before any socket opens, and each is dry-run or explicit by default. **Every
-socket lives in `judge.send` or `forge.request`**, so `grep -rn build_opener
-src/` has exactly two answers and must keep having exactly two. Everything
+**Three commands SEND and three FETCH, and only those six.** SEND:
+`wring judge --send`, `wring spec --send`, `wring deliver --send`. Each
+requires a section the repo wrote down — `judge:` or `forge:` — each writes
+the exact bytes to disk before any socket opens, and each is dry-run or
+explicit by default. FETCH, not behind a flag because fetching is the entire
+purpose: `wring get` clones a repository, `wring issue` reads one issue, and
+**`wring start --clone`** clones one — the third fetcher, added in P4, and the
+only one of the six that a new user meets first. It opens a socket under
+exactly one condition: the user asked it to clone. It then **stops**, because
+a fresh clone is untrusted input and running its gates in the same invocation
+would be the most dangerous command in the program aimed at the least
+technical user it has (SPEC_START_V0.md §3e).
+
+**Every socket lives in `judge.send` or `forge.request`**, so `grep -rn
+build_opener src/` has exactly two answers and must keep having exactly two —
+a clone is `git` in a subprocess, not a socket this program opens. Everything
 that *proves* anything still makes no LLM call and no network call: the worker
 is the user's own program, and every worker in the test suite is a shell
-one-liner.
+one-liner or the repo's own fake ACP agent.
+
+**Wringer never stores a credential.** `wring start` will ask for your API key
+so it can hand it to the build it launches; it keeps it in memory for that
+session, folds it into the redactor so it cannot reach a bundle, and writes it
+nowhere. Your config records the *name* of an environment variable, never a
+key. Nothing else in Wringer ever asks.
 
 **Wringer writes git history in exactly one place.** `deliver.py`, only on
 `--send`, only onto a branch it created, never the default branch, never a

@@ -266,8 +266,11 @@ def _api_key(root: Path) -> Check:
     )
 
 
+MARKS = {OK: "✓", WARN: "!", FAIL: "✗", SKIP: "-"}
+
+
 def report(checks: list[Check]) -> str:
-    mark = {OK: "✓", WARN: "!", FAIL: "✗", SKIP: "-"}
+    mark = MARKS
     lines = []
     for check in checks:
         label = f"{mark[check.status]} {check.name}"

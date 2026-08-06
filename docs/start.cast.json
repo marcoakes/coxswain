@@ -1,0 +1,243 @@
+[
+ {
+  "at": 0.0,
+  "text": "$ wring start --accept-gates --agent claude-code",
+  "prompt": true
+ },
+ {
+  "at": 0.7,
+  "text": "wring start \u2014 set this up and start your first build"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[1/7] preflight"
+ },
+ {
+  "at": 0.7,
+  "text": "\u2713 python                Python 3.12.13"
+ },
+ {
+  "at": 0.7,
+  "text": "\u2713 wring                 wring 0.2.0 at \u2026sers/marc/Claude/wringer/.venv/bin/wring"
+ },
+ {
+  "at": 0.7,
+  "text": "\u2713 git                   git version 2.50.1 (Apple Git-155)"
+ },
+ {
+  "at": 0.7,
+  "text": "! container runtime     no container runtime found (Apple silicon detected)"
+ },
+ {
+  "at": 0.7,
+  "text": "\u2713 git repository        /private/var/fo\u2026951kn9bfs540fq17gw0000gn/T/wringer-start"
+ },
+ {
+  "at": 0.7,
+  "text": "! gates                 no .wringer.yaml here yet"
+ },
+ {
+  "at": 0.7,
+  "text": "\u2713 workspace writable    /private/var/fo\u20260gn/T/wringer-start/.wringer is writable"
+ },
+ {
+  "at": 0.7,
+  "text": "\u2713 llm key               set: ANTHROPIC_API_KEY (value not shown)"
+ },
+ {
+  "at": 0.7,
+  "text": "  (the ! lines are optional extras \u2014 `wring doctor` explains them)"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[2/7] workspace"
+ },
+ {
+  "at": 0.7,
+  "text": "  not declared \u2014 nothing here needs one yet. `wring get` will ask"
+ },
+ {
+  "at": 0.7,
+  "text": "  for one before it clones."
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[3/7] repo"
+ },
+ {
+  "at": 0.7,
+  "text": "  /private/var/folders/n8/bx4t2r951kn9bfs540fq17gw0000gn/T/wringer-start"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[4/7] gates"
+ },
+ {
+  "at": 0.7,
+  "text": "  detected from a Python layout: test"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[5/7] agent"
+ },
+ {
+  "at": 0.7,
+  "text": "  \u2713 claude-code   /var/folders/n8/bx4t2\u202600gn/T/wringer-start-bin/claude-code-acp"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "  This is what will be added:"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "    run:"
+ },
+ {
+  "at": 0.7,
+  "text": "      worker:"
+ },
+ {
+  "at": 0.7,
+  "text": "        acp:"
+ },
+ {
+  "at": 0.7,
+  "text": "          command: claude-code-acp"
+ },
+ {
+  "at": 0.7,
+  "text": "          env_passthrough:"
+ },
+ {
+  "at": 0.7,
+  "text": "          - ANTHROPIC_API_KEY"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[6/7] key"
+ },
+ {
+  "at": 0.7,
+  "text": "  ANTHROPIC_API_KEY is already set here (value not shown)."
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "Wrote .wringer.yaml."
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "Wringer stored nothing. .wringer.yaml records the NAME ANTHROPIC_API_KEY, never"
+ },
+ {
+  "at": 0.7,
+  "text": "a value. To have it set next time, run this yourself:"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "  read -rs -p \"API key: \" ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY"
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "[7/7] first build"
+ },
+ {
+  "at": 0.9,
+  "text": "\u2713 test passed        0.1s"
+ },
+ {
+  "at": 0.9,
+  "text": ""
+ },
+ {
+  "at": 0.9,
+  "text": "\u2713 every required gate passed."
+ },
+ {
+  "at": 0.9,
+  "text": "Evidence: .wringer/runs/20260806-164000-fd43/"
+ },
+ {
+  "at": 0.9,
+  "text": ""
+ },
+ {
+  "at": 0.9,
+  "text": "Receipt:  .wringer/attestations/20260806-164000-9667/attestation.json"
+ },
+ {
+  "at": 0.9,
+  "text": ""
+ },
+ {
+  "at": 0.9,
+  "text": "! unsigned \u2014 this proves the named bundles are unaltered since they were"
+ },
+ {
+  "at": 0.9,
+  "text": "  written, not who produced them, and not that they were not fabricated"
+ },
+ {
+  "at": 0.9,
+  "text": "  wholesale."
+ },
+ {
+  "at": 0.9,
+  "text": ""
+ },
+ {
+  "at": 0.9,
+  "text": "Check it yourself \u2014 offline, no config, no network:"
+ },
+ {
+  "at": 0.9,
+  "text": "  wring audit .wringer/attestations/20260806-164000-9667/attestation.json"
+ }
+]

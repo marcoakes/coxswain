@@ -102,11 +102,18 @@ text-anchor="middle">{html.escape(title)}</text>
 """
 
 
+# The title drawn in the window chrome. A parameter rather than a literal
+# because there is more than one recording now, and a second cast rendered
+# under the first one's title would be a caption that describes a different
+# session than the one below it.
+DEFAULT_TITLE = "wring run — a planted bug, verified fixed"
+
+
 def main() -> int:
     cast = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     out = Path(sys.argv[2])
-    out.write_text(render(cast, "wring run — a planted bug, verified fixed"),
-                   encoding="utf-8")
+    title = sys.argv[3] if len(sys.argv) > 3 else DEFAULT_TITLE
+    out.write_text(render(cast, title), encoding="utf-8")
     print(f"rendered {len(cast)} lines -> {out} ({out.stat().st_size} bytes)")
     return 0
 

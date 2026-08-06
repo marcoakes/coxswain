@@ -193,6 +193,43 @@ What a run would need, on a machine whose owner already signs commits:
 SPEC_PROVENANCE_V0 ruling 1 refused, and a test is not worth contradicting the
 promise it exists to protect.
 
+## Sequence E — `wring start` against a real agent binary
+
+**Status: unverified. Never run by anyone.**
+
+`wring start`'s agent step is `shutil.which` over a named table, and every
+test — plus the committed recording — drives it against a **stub** executable
+with the right filename. That is deliberate and stays that way: installing a
+vendor agent is exactly the power SPEC_START_V0 §3c-i refuses, and putting one
+in CI or in anyone's `scripts/demo.sh` path would contradict the thing being
+demonstrated.
+
+So what is proven is that detection finds a binary of that name, writes the
+stanza, and never runs it. What is **not** proven is that the `command` and
+`args` in `src/wringer/agents.py` are the invocation a real agent wants. Those
+values are pinned in one table for exactly this reason (AGENTS.md rule 5): if
+an agent's ACP entry point differs, it is a one-line diff.
+
+What a run would need, on a machine whose owner already has an agent installed:
+
+1. Install one of the table's agents by its own published route, and confirm
+   the binary in `agents.AGENTS` is on `PATH` under that name.
+2. In a scratch repo with a gate that fails, `wring start --accept-gates
+   --agent <id>` with the agent's key already exported.
+3. Confirm the loop reaches the agent — `worker.started` with
+   `worker_kind: "acp"` in the loop ledger — and that `worker.finished`
+   carries a non-empty `agent_name`. That is the handshake succeeding, which
+   is the part a stub cannot show.
+4. Grep the whole loop bundle for the key's value. It must not appear.
+5. If the handshake fails on the pinned `args`, fix the table and say so in
+   the commit — do not add a flag to work around it.
+
+**A network clone is not on this list.** `wring start --clone` uses
+`acquire.clone` unchanged, and `tests/test_start.py` exercises it over
+`file://` for the reason the rest of the suite does: a test that needs someone
+else's server to be up is a test that fails for reasons unrelated to this
+code. The https path is `wring get`'s, and it is the same function.
+
 ## What is *not* here, and why
 
 These are covered by automated tests and do not belong on a manual list.

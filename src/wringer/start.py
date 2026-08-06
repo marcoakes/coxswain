@@ -34,11 +34,55 @@ import yaml
 
 from wringer import config, detect
 
+# The width this command keeps its console inside.
+#
+# 80 is the classic terminal floor, and it is also exactly the canvas
+# `scripts/demo_render.py` draws on — a fixed 80 columns with no wrapping,
+# clipping or truncation. Bounding the OUTPUT rather than the picture is the
+# honest direction: the cast is evidence and the SVG only draws it, so a
+# renderer that cropped would be hiding what the command said. A real launch
+# produced lines of 124, 145 and 223 columns before this existed.
+CONSOLE_WIDTH = 80
+
 # What a human runs to have the variable set next time. Printed, never run —
 # and it is `SETUP.md`'s own line, because the route a credential takes from a
 # person's head into a process should be the one route this project documents.
 # `read -rs` keeps it off the terminal and out of shell history.
-PERSIST_HINT = 'read -rs -p "{name}: " {name} && export {name}'
+#
+# It is a COMMAND, so it is never elided to fit the console the way a path is
+# — a shortened command is one that does not run. `SETUP.md`'s prompt text
+# ("API key: " rather than the variable's own name) is kept for that reason
+# too: it is shorter, and it is the line this project already documents.
+PERSIST_HINT = 'read -rs -p "API key: " {name} && export {name}'
+
+
+def fit(text: str, width: int = CONSOLE_WIDTH) -> str:
+    """One line, bounded — the middle elided when it does not fit.
+
+    The middle rather than the tail, because what overflows here is almost
+    always a path, and a path with its head kept and its filename dropped is
+    the half nobody needed. `…` is visible on purpose: `gates.truncate` and
+    `_print_tail` both already say what they dropped, and a bounded line that
+    reads as complete is worse than one that admits it is not.
+    """
+    if len(text) <= width:
+        return text
+    keep = width - 1
+    head = keep // 2
+    return f"{text[:head]}…{text[len(text) - (keep - head):]}"
+
+
+def wrap(text: str, indent: str = "") -> str:
+    """Prose, wrapped to the console width. `textwrap`, so stdlib only."""
+    import textwrap
+
+    return textwrap.fill(
+        text,
+        width=CONSOLE_WIDTH,
+        subsequent_indent=indent,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
 
 
 class StartError(Exception):

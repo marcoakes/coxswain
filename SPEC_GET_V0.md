@@ -173,10 +173,19 @@ kept**. The rule that actually matters, and that holds:
 
 `verify`, `run`, `resume`, `fleet` and `plan` cannot reach a network at all.
 Three commands SEND, each behind `--send` and each writing the exact bytes to
-disk first: `judge`, `spec`, `deliver`. Two commands FETCH, and are not behind
-a flag because fetching is their entire purpose — `wring get` clones a
-repository, `wring issue` reads one issue. A user typing either knows they are
-reaching a network; a `--send` on them would be ceremony rather than safety.
+disk first: `judge`, `spec`, `deliver`. **Three commands FETCH**, and are not
+behind a flag because fetching is their entire purpose — `wring get` clones a
+repository, `wring issue` reads one issue, and `wring start --clone` clones
+one. A user typing any of them knows they are reaching a network; a `--send`
+on them would be ceremony rather than safety.
+
+> **Restated for P4** (SPEC_START_V0.md §3e-i). This paragraph enumerated the
+> network surface exactly, and `wring start` made it false the moment it
+> shipped. It is the third fetcher and it opens a socket under exactly one
+> condition: the user asked it to clone. It then **stops** — it never runs a
+> gate in a repository it cloned in the same invocation, which is §3 of this
+> document ("Runs nothing it cloned") holding for the newest command rather
+> than being quietly dropped for it.
 Every socket lives in `judge.send` or `forge.request`, and
 `grep -rn "build_opener" src/` must return exactly those two. Both are reached only with a flag a human typed, only
 against an endpoint the repo declared, and only after the bytes are on disk.

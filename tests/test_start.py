@@ -1056,3 +1056,42 @@ def test_a_gate_whose_module_is_missing_is_diagnosed_too(
 
     assert code == cli.EXIT_GATE_FAILED
     assert "not installed in the environment" in captured.out + captured.err
+
+
+# --- the console the recorder has to fit -----------------------------------
+
+
+def test_every_line_a_successful_launch_prints_fits_the_canvas(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """`scripts/demo_render.py` draws a FIXED 80-column canvas with no
+    wrapping, clipping or truncation, and nothing tested it — the committed
+    cast's longest line was 51 characters, so the limit had never been
+    exercised. A wizard printing paths, a YAML stanza and an install command
+    is the first flow likely to blow it, and it does: a real launch on this
+    machine produced lines of 124, 145 and 223 columns.
+
+    Bounded here rather than in the renderer, deliberately. The cast is the
+    evidence and the SVG only draws it, so the honest fix is for the command
+    to print within a width a terminal actually has — not for the picture to
+    quietly crop what the command said.
+
+    Scoped to a launch that SUCCEEDS: a failing gate's log tail is the gate's
+    own output, and bounding that would be hiding evidence rather than
+    formatting it.
+    """
+    real_gates(repo)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start", "--accept-gates", "--agent", fake_agent.id]) == 0
+    captured = capsys.readouterr()
+
+    too_wide = [
+        (len(line), line)
+        for line in (captured.out + captured.err).splitlines()
+        if len(line) > start.CONSOLE_WIDTH
+    ]
+    assert not too_wide, (
+        f"{len(too_wide)} line(s) overflow the {start.CONSOLE_WIDTH}-column "
+        f"canvas: {too_wide[:3]}"
+    )

@@ -449,7 +449,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     # inline, so a launch does not send a new user to a second command first.
     _start_step(1, "preflight")
     checks = doctor.run_checks(here)
-    print(doctor.report(checks))
+    _report_preflight(checks)
     # On the statuses, NOT on doctor's exit code. WARN and SKIP both count as
     # passed there, and outside a repo the repo checks SKIP — so an empty
     # directory reports "machine ready" and exits 0. Branching on that alone
@@ -489,7 +489,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_CONFIG
-    print(f"  {root}")
+    print(start.fit(f"  {root}"))
 
     # [4/7] gates. Detection's proposal, or what the repo already declares —
     # shown before it is written, because `.wringer.yaml` is code.
@@ -631,7 +631,7 @@ def _start_agent(
             return None, EXIT_CONFIG
 
         worker = agents.worker(agent)
-        print(f"  ✓ {agent.id:<14}{where}")
+        print(start.fit(f"  ✓ {agent.id:<14}{where}"))
         # Consent IS the written stanza (§3c), so the human sees the exact
         # YAML — from the same function that writes it, not a second renderer.
         print("\n  This is what will be added:\n")
@@ -642,10 +642,10 @@ def _start_agent(
     installed = []
     for agent, where in agents.survey():
         if where is not None:
-            print(f"  ✓ {agent.id:<14}{where}")
+            print(start.fit(f"  ✓ {agent.id:<14}{where}"))
             installed.append(agent.id)
         else:
-            print(f"  - {agent.id:<14}not installed:  {agent.install}")
+            print(start.fit(f"  - {agent.id:<14}not installed:  {agent.install}"))
 
     if asking.interactive() and installed:
         picked = asking.choose(
@@ -665,6 +665,30 @@ def _start_agent(
         file=sys.stderr,
     )
     return None, EXIT_CONFIG
+
+
+def _report_preflight(checks: list[doctor.Check]) -> None:
+    """`wring doctor`'s checks, rendered for a wizard.
+
+    Its machinery, not its layout (§7 forbids reimplementing the command, not
+    reformatting it). Two differences, both deliberate:
+
+    - **Bounded to the console width.** doctor's own report is unbounded, and
+      its fix lines run to 220 columns — fine in a terminal you are reading,
+      impossible on the demo canvas.
+    - **Only a ✗ gets its fix printed.** A ✗ stops the launch, so its fix is
+      the next thing the reader needs. A ! does not, and eight wrapped
+      paragraphs of optional advice before anything happens is how a wizard
+      teaches people to skim past the line that mattered. `wring doctor` is
+      one command away and this says so.
+    """
+    for check in checks:
+        mark = doctor.MARKS[check.status]
+        print(start.fit(f"{mark} {check.name:<22}{check.detail}"))
+        if check.status == doctor.FAIL and check.fix:
+            print(start.wrap(f"{'':<24}→ {check.fix}", indent=" " * 24))
+    if any(check.status == doctor.WARN for check in checks):
+        print("  (the ! lines are optional extras — `wring doctor` explains them)")
 
 
 def _start_clone(here: Path, url: str, workspace: str | None) -> int:
@@ -727,9 +751,15 @@ def _start_clone(here: Path, url: str, workspace: str | None) -> int:
         print(f"wring start: {exc}", file=sys.stderr)
         return EXIT_CONFIG
 
-    print(f"  cloned {acquired.origin}\n  into   {acquired.directory}")
+    print(start.fit(f"  cloned {acquired.origin}"))
+    print(start.fit(f"  into   {acquired.directory}"))
     if acquired.head_sha:
-        print(f"  at     {acquired.head_sha[:12]} on {acquired.default_branch or '?'}")
+        print(
+            start.fit(
+                f"  at     {acquired.head_sha[:12]} on "
+                f"{acquired.default_branch or '?'}"
+            )
+        )
     print(f"\nProvenance: {_relative(manifest, root)}")
     print(
         "\nNothing in it has been run, and this launch stops here.\n"
@@ -952,7 +982,7 @@ def _start_receipt(root: Path, anchor: Path) -> int:
     bundle = attest.Bundle.create(root, built.payload["attestation_id"])
     written = bundle.write(built.payload)
     print(f"\nReceipt:  {_relative(written, root)}")
-    print(f"\n! {attest.UNSIGNED_LIMIT}")
+    print("\n" + start.wrap(f"! {attest.UNSIGNED_LIMIT}", indent="  "))
     print(
         f"\nCheck it yourself — offline, no config, no network:\n"
         f"  wring audit {_relative(written, root)}"
@@ -978,10 +1008,13 @@ def _report_start(emission: start.Emission, key_name: str | None) -> None:
         # keychain is a declared non-goal (§7) until a field report shows
         # people losing the key between sessions.
         print(
-            f"\nWringer stored nothing. {name} records the NAME "
-            f"{key_name}, never a\nvalue. To have it set next time, run this "
-            "yourself:\n\n"
-            f"  {start.PERSIST_HINT.format(name=key_name)}"
+            "\n"
+            + start.wrap(
+                f"Wringer stored nothing. {name} records the NAME "
+                f"{key_name}, never a value. To have it set next time, "
+                "run this yourself:"
+            )
+            + f"\n\n  {start.PERSIST_HINT.format(name=key_name)}"
         )
 
 

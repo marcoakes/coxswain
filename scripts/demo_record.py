@@ -36,8 +36,52 @@ from pathlib import Path
 TIMING_QUANTUM = 0.1
 
 
+# The agent `wring start` is told to use in the recording. A real id from
+# Wringer's own table — `tests/test_docs.py` asserts that — but the binary
+# behind it during the recording is a STUB that `scripts/demo.sh` puts on
+# PATH. That is the only route that films the agent step without installing a
+# vendor binary or handling a credential, and the documentation says so in
+# words beside the picture. The launch never runs it: the gates pass on the
+# first try, so there is nothing for a repair loop to do.
+START_AGENT_ID = "claude-code"
+
+
+def _argv_step(wring: str, *args: str) -> tuple[str, list[str]]:
+    """A step whose displayed command IS its argv.
+
+    Displayed and executed differ in exactly one thing — argv[0] is the
+    absolute path to the `wring` being recorded — and `tests/test_docs.py`
+    checks that is the only difference. `_listing_step` earned that guard the
+    hard way: the cast showed one command and ran another for two days.
+    """
+    return " ".join(("wring", *args)), [wring, *args]
+
+
 def _run_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
-    return "wring run", [wring, "run"]
+    return _argv_step(wring, "run")
+
+
+def _start_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
+    """The guided launch, non-interactively.
+
+    **The recorded run is the non-interactive surface, and that is measured
+    rather than chosen** (SPEC_START_V0.md §3b-i). This recorder cannot film
+    an interactive session: `getpass` reads `/dev/tty` rather than stdin and
+    would block on the operator's real terminal; child stdin is DEVNULL; and
+    capture is line-oriented, so a prompt printed without a trailing newline
+    is glued onto whatever line comes next — a plausible-looking line no
+    command ever printed, which is worse for law 8 than an absence.
+
+    It is also the documented happy path: the north-star flow has an agent
+    running setup and launching `wring start` at the end, and an agent passes
+    flags.
+
+    The key step is deliberately off-camera. The recorded run has the variable
+    already set, `wring start` says so on the terminal, and the docs say in
+    words that the one step a film cannot honestly show is the one where a
+    human types a secret.
+    """
+    return _argv_step(wring, "start", "--accept-gates", "--agent", START_AGENT_ID)
 
 
 def _listing_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
@@ -133,10 +177,21 @@ def record(command: list[str], cwd: Path, env: dict[str, str]) -> list[dict]:
     return frames
 
 
+# Which commands each recording films. `main()` iterates one of these, so a
+# new recorded command needs an entry — that is the expected shape, and it is
+# not new *capability*: no pty driving and no keystroke injection, which is
+# what would put synthesised input into a file law 8 forbids editing.
+STEP_SETS = {
+    "run": (_run_step, _listing_step),
+    "start": (_start_step,),
+}
+
+
 def main() -> int:
     scratch = Path(sys.argv[1])
     out = Path(sys.argv[2])
     wring = sys.argv[3]
+    steps = STEP_SETS[sys.argv[4] if len(sys.argv) > 4 else "run"]
 
     env = dict(os.environ)
     env["PATH"] = f"{Path(wring).parent}:{env['PATH']}"
@@ -154,7 +209,7 @@ def main() -> int:
     # the FIRST command creates, so the list cannot be computed up front.
     cast: list[dict] = []
     offset = 0.0
-    for step in (_run_step, _listing_step):
+    for step in steps:
         prompt, command = step(wring, scratch)
         if cast:  # a blank line before each new prompt, as a shell leaves
             cast.append({"at": round(offset, 3), "text": ""})

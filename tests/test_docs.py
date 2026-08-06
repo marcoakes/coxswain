@@ -467,3 +467,222 @@ def test_quantize_never_touches_the_captured_text():
     assert [f["text"] for f in snapped] == [f["text"] for f in original]
     assert [f.get("prompt") for f in snapped] == [f.get("prompt") for f in original]
     assert [f["at"] for f in snapped] == [0.0, 1.2, 3.0]
+
+
+# --- the launch demo -------------------------------------------------------
+#
+# `main()` iterates a hardcoded tuple, so a new recorded command REQUIRES a
+# new step function. What is banned is new *capability*: teaching the recorder
+# to drive a pty or inject keystrokes would put synthesised keystrokes into
+# the one file law 8 forbids editing. A step function is not that.
+
+COMMITTED_CASTS = ("docs/demo.cast.json", "docs/start.cast.json")
+
+
+def committed_casts() -> list[tuple[str, list[dict]]]:
+    import json as _json
+
+    found = []
+    for name in COMMITTED_CASTS:
+        path = repo_root() / name
+        if path.is_file():
+            found.append((name, _json.loads(path.read_text(encoding="utf-8"))))
+    return found
+
+
+def test_the_argv_steps_display_exactly_what_they_execute():
+    """`_listing_step` earned this guard the hard way — the cast showed one
+    command and ran another for two days because nothing tested it. The
+    argv-shaped steps had no guard at all until now, including the one that
+    has been in every recording since the demo shipped."""
+    require_checkout("scripts/demo_record.py")
+    module = demo_record_module()
+    wring = "/somewhere/bin/wring"
+
+    for name in ("_run_step", "_start_step"):
+        step = getattr(module, name, None)
+        if step is None:
+            continue
+        prompt, command = step(wring, Path("/nowhere"))
+        assert command[0] == wring
+        assert prompt.split() == ["wring", *command[1:]], (
+            f"{name} displays {prompt!r} and executes {command!r} — law 8, in "
+            "the artifact the README puts at the top of the page"
+        )
+
+
+def test_the_recorded_agent_is_one_the_program_actually_knows():
+    """The recorder names an agent id. If it drifts from the table, the
+    recording shows a launch nobody could reproduce."""
+    require_checkout("scripts/demo_record.py")
+    from wringer import agents
+
+    module = demo_record_module()
+    assert module.START_AGENT_ID in agents.known()
+
+
+def test_every_line_of_every_committed_cast_fits_the_renderers_canvas():
+    """§8 — `scripts/demo_render.py` draws a FIXED 80-column canvas with no
+    wrapping, clipping or truncation, and nothing tested it. The original
+    cast's longest line is 51 characters, so the limit had never been
+    exercised; the launch is the first flow wide enough to reach it."""
+    require_checkout("docs/demo.cast.json")
+    casts = committed_casts()
+    assert casts, "no committed cast to check"
+
+    too_wide = [
+        (name, len(frame["text"]), frame["text"])
+        for name, cast in casts
+        for frame in cast
+        if len(frame["text"]) > 80
+    ]
+    assert not too_wide, (
+        f"{len(too_wide)} recorded line(s) overflow the renderer's 80-column "
+        f"canvas: {too_wide[:3]}"
+    )
+
+
+def test_the_docs_say_the_key_step_is_not_in_the_recording():
+    """§8 — the docs state IN WORDS that the one step a film cannot honestly
+    show is the one where a human types a secret, and why."""
+    require_checkout("docs/start.cast.json")
+    found = [
+        name
+        for name in ("QUICKSTART.md", "SETUP.md")
+        if (repo_root() / name).is_file()
+        and "not in the recording" in (repo_root() / name).read_text("utf-8")
+    ]
+    assert found, (
+        "no document says the key step is absent from the recording. A "
+        "transcript that silently omits a step teaches people the step is not "
+        "there"
+    )
+
+
+def test_the_docs_say_the_recorded_agent_was_a_stub():
+    """§3c — identity is self-reported and Wringer never verifies it, so a
+    recording that let a reader assume a real vendor agent ran would be a
+    claim the artifact cannot support."""
+    require_checkout("docs/start.cast.json")
+    found = [
+        name
+        for name in ("QUICKSTART.md", "SETUP.md")
+        if (repo_root() / name).is_file()
+        and "stub" in (repo_root() / name).read_text("utf-8")
+    ]
+    assert found, "no document says the agent in the recording was a stub"
+
+
+# --- the promise that changes with the capability --------------------------
+
+PROMISE = (
+    "Wringer never stores a credential. `wring start` will ask for your API "
+    "key so it can hand it to the build it launches; it keeps it in memory "
+    "for that session, folds it into the redactor so it cannot reach a "
+    "bundle, and writes it nowhere. Your config records the name of an "
+    "environment variable, never a key. Nothing else in Wringer ever asks."
+)
+
+DOCS_CARRYING_THE_PROMISE = ("README.md", "SECURITY.md", "SETUP.md")
+
+
+def normalised(text: str) -> str:
+    """Whitespace, emphasis and blockquote markers flattened.
+
+    The same paragraph is wrapped three different ways in three documents and
+    quoted inside a `>` block in one of them. Verbatim means the words, not
+    the markdown around them.
+    """
+    lines = [line.lstrip("> ").rstrip() for line in text.splitlines()]
+    return " ".join(" ".join(lines).replace("*", "").split())
+
+
+def test_every_public_document_carries_the_promise_wording():
+    """Marc approved this paragraph verbatim on 2026-08-06 (spec §6.1), and it
+    ships in the SAME COMMIT as the capability — the J2 precedent. Note what
+    changed and what did not: "never touches a credential" became "never
+    STORES a credential". The narrower claim is the true one now that a
+    command prompts for a key, and it is still the strongest claim in this
+    category any comparable tool makes."""
+    missing = [
+        name
+        for name in DOCS_CARRYING_THE_PROMISE
+        if (repo_root() / name).is_file()
+        and normalised(PROMISE) not in normalised(
+            (repo_root() / name).read_text(encoding="utf-8")
+        )
+    ]
+    assert not missing, f"the approved promise wording is missing from {missing}"
+
+
+def test_no_document_still_claims_wringer_never_touches_a_credential():
+    """The claim that stopped being true. `wring start` handles one."""
+    offenders = [
+        name
+        for name in DOCS_CARRYING_THE_PROMISE + ("QUICKSTART.md", "AGENTS.md")
+        if (repo_root() / name).is_file()
+        and "never touches a credential" in (repo_root() / name).read_text("utf-8")
+    ]
+    assert not offenders, (
+        f"{offenders} still claim Wringer never touches a credential. It "
+        "prompts for one now; the true claim is that it never STORES one"
+    )
+
+
+# --- enumerations that `wring start` made false ---------------------------
+
+
+def test_the_network_enumerations_name_wring_start():
+    """§3e-i — `SPEC_GET_V0.md` and `AGENTS.md` both enumerate the network
+    surface EXACTLY: three SEND commands, two FETCH. Cloning makes
+    `wring start` the third fetcher, and both enumerations become false the
+    moment it ships. Restated in the same commit as the capability, rather
+    than quietly kept."""
+    for name in ("SPEC_GET_V0.md", "AGENTS.md"):
+        path = repo_root() / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        # The paragraph that does the enumerating, not the whole document.
+        assert "wring start" in text, f"{name} never mentions wring start"
+        assert "Three commands FETCH" in text or "three FETCH" in text, (
+            f"{name} still enumerates two fetching commands; `wring start "
+            "--clone` is the third"
+        )
+
+
+def test_setup_no_longer_says_wring_start_is_not_built():
+    path = repo_root() / "SETUP.md"
+    if not path.is_file():
+        pytest.skip("SETUP.md is not in this repo")
+    text = path.read_text(encoding="utf-8")
+    assert "not built yet" not in text, (
+        "SETUP.md still tells a reader `wring start` does not exist"
+    )
+
+
+def test_the_document_hierarchy_lists_every_spec_in_the_repo():
+    """AGENTS.md's table listed four specs while the repo had nine, and
+    nothing guarded it (operating rule 6). A hierarchy that omits half the
+    binding documents is one the next agent reads and trusts."""
+    require_checkout("AGENTS.md")
+    text = (repo_root() / "AGENTS.md").read_text(encoding="utf-8")
+    missing = [
+        path.name
+        for path in sorted(repo_root().glob("SPEC_*.md"))
+        if path.name not in text
+    ]
+    assert not missing, f"AGENTS.md's document hierarchy omits {missing}"
+
+
+def test_the_module_map_covers_every_module():
+    """Operating rule 6: update this file whenever the module map changes."""
+    require_checkout("AGENTS.md")
+    text = (repo_root() / "AGENTS.md").read_text(encoding="utf-8")
+    missing = [
+        path.name
+        for path in sorted((repo_root() / "src" / "wringer").glob("*.py"))
+        if path.name not in ("__init__.py", "__main__.py")
+        and f"`{path.name}`" not in text
+    ]
+    assert not missing, f"AGENTS.md's module map omits {missing}"

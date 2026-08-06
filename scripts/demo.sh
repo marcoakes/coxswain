@@ -81,3 +81,73 @@ git commit -qm "the calculator, with a planted bug"
 
 "$PY" "$ROOT/scripts/demo_record.py" "$SCRATCH" "$ROOT/docs/demo.cast.json" "$WRING"
 "$PY" "$ROOT/scripts/demo_render.py" "$ROOT/docs/demo.cast.json" "$ROOT/docs/demo.svg"
+
+# ---------------------------------------------------------------------------
+# The second recording: the guided launch.
+#
+# Its own scratch, and that is not tidiness. The tree above already carries a
+# .wringer.yaml with `gates:` and `run:`, so `wring start` there would refuse
+# to rewrite a `run:` section the file already has — the recording would be a
+# correct refusal rather than a launch.
+#
+# It lands BESIDE docs/demo.svg rather than replacing it. The README's hero is
+# `wring run` repairing a planted bug, which is the product's core claim; the
+# launch is a different story (onboarding) and both are worth showing.
+# ---------------------------------------------------------------------------
+START=$(scratch_dir "${1:-}" start) || exit 2
+STUBS=$(scratch_dir "${1:-}" start-bin) || exit 2
+
+if [ -d "$START" ]; then find "$START" -mindepth 1 -delete 2>/dev/null; fi
+if [ -d "$STUBS" ]; then find "$STUBS" -mindepth 1 -delete 2>/dev/null; fi
+mkdir -p "$START" "$STUBS"
+
+# The agent is a STUB, and the documentation says so beside the picture.
+# It is the only route that films the agent step while keeping the rule that
+# Wringer neither bundles nor installs an agent, and without putting a vendor
+# binary into anyone's regeneration path. It is never executed: the launch's
+# gates pass on the first try, so no repair loop runs and nothing speaks ACP.
+cat > "$STUBS/claude-code-acp" <<'EOF'
+#!/bin/sh
+echo "this is a stub; the demo detects it and never runs it" >&2
+exit 1
+EOF
+chmod +x "$STUBS/claude-code-acp"
+
+cd "$START"
+git init -q -b main .
+git config user.email demo@example.invalid
+git config user.name "demo"
+echo ".wringer/" > .gitignore
+
+# No .wringer.yaml: the launch DETECTS the gates, which is the step being
+# filmed. A `test_*.py` at the root is what detection reads as a Python
+# layout, so the gate it proposes is `pytest -q`.
+cat > calc.py <<'EOF'
+def add(a, b):
+    return a + b
+EOF
+
+cat > test_calc.py <<'EOF'
+from calc import add
+
+
+def test_add():
+    assert add(2, 2) == 4
+EOF
+
+git add -A
+git commit -qm "a calculator, and a test that passes"
+
+# Obviously fake, and it never reaches the recording: `wring start` prints the
+# NAME of the variable and never its value. Setting it is what makes the key
+# step non-interactive — which is the only form this recorder can film, since
+# getpass reads /dev/tty and would block on the operator's real terminal.
+ANTHROPIC_API_KEY=sk-ant-notarealkey
+export ANTHROPIC_API_KEY
+PATH="$STUBS:$PATH"
+export PATH
+
+"$PY" "$ROOT/scripts/demo_record.py" "$START" "$ROOT/docs/start.cast.json" \
+    "$WRING" start
+"$PY" "$ROOT/scripts/demo_render.py" "$ROOT/docs/start.cast.json" \
+    "$ROOT/docs/start.svg" "wring start — preflight, gates, agent, receipt"

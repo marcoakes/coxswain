@@ -111,6 +111,19 @@ turn them into text.
   detected git root. Gate ids are validated as slugs precisely so a config
   cannot direct a write outside the bundle.
 - **No credential is ever read from a config file, stored, or relayed.** A repo names an environment *variable*; Wringer reads its value at runtime, folds it into the redactor so it cannot reach an artifact, and passes it to one request. Git's own credential helper answers for git — Wringer never sees that one at all.
+
+  *Wringer never stores a credential.* `wring start` will ask for your API
+  key so it can hand it to the build it launches; it keeps it in memory for
+  that session, folds it into the redactor so it cannot reach a bundle, and
+  writes it nowhere. Your config records the *name* of an environment
+  variable, never a key. Nothing else in Wringer ever asks.
+
+  There is deliberately **no `--key` flag**: a value on a command line is a
+  process listing anyone on the machine can read. Its non-interactive form is
+  the variable already being set, which is how every other command here
+  receives one. And `wring start` prints the command to make it durable
+  rather than running it — storing a credential is a larger power than
+  launching a build.
 - **Read-only git, except one command.** Wringer reads git state with read-only
   commands and never authenticates anywhere.
 
