@@ -202,42 +202,42 @@
  },
  {
   "at": 0.9,
-  "text": "Evidence: .wringer/runs/20260806-164000-fd43/"
+  "text": "Evidence: .wringer/runs/20260806-205727-739d/"
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": ""
  },
  {
-  "at": 0.9,
-  "text": "Receipt:  .wringer/attestations/20260806-164000-9667/attestation.json"
+  "at": 1.0,
+  "text": "Receipt:  .wringer/attestations/20260806-205727-dc13/attestation.json"
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": ""
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": "! unsigned \u2014 this proves the named bundles are unaltered since they were"
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": "  written, not who produced them, and not that they were not fabricated"
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": "  wholesale."
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": ""
  },
  {
-  "at": 0.9,
+  "at": 1.0,
   "text": "Check it yourself \u2014 offline, no config, no network:"
  },
  {
-  "at": 0.9,
-  "text": "  wring audit .wringer/attestations/20260806-164000-9667/attestation.json"
+  "at": 1.0,
+  "text": "  wring audit .wringer/attestations/20260806-205727-dc13/attestation.json"
  }
 ]

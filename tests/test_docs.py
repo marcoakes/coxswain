@@ -476,7 +476,11 @@ def test_quantize_never_touches_the_captured_text():
 # to drive a pty or inject keystrokes would put synthesised keystrokes into
 # the one file law 8 forbids editing. A step function is not that.
 
-COMMITTED_CASTS = ("docs/demo.cast.json", "docs/start.cast.json")
+COMMITTED_CASTS = (
+    "docs/demo.cast.json",
+    "docs/start.cast.json",
+    "docs/vacuous.cast.json",
+)
 
 
 def committed_casts() -> list[tuple[str, list[dict]]]:
@@ -490,24 +494,41 @@ def committed_casts() -> list[tuple[str, list[dict]]]:
     return found
 
 
-def test_the_argv_steps_display_exactly_what_they_execute():
+def test_every_recorded_step_displays_exactly_what_it_executes(tmp_path):
     """`_listing_step` earned this guard the hard way — the cast showed one
-    command and ran another for two days because nothing tested it. The
-    argv-shaped steps had no guard at all until now, including the one that
-    has been in every recording since the demo shipped."""
+    command and ran another for two days because nothing tested it.
+
+    Discovered from `STEP_SETS` rather than a hardcoded list of names, so a
+    step added later is guarded the day it is added. That matters more than it
+    sounds: the hardcoded version silently stopped covering the two steps
+    added for the vacuity recording, which is the same shape of gap as the bug
+    it exists to prevent.
+    """
     require_checkout("scripts/demo_record.py")
     module = demo_record_module()
     wring = "/somewhere/bin/wring"
+    # `_listing_step` reads a real run directory to name the newest run.
+    (tmp_path / ".wringer" / "runs" / "20260805-120000-abcd").mkdir(parents=True)
 
-    for name in ("_run_step", "_start_step"):
-        step = getattr(module, name, None)
-        if step is None:
-            continue
-        prompt, command = step(wring, Path("/nowhere"))
-        assert command[0] == wring
-        assert prompt.split() == ["wring", *command[1:]], (
-            f"{name} displays {prompt!r} and executes {command!r} — law 8, in "
-            "the artifact the README puts at the top of the page"
+    steps = {step for group in module.STEP_SETS.values() for step in group}
+    assert steps, "STEP_SETS is empty — nothing is recorded at all"
+
+    for step in sorted(steps, key=lambda fn: fn.__name__):
+        prompt, command = step(wring, tmp_path)
+        if command[0] == "sh":
+            # The one shell-shaped step: displayed and executed are ONE string.
+            assert command[:2] == ["sh", "-c"]
+            assert command[2] == prompt, (
+                f"{step.__name__} displays {prompt!r} and runs {command[2]!r}"
+            )
+        else:
+            assert command[0] == wring
+            assert prompt.split() == ["wring", *command[1:]], (
+                f"{step.__name__} displays {prompt!r} and executes {command!r} "
+                "— law 8, in the artifact the README puts at the top of the page"
+            )
+        assert "<" not in prompt, (
+            f"{step.__name__} shows a placeholder, not a runnable command"
         )
 
 

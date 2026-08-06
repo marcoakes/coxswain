@@ -50,6 +50,12 @@ class Outcome:
     # caller has to be able to say so; a green exit that quietly means
     # nothing is the failure mode this whole tool argues against.
     template_only: bool = False
+    # The prove pass's verdict, when one ran. Carried for the SAME reason
+    # as `template_only`: a run can pass and still have proven nothing,
+    # and the caller cannot say so if the outcome does not tell it.
+    # None means vacuity was never checked — which the console must stay
+    # silent about (SPEC_VACUITY_V0 §7).
+    vacuity: vacuity.Result | None = None
 
     @property
     def passed(self) -> bool:
@@ -273,6 +279,7 @@ def run(
         failed_gate=failed_gate,
         status=status,
         template_only=template_only,
+        vacuity=proved,
     )
 
 

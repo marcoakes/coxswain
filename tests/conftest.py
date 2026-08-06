@@ -69,3 +69,14 @@ def write_config():
         return path
 
     return _write
+
+
+def flat(text: str) -> str:
+    """Collapse whitespace in captured output before matching on it.
+
+    Refusals are wrapped to the terminal (`cli._wrap_message`), so a phrase can
+    legitimately straddle a line break. Asserting on the exact line-breaking of
+    prose tests the formatter rather than the message — and the formatter has
+    its own tests.
+    """
+    return " ".join(text.split())

@@ -33,24 +33,24 @@
   "text": "\u2713 test passed        0.1s"
  },
  {
-  "at": 1.2,
+  "at": 1.3,
   "text": ""
  },
  {
-  "at": 1.2,
+  "at": 1.3,
   "text": "Converged in 2 iterations."
  },
  {
-  "at": 1.2,
-  "text": "Loop evidence: .wringer/loops/20260806-163959-21be/"
+  "at": 1.3,
+  "text": "Loop evidence: .wringer/loops/20260806-205726-ff04/"
  },
  {
-  "at": 2.6,
+  "at": 2.7,
   "text": ""
  },
  {
   "at": 2.7,
-  "text": "$ ls -1 .wringer/runs/20260806-163959-af0f/",
+  "text": "$ ls -1 .wringer/runs/20260806-205727-7c20/",
   "prompt": true
  },
  {

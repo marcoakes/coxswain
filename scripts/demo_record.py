@@ -84,6 +84,26 @@ def _start_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
     return _argv_step(wring, "start", "--accept-gates", "--agent", START_AGENT_ID)
 
 
+def _prove_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
+    """The catch.
+
+    `wring run` has just converged: gates green, worker done, a confident
+    ending. This re-runs those same gates against the PRE-CHANGE tree in a
+    scratch worktree. A gate that passes on both proved nothing about the
+    change — and that is the verdict this recording exists to show.
+    """
+    return _argv_step(wring, "verify", "--prove")
+
+
+def _deliver_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
+    """The consequence. A `gates_vacuous` bundle is refused, exit 1.
+
+    Recorded last because a refusal is only meaningful once the reader has
+    watched the thing it is refusing look fine.
+    """
+    return _argv_step(wring, "deliver")
+
+
 def _listing_step(wring: str, scratch: Path) -> tuple[str, list[str]]:
     """The receipts listing — displayed and executed as ONE string.
 
@@ -184,6 +204,8 @@ def record(command: list[str], cwd: Path, env: dict[str, str]) -> list[dict]:
 STEP_SETS = {
     "run": (_run_step, _listing_step),
     "start": (_start_step,),
+    # The agent lies, Wringer catches it: converge, prove, refuse.
+    "vacuous": (_run_step, _prove_step, _deliver_step),
 }
 
 

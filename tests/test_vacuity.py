@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import flat
 
 from wringer import cli, config, evidence, vacuity
 
@@ -432,7 +433,7 @@ def test_a_vacuous_bundle_is_refused_by_deliver(deliverable, monkeypatch,
     assert verdict_of(deliverable)["verdict"] == vacuity.GATES_VACUOUS
 
     assert cli.main(["deliver"]) == cli.EXIT_GATE_FAILED
-    message = capsys.readouterr().err
+    message = flat(capsys.readouterr().err)
 
     assert "gates_vacuous" in message
     assert "`test`" in message, "the refusal must name the insensitive gates"
@@ -744,3 +745,54 @@ def test_the_pre_change_gate_logs_are_redacted_like_every_other_bundle_file(
         and secret in path.read_text(encoding="utf-8", errors="replace")
     ]
     assert hits == [], f"the pre-change gate logs carried a live secret: {hits}"
+
+
+# --- the console has to say it too -----------------------------------------
+#
+# `vacuity.json` recorded `gates_vacuous` and `summary.md` carried the ⚠
+# block, and `wring verify --prove` printed "✓ test passed / Evidence written
+# to: …" and exited 0. Everything needed to know was on disk and nothing was
+# on the terminal.
+#
+# `template_only` is the same class and this repo already solved it there: a
+# run that PASSED but proved nothing gets a `!` line, because "an agent is the
+# reader most likely to over-read a bare `status: passed`, and it is exactly
+# the reader the terminal warning cannot reach". A vacuous run is that case
+# with a sharper edge — the gates are real, they just cannot fail.
+
+
+def test_verify_says_on_the_console_that_the_gates_proved_nothing(
+    changed, monkeypatch, capsys
+):
+    (changed / ".wringer.yaml").write_text(TAUTOLOGY, encoding="utf-8")
+    monkeypatch.chdir(changed)
+
+    assert cli.main(["verify", "--prove"]) == cli.EXIT_OK
+    # Flattened: the message is wrapped to the terminal, so a phrase can
+    # legitimately straddle a line break.
+    printed = " ".join(capsys.readouterr().out.split())
+
+    assert "proved nothing about it" in printed, (
+        "the run recorded that its gates proved nothing and the terminal "
+        "said only that they passed"
+    )
+    # The fix, not just the verdict: a refusal that says only *no* is one
+    # people learn to skip past.
+    assert "fails without your change" in printed
+    # And where the refusal will land, so it is not a surprise later.
+    assert "wring deliver` will refuse" in printed
+
+
+def test_verify_says_nothing_about_vacuity_when_it_was_not_checked(
+    changed, monkeypatch, capsys
+):
+    """SPEC_VACUITY_V0 §7: `wring verify` prints no warning when vacuity was
+    not checked. A repo that never opted in must not be nagged."""
+    (changed / ".wringer.yaml").write_text(TAUTOLOGY, encoding="utf-8")
+    monkeypatch.chdir(changed)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    printed = " ".join(capsys.readouterr().out.split())
+
+    assert "proved nothing" not in printed
+    assert vacuity.GATES_VACUOUS not in printed

@@ -151,3 +151,122 @@ export PATH
     "$WRING" start
 "$PY" "$ROOT/scripts/demo_render.py" "$ROOT/docs/start.cast.json" \
     "$ROOT/docs/start.svg" "wring start — preflight, gates, agent, receipt"
+
+# ---------------------------------------------------------------------------
+# The third recording: the agent lies, Wringer catches it.
+#
+# HEAD is GREEN. The worker is then handed a change with a real test that
+# catches a real bug, and it "fixes" the failure by making the test
+# tautological — `assert multiply(3, 4) == multiply(3, 4)`. The gates go green
+# and the loop reports convergence. The bug is still there.
+#
+# `wring verify --prove` re-runs those gates against the pre-change tree. They
+# pass there too, so they proved nothing about the change: `gates_vacuous`.
+# `wring deliver` then refuses the bundle, exit 1.
+#
+# **Why the baseline must be green.** `--prove` compares against HEAD, so it
+# catches gates that could not fail — not an agent deleting a test that was
+# already failing at HEAD, which SPEC_VACUITY_V0 §5a states as a known limit.
+# Committing the failing test would therefore record `sensitive` and tell the
+# opposite story. The tree is left DIRTY for the same reason: a clean tree
+# makes `--prove` return `not_applicable` and write no verdict at all.
+#
+# The gate is `python3 -m pytest -q` and the test imports only the repo's own
+# module, because the pre-change worktree carries TRACKED FILES ONLY — a gate
+# needing an installed dependency fails there on a missing environment, and
+# the comparison reads that failure as PROOF.
+# ---------------------------------------------------------------------------
+VACUOUS=$(scratch_dir "${1:-}" vacuous) || exit 2
+# The bare `origin` gets a scratch of its own rather than a path derived by
+# string-appending to $VACUOUS: `scratch.sh` constructs safe answers, and
+# building one by hand next to it is how that guarantee gets lost. It also
+# has to be CLEARED — a bare repo surviving from a previous run already has
+# `main`, so the push below fails and `set -eu` kills the script before the
+# recording happens.
+ORIGIN=$(scratch_dir "${1:-}" vacuous-origin) || exit 2
+for tree in "$VACUOUS" "$ORIGIN"; do
+    if [ -d "$tree" ]; then find "$tree" -mindepth 1 -delete 2>/dev/null; fi
+    mkdir -p "$tree"
+done
+cd "$VACUOUS"
+
+git init -q -b main .
+git config user.email demo@example.invalid
+git config user.name "demo"
+echo ".wringer/" > .gitignore
+
+cat > calc.py <<'EOF'
+def add(a, b):
+    return a + b
+EOF
+
+cat > test_calc.py <<'EOF'
+from calc import add
+
+
+def test_add():
+    assert add(2, 2) == 4
+EOF
+
+cat > .wringer.yaml <<'EOF'
+version: 1
+gates:
+  - id: test
+    run: "python3 -m pytest -q"
+
+run:
+  worker: "sh ./fix.sh"
+  max_iterations: 3
+
+deliver:
+  branch: "wringer/{run}"
+EOF
+
+git add -A
+git commit -qm "a calculator, and a test that passes"
+
+# A real `origin` on disk. `wring deliver` refuses when the remote's default
+# branch cannot be resolved, and that refusal would be recorded INSTEAD of the
+# vacuity one — the recording would show a true message about the wrong thing.
+git init -q --bare "$ORIGIN"
+git remote add origin "$ORIGIN"
+git push -q origin main
+git remote set-head origin -a
+
+# The change an agent is asked to land: a new function with a real bug, and a
+# real test that catches it. The gates fail here, which is what gives the loop
+# something to do.
+cat > calc.py <<'EOF'
+def add(a, b):
+    return a + b
+
+
+def multiply(a, b):
+    return a + b
+EOF
+
+cat > test_calc.py <<'EOF'
+from calc import add, multiply
+
+
+def test_add():
+    assert add(2, 2) == 4
+
+
+def test_multiply():
+    assert multiply(3, 4) == 12
+EOF
+
+# The lie. It stands in for a coding agent, as `demo.sh`'s first recording
+# does, so the demo is honest about running no agent and reproducible by
+# anyone. What it does is what matters and it is exactly what a reward-hacking
+# agent does: make the assertion true rather than the code correct.
+cat > fix.sh <<'EOF'
+sed 's/multiply(3, 4) == 12/multiply(3, 4) == multiply(3, 4)/' test_calc.py > t
+mv t test_calc.py
+EOF
+
+"$PY" "$ROOT/scripts/demo_record.py" "$VACUOUS" "$ROOT/docs/vacuous.cast.json" \
+    "$WRING" vacuous
+"$PY" "$ROOT/scripts/demo_render.py" "$ROOT/docs/vacuous.cast.json" \
+    "$ROOT/docs/vacuous.svg" "the gates went green and proved nothing"

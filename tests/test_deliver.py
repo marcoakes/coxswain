@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import flat
 
 from wringer import acquire, cli, config, deliver, evidence, forge
 
@@ -311,7 +312,7 @@ def test_an_unverified_change_gets_no_branch(delivery_repo, monkeypatch,
 
     assert cli.main(["deliver"]) == cli.EXIT_GATE_FAILED
 
-    assert "gates did not pass" in capsys.readouterr().err
+    assert "gates did not pass" in flat(capsys.readouterr().err)
     assert not (delivery_repo / deliver.DELIVERIES_DIRNAME).exists()
 
 
@@ -349,7 +350,7 @@ def test_the_base_branch_is_never_the_target(delivery_repo, monkeypatch,
 
     assert cli.main(["deliver"]) == cli.EXIT_REFUSED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "which is the base branch" in err
 
 
@@ -661,7 +662,7 @@ def test_no_git_identity_is_refused_before_the_branch_exists(
 
     assert cli.main(["deliver", "--send"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "user.email" in err
     assert "does not invent one" in err
     # and no branch was created, which is the whole point of checking early
@@ -801,7 +802,7 @@ def test_delivering_a_tree_the_gates_never_saw_is_refused(
 
     assert cli.main(["deliver", "--send"]) == cli.EXIT_GATE_FAILED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "working tree has moved" in err
     assert "code it never saw" in err
     assert git(delivery_repo, "branch", "--list").strip() == "* main"
@@ -821,7 +822,7 @@ def test_an_edit_to_an_already_changed_file_is_refused(
     # same file list as the run, different contents
     assert cli.main(["deliver", "--send"]) == cli.EXIT_GATE_FAILED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "differ from what" in err or "working tree has moved" in err
 
 
@@ -879,7 +880,7 @@ def test_deliver_base_cannot_unlock_the_default_branch(
 
     assert cli.main(["deliver"]) == cli.EXIT_REFUSED
 
-    assert "remote's default branch" in capsys.readouterr().err
+    assert "remote's default branch" in flat(capsys.readouterr().err)
 
 
 def test_a_branch_that_exists_only_on_the_remote_is_refused(

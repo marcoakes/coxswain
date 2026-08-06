@@ -1,0 +1,125 @@
+[
+ {
+  "at": 0.0,
+  "text": "$ wring run",
+  "prompt": true
+ },
+ {
+  "at": 0.7,
+  "text": ""
+ },
+ {
+  "at": 0.7,
+  "text": "iteration 1/3"
+ },
+ {
+  "at": 0.9,
+  "text": "\u2717 test failed        0.1s"
+ },
+ {
+  "at": 1.0,
+  "text": "\u2192 worker             0.0s  (exit 0)"
+ },
+ {
+  "at": 1.0,
+  "text": ""
+ },
+ {
+  "at": 1.0,
+  "text": "iteration 2/3"
+ },
+ {
+  "at": 1.2,
+  "text": "\u2713 test passed        0.1s"
+ },
+ {
+  "at": 1.2,
+  "text": ""
+ },
+ {
+  "at": 1.2,
+  "text": "Converged in 2 iterations."
+ },
+ {
+  "at": 1.2,
+  "text": "Loop evidence: .wringer/loops/20260806-205728-7d39/"
+ },
+ {
+  "at": 2.6,
+  "text": ""
+ },
+ {
+  "at": 2.7,
+  "text": "$ wring verify --prove",
+  "prompt": true
+ },
+ {
+  "at": 3.6,
+  "text": "\u2713 test passed        0.1s"
+ },
+ {
+  "at": 3.8,
+  "text": ""
+ },
+ {
+  "at": 3.8,
+  "text": "! every required gate passed without the change too (test), so they proved"
+ },
+ {
+  "at": 3.8,
+  "text": "  nothing about it \u2014 write a test that fails without your change"
+ },
+ {
+  "at": 3.8,
+  "text": "  Both trees' output: .wringer/runs/20260806-205729-e3a5/vacuity/"
+ },
+ {
+  "at": 3.8,
+  "text": "  `wring deliver` will refuse this bundle."
+ },
+ {
+  "at": 3.8,
+  "text": ""
+ },
+ {
+  "at": 3.8,
+  "text": "Evidence written to:"
+ },
+ {
+  "at": 3.8,
+  "text": ".wringer/runs/20260806-205729-e3a5/"
+ },
+ {
+  "at": 5.2,
+  "text": ""
+ },
+ {
+  "at": 5.2,
+  "text": "$ wring deliver",
+  "prompt": true
+ },
+ {
+  "at": 5.9,
+  "text": "wring deliver: refusing to deliver 20260806-205729-e3a5 \u2014 it recorded"
+ },
+ {
+  "at": 5.9,
+  "text": "`gates_vacuous`. `test` passed on the pre-change tree too, so they proved"
+ },
+ {
+  "at": 5.9,
+  "text": "nothing about this change. The fix is to write a test that fails without your"
+ },
+ {
+  "at": 5.9,
+  "text": "change, then verify again; both trees' output is in"
+ },
+ {
+  "at": 5.9,
+  "text": "20260806-205729-e3a5/vacuity/ if you want to see why. There is no flag for"
+ },
+ {
+  "at": 5.9,
+  "text": "this \u2014 make the evidence better, not the check weaker"
+ }
+]

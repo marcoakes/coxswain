@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 from wringer import (
@@ -507,10 +508,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     try:
         emission = start.emit(root, workspace=args.workspace, worker=worker)
     except start.StartError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_CONFIG
     except start.Refused as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_REFUSED
     emission.write()
 
@@ -540,7 +541,7 @@ def _start_gates(
         try:
             cfg = config.load(path)
         except config.ConfigError as exc:
-            print(f"wring start: {exc}", file=sys.stderr)
+            _fail("start", exc)
             return EXIT_CONFIG
         print(f"  {path.name} already declares: {start.gate_summary(cfg)}")
         if detect.is_untouched_template(cfg.gates):
@@ -712,7 +713,7 @@ def _start_clone(here: Path, url: str, workspace: str | None) -> int:
             else None
         )
     except config.ConfigError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_CONFIG
 
     if workspace is None and cfg_workspace is None:
@@ -733,10 +734,10 @@ def _start_clone(here: Path, url: str, workspace: str | None) -> int:
     try:
         emission = start.emit(root, workspace=workspace)
     except start.StartError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_CONFIG
     except start.Refused as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_REFUSED
     emission.write()
 
@@ -748,7 +749,7 @@ def _start_clone(here: Path, url: str, workspace: str | None) -> int:
         acquired = acquire.clone(url, target)
         manifest = acquire.record(root, acquired)
     except acquire.AcquireError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_CONFIG
 
     print(start.fit(f"  cloned {acquired.origin}"))
@@ -846,13 +847,13 @@ def _start_build(root: Path, worker: config.AcpWorker | None) -> int:
         cfg = config.load(root / config.CONFIG_FILENAME)
         planned = verify.plan(cfg, None)
     except config.ConfigError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_CONFIG
 
     try:
         outcome = verify.run(root, cfg, planned, on_gate=_report_gate)
     except evidence.EvidenceError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return EXIT_CONFIG
 
     if outcome.interrupted is not None:
@@ -918,7 +919,7 @@ def _start_repair(
             on_worker=_report_worker,
         )
     except evidence.EvidenceError as exc:
-        print(f"wring start: {exc}", file=sys.stderr)
+        _fail("start", exc)
         return None
     _report_loop(loop_outcome, root)
     # The loop's own final verification is the one that counts; without it the
@@ -1119,7 +1120,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         cfg = config.load(root / config.CONFIG_FILENAME)
         planned = verify.plan(cfg, args.gate)
     except config.ConfigError as exc:
-        print(f"wring verify: {exc}", file=sys.stderr)
+        _fail("verify", exc)
         return EXIT_CONFIG
 
     try:
@@ -1136,7 +1137,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             prove=args.prove,
         )
     except evidence.EvidenceError as exc:
-        print(f"wring verify: {exc}", file=sys.stderr)
+        _fail("verify", exc)
         return EXIT_CONFIG
 
     if args.json:
@@ -1155,6 +1156,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             outcome.failed_gate,
             outcome.status,
             template_only=outcome.template_only,
+            vacuity_result=outcome.vacuity,
         )
 
     if outcome.interrupted is not None:
@@ -1174,7 +1176,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         cfg = config.load(root / config.CONFIG_FILENAME)
         verify.plan(cfg, None)  # fail on a broken gate list before any work
     except config.ConfigError as exc:
-        print(f"wring run: {exc}", file=sys.stderr)
+        _fail("run", exc)
         return EXIT_CONFIG
 
     if cfg.run is None:
@@ -1211,7 +1213,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             prove=args.prove,
         )
     except evidence.EvidenceError as exc:
-        print(f"wring run: {exc}", file=sys.stderr)
+        _fail("run", exc)
         return EXIT_CONFIG
 
     if args.json:
@@ -1308,7 +1310,7 @@ def cmd_fleet(args: argparse.Namespace) -> int:
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
     except config.ConfigError as exc:
-        print(f"wring fleet: {exc}", file=sys.stderr)
+        _fail("fleet", exc)
         return EXIT_CONFIG
 
     if cfg.fleet is None:
@@ -1325,7 +1327,7 @@ def cmd_fleet(args: argparse.Namespace) -> int:
     try:
         tasks = fleet.load_tasks(Path(args.tasks))
     except fleet.FleetError as exc:
-        print(f"wring fleet: {exc}", file=sys.stderr)
+        _fail("fleet", exc)
         return EXIT_CONFIG
 
     if not args.json:
@@ -1337,7 +1339,7 @@ def cmd_fleet(args: argparse.Namespace) -> int:
     try:
         outcome = fleet.run(root, cfg, tasks)
     except fleet.FleetError as exc:
-        print(f"wring fleet: {exc}", file=sys.stderr)
+        _fail("fleet", exc)
         return EXIT_CONFIG
 
     if args.json:
@@ -1385,7 +1387,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         cfg = config.load(root / config.CONFIG_FILENAME)
         verify.plan(cfg, None)
     except config.ConfigError as exc:
-        print(f"wring resume: {exc}", file=sys.stderr)
+        _fail("resume", exc)
         return EXIT_CONFIG
 
     if cfg.run is None:
@@ -1414,7 +1416,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     try:
         resumable = loop.inspect_for_resume(loop_dir)
     except evidence.EvidenceError as exc:
-        print(f"wring resume: {exc}", file=sys.stderr)
+        _fail("resume", exc)
         return EXIT_CONFIG
 
     if resumable is None:
@@ -1444,7 +1446,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
             resuming=resumable,
         )
     except evidence.EvidenceError as exc:
-        print(f"wring resume: {exc}", file=sys.stderr)
+        _fail("resume", exc)
         return EXIT_CONFIG
 
     if args.json:
@@ -1481,7 +1483,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
     except config.ConfigError as exc:
-        print(f"wring judge: {exc}", file=sys.stderr)
+        _fail("judge", exc)
         return EXIT_CONFIG
 
     if cfg.judge is None:
@@ -1504,7 +1506,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
     try:
         loaded = rubric.load(Path(args.rubric or cfg.judge.rubric), root)
     except rubric.RubricError as exc:
-        print(f"wring judge: {exc}", file=sys.stderr)
+        _fail("judge", exc)
         return EXIT_CONFIG
 
     redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
@@ -1514,7 +1516,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
     try:
         passed, failed_gate = judge.gates_passed(run_dir)
     except judge.JudgeError as exc:
-        print(f"wring judge: {exc}", file=sys.stderr)
+        _fail("judge", exc)
         return EXIT_CONFIG
 
     if not passed:
@@ -1539,7 +1541,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
     try:
         packet = judge.build_packet(run_dir, loaded)
     except judge.JudgeError as exc:
-        print(f"wring judge: {exc}", file=sys.stderr)
+        _fail("judge", exc)
         return EXIT_CONFIG
 
     request = judge.render_request(
@@ -1554,7 +1556,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
     try:
         bundle = judge.Bundle.create(root / judge.VERDICTS_DIRNAME, redactor=redactor)
     except judge.JudgeError as exc:
-        print(f"wring judge: {exc}", file=sys.stderr)
+        _fail("judge", exc)
         return EXIT_CONFIG
 
     # Written before any transport is consulted: what would leave the machine
@@ -1675,7 +1677,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
     except config.ConfigError as exc:
-        print(f"wring spec: {exc}", file=sys.stderr)
+        _fail("spec", exc)
         return EXIT_CONFIG
 
     if cfg.judge is None:
@@ -1701,7 +1703,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
     try:
         prd = spec.read_prd(Path(args.prd), root, redactor)
     except spec.SpecError as exc:
-        print(f"wring spec: {exc}", file=sys.stderr)
+        _fail("spec", exc)
         return EXIT_CONFIG
 
     target = root / spec.SPEC_FILENAME
@@ -1738,7 +1740,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
     try:
         bundle = spec.Bundle.create(root / spec.SPECS_DIRNAME, redactor=redactor)
     except spec.SpecError as exc:
-        print(f"wring spec: {exc}", file=sys.stderr)
+        _fail("spec", exc)
         return EXIT_CONFIG
 
     bundle.write_request(request)
@@ -1847,7 +1849,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     try:
         loaded = spec.load(root / spec.SPEC_FILENAME)
     except spec.SpecError as exc:
-        print(f"wring plan: {exc}", file=sys.stderr)
+        _fail("plan", exc)
         return EXIT_CONFIG
 
     if not loaded.approved:
@@ -1883,7 +1885,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     try:
         writes, brief_paths = _plan_writes(loaded, root)
     except spec.SpecError as exc:
-        print(f"wring plan: {exc}", file=sys.stderr)
+        _fail("plan", exc)
         return EXIT_CONFIG
 
     for path, body in writes:
@@ -2040,7 +2042,7 @@ def cmd_get(args: argparse.Namespace) -> int:
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
     except config.ConfigError as exc:
-        print(f"wring get: {exc}", file=sys.stderr)
+        _fail("get", exc)
         return EXIT_CONFIG
 
     if cfg.workspace is None and not args.into:
@@ -2060,7 +2062,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         acquired = acquire.clone(args.url, target)
         manifest = acquire.record(root, acquired)
     except acquire.AcquireError as exc:
-        print(f"wring get: {exc}", file=sys.stderr)
+        _fail("get", exc)
         return EXIT_CONFIG
 
     print(f"Cloned {acquired.origin}\n  into {acquired.directory}")
@@ -2081,7 +2083,7 @@ def cmd_issue(args: argparse.Namespace) -> int:
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
     except config.ConfigError as exc:
-        print(f"wring issue: {exc}", file=sys.stderr)
+        _fail("issue", exc)
         return EXIT_CONFIG
 
     if cfg.forge is None:
@@ -2116,7 +2118,7 @@ def cmd_issue(args: argparse.Namespace) -> int:
             cfg.forge, number, os.environ.get(cfg.forge.token_env or "")
         )
     except forge.ForgeError as exc:
-        print(f"wring issue: {exc}", file=sys.stderr)
+        _fail("issue", exc)
         return EXIT_CONFIG
 
     target = root / settings.issues_dir / f"{fetched.number}.md"
@@ -2159,7 +2161,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
     try:
         cfg = config.load(root / config.CONFIG_FILENAME)
     except config.ConfigError as exc:
-        print(f"wring deliver: {exc}", file=sys.stderr)
+        _fail("deliver", exc)
         return EXIT_CONFIG
 
     if cfg.deliver is None:
@@ -2185,10 +2187,10 @@ def cmd_deliver(args: argparse.Namespace) -> int:
     try:
         planned = deliver.plan(root, cfg, run_dir, run_dir.name, args.task)
     except deliver.Refused as exc:
-        print(f"wring deliver: {exc}", file=sys.stderr)
+        _fail("deliver", exc)
         return exc.exit_code
     except deliver.DeliverError as exc:
-        print(f"wring deliver: {exc}", file=sys.stderr)
+        _fail("deliver", exc)
         return EXIT_CONFIG
 
     try:
@@ -2196,7 +2198,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
             root / deliver.DELIVERIES_DIRNAME, redactor=redactor
         )
     except deliver.DeliverError as exc:
-        print(f"wring deliver: {exc}", file=sys.stderr)
+        _fail("deliver", exc)
         return EXIT_CONFIG
 
     # Written before anything runs: what would happen is auditable rather than
@@ -2216,7 +2218,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
             # bundle without digests is one `wring audit` has to refuse. The
             # failure path gets the same treatment as the happy one.
             bundle.write_digests()
-            print(f"wring deliver: {exc}", file=sys.stderr)
+            _fail("deliver", exc)
             return EXIT_CONFIG
 
         opened = _open_merge_request(cfg, bundle, planned, root)
@@ -2389,10 +2391,10 @@ def cmd_attest(args: argparse.Namespace) -> int:
     try:
         built = attest.build(root, anchor)
     except attest.Refused as exc:
-        print(f"wring attest: {exc}", file=sys.stderr)
+        _fail("attest", exc)
         return EXIT_GATE_FAILED
     except attest.AttestError as exc:
-        print(f"wring attest: {exc}", file=sys.stderr)
+        _fail("attest", exc)
         return EXIT_CONFIG
 
     bundle = attest.Bundle.create(root, built.payload["attestation_id"])
@@ -2445,7 +2447,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     try:
         report = attest.audit(path)
     except attest.AttestError as exc:
-        print(f"wring audit: {exc}", file=sys.stderr)
+        _fail("audit", exc)
         return EXIT_CONFIG
 
     if args.json:
@@ -2507,7 +2509,7 @@ def cmd_explain(args: argparse.Namespace) -> int:
         recorded = evidence.read_events(run_dir)
         rows = evidence.read_gate_results(run_dir)
     except evidence.EvidenceError as exc:
-        print(f"wring explain: {exc}", file=sys.stderr)
+        _fail("explain", exc)
         return EXIT_CONFIG
 
     _explain(run_dir, manifest, recorded, rows)
@@ -2789,6 +2791,7 @@ def _report_run(
     failed_gate: str | None,
     status: str = "passed",
     template_only: bool = False,
+    vacuity_result: object | None = None,
 ) -> None:
     if status == "interrupted":
         print("\n✗ interrupted — the run stopped before every gate finished")
@@ -2806,6 +2809,7 @@ def _report_run(
             "\n  Replace it with the commands that prove your change is"
             "\n  mergeable."
         )
+    _report_vacuity(vacuity_result, bundle, root)
 
     shown = _bundle_path(bundle, root)
     print(f"\nEvidence written to:\n{shown}/")
@@ -2815,6 +2819,92 @@ def _report_run(
             f"\nNext:\n  open {shown}/summary.md\n"
             f"  rerun wring verify --gate {failed_gate}"
         )
+
+
+def _report_vacuity(
+    result: object | None, bundle: evidence.Bundle, root: Path
+) -> None:
+    """Say on the TERMINAL what the prove pass decided.
+
+    `vacuity.json` recorded `gates_vacuous` and `summary.md` carried the
+    warning, and the console printed "✓ test passed" and exited 0.
+    Everything a reader needed was on disk and none of it was in front of
+    them — and `wring deliver` would refuse the bundle much later, for a
+    reason nothing had mentioned.
+
+    `template_only` is the same class and this file already solved it
+    there: a run that PASSED while proving nothing gets a `!` line. This
+    is that case with a sharper edge, because the gates are real and just
+    cannot fail.
+
+    Silent on `proven`, and silent when no prove pass ran at all —
+    SPEC_VACUITY_V0 §7 is explicit that a repo which never opted in must
+    not be nagged.
+    """
+    from wringer import vacuity as vacuity_module
+
+    if result is None:
+        return
+    verdict = getattr(result, "verdict", None)
+    if verdict in (None, vacuity_module.PROVEN, vacuity_module.NOT_APPLICABLE):
+        return
+
+    # Wrapped rather than hand-broken: the reason names the insensitive
+    # gates, so its length depends on the repo. A line that runs past the
+    # terminal is also a line the demo canvas cannot draw.
+    print(
+        "\n! "
+        + textwrap.fill(
+            str(getattr(result, "reason", verdict)),
+            width=78,
+            subsequent_indent="  ",
+        )
+    )
+    if verdict == vacuity_module.GATES_VACUOUS:
+        where = f"{_bundle_path(bundle, root)}/{vacuity_module.VACUITY_DIRNAME}"
+        print(f"  Both trees' output: {where}/")
+        print("  `wring deliver` will refuse this bundle.")
+
+
+def _wrap_message(text: str, width: int = 78) -> str:
+    """Reflow a message to fit a terminal, without flattening its structure.
+
+    Every refusal in this program is composed as prose, and `wring deliver`'s
+    vacuity refusal rendered as a single **402-column line** — four times past
+    the edge of any terminal, in a message whose entire job is to be read and
+    acted on.
+
+    Line-by-line rather than `textwrap.fill` over the whole string, because
+    about half of these messages carry an indented example the reader is meant
+    to copy — a `judge:` stanza, a `git remote set-head` command. An INDENTED
+    line is structure and is left exactly as it is; an unindented one is prose
+    and gets reflowed. Blank lines survive, because they separate the prose
+    from the thing to copy.
+
+    Long words are never broken: a path or a URL split across two lines is a
+    path nobody can paste.
+    """
+    lines: list[str] = []
+    for line in text.split("\n"):
+        if not line.strip():
+            lines.append("")
+        elif line[:1].isspace():
+            lines.append(line)
+        else:
+            lines.extend(
+                textwrap.fill(
+                    line,
+                    width=width,
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                ).split("\n")
+            )
+    return "\n".join(lines)
+
+
+def _fail(command: str, message: object) -> None:
+    """The one way this CLI reports a refusal or an error to stderr."""
+    print(_wrap_message(f"wring {command}: {message}"), file=sys.stderr)
 
 
 def _print_tail(path: Path, label: str) -> None:

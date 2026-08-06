@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import flat
 
 from wringer import attest, cli, deliver, evidence, judge
 
@@ -355,7 +356,7 @@ def test_attest_refuses_a_bundle_with_no_digests(project, monkeypatch, capsys):
     (only(project, ".wringer", "runs") / evidence.DIGESTS_FILENAME).unlink()
 
     assert cli.main(["attest"]) == cli.EXIT_GATE_FAILED
-    assert "cannot attest what cannot be checked" in capsys.readouterr().err
+    assert "cannot attest what cannot be checked" in flat(capsys.readouterr().err)
 
 
 def test_attest_refuses_a_bundle_whose_digest_no_longer_matches(
@@ -447,7 +448,7 @@ def test_attest_refuses_a_vacuous_run(project, monkeypatch, capsys):
     evidence.digest_directory(run_dir)
 
     assert cli.main(["attest"]) == cli.EXIT_GATE_FAILED
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "gates_vacuous" in err
     assert "test that fails without your change" in err
 
@@ -574,7 +575,7 @@ def test_flipping_one_byte_in_one_gate_log_names_that_file_and_fails(
     log.write_bytes(bytes(raw))
 
     assert cli.main(["audit", str(attested(project))]) == cli.EXIT_GATE_FAILED
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert log.name in err, err
     assert "does not match" in err
 
@@ -799,7 +800,7 @@ def test_the_committed_pre_0_2_example_bundle_is_refused(project, monkeypatch,
     monkeypatch.chdir(project)
 
     assert cli.main(["attest", str(target)]) == cli.EXIT_GATE_FAILED
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "cannot attest what cannot be checked" in err
     assert "digests.json" in err
 

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from conftest import flat
 
 from wringer import cli, spec
 
@@ -377,7 +378,7 @@ def test_an_oversized_prd_is_refused(repo, monkeypatch, capsys):
 
     assert cli.main(["spec", "PRD.md"]) == cli.EXIT_CONFIG
 
-    assert "these bytes travel" in capsys.readouterr().err
+    assert "these bytes travel" in flat(capsys.readouterr().err)
 
 
 def test_an_empty_prd_is_refused(repo, monkeypatch, capsys):
@@ -665,7 +666,7 @@ def test_criteria_too_large_to_be_a_rubric_are_refused_at_draft_time(
 
     assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
 
-    assert "these bytes travel" in capsys.readouterr().err
+    assert "these bytes travel" in flat(capsys.readouterr().err)
     assert not (repo / spec.SPEC_FILENAME).exists()
 
 

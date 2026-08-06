@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from conftest import flat
 
 from wringer import cli, config, fleet, rubric, spec
 
@@ -327,7 +328,7 @@ def test_a_brief_reached_through_a_symlink_is_refused(repo, tmp_path_factory,
 
     assert cli.main(["plan"]) == cli.EXIT_CONFIG
 
-    assert "outside the repository" in capsys.readouterr().err
+    assert "outside the repository" in flat(capsys.readouterr().err)
     assert not (outside / "csv-export.md").exists()
 
 
@@ -538,7 +539,7 @@ def test_a_symlinked_rubric_cannot_reach_outside_the_repo(
 
     assert cli.main(["plan"]) == cli.EXIT_CONFIG
 
-    assert "outside the repository" in capsys.readouterr().err
+    assert "outside the repository" in flat(capsys.readouterr().err)
     assert outside.read_text(encoding="utf-8") == "not ours\n"
 
 
