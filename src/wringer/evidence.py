@@ -296,6 +296,52 @@ def hash_untracked(root: Path, paths: Iterable[str]) -> dict[str, str]:
     return entries
 
 
+def digest_directory(directory: Path) -> Path:
+    """Hash every file in `directory`, into a sibling `digests.json`.
+
+    **Written last**, so it covers everything else — including
+    `manifest.json` and `summary.md`. It cannot cover itself, which is the
+    one thing a reader must understand: `digests.json` proves the bundle has
+    not changed *around* it, and a chained ledger proves the ledger. Neither
+    proves the digest file itself, and nothing on a disk its owner controls
+    could. That is tamper-EVIDENCE, and it is what turns a silent edit into a
+    detectable one.
+
+    A free function rather than a method because five bundle types need it and
+    they are five unrelated dataclasses. Only the verify bundle had it until
+    now, which would have made `wring attest` refuse every judged, delivered
+    or looped clause it was built to make — its own rule is *cannot attest
+    what cannot be checked*, and there was nothing to check with.
+
+    Paths are POSIX and bundle-relative so a digest computed on Linux matches
+    one computed on macOS.
+    """
+    entries: dict[str, str] = {}
+    for path in sorted(directory.rglob("*")):
+        if not path.is_file() or path.name == DIGESTS_FILENAME:
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(65536), b""):
+                digest.update(chunk)
+        entries[path.relative_to(directory).as_posix()] = digest.hexdigest()
+
+    target = directory / DIGESTS_FILENAME
+    target.write_text(
+        json.dumps(
+            {
+                "schema_version": DIGESTS_SCHEMA_VERSION,
+                "algorithm": "sha256",
+                "files": entries,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
 def read_manifest(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / MANIFEST_FILENAME)
 
@@ -636,45 +682,8 @@ class Bundle:
         return path
 
     def write_digests(self) -> Path:
-        """Hash every file in the bundle, into a sibling `digests.json`.
-
-        **Written last**, so it covers everything else — including
-        `manifest.json` and `summary.md`. It cannot cover itself, which is the
-        one thing a reader must understand: `digests.json` proves the bundle
-        has not changed *around* it, and a chained ledger proves the ledger.
-        Neither proves the digest file itself, and nothing on a disk its owner
-        controls could. That is tamper-EVIDENCE, and it is what turns a silent
-        edit into a detectable one.
-
-        Paths are POSIX and repo-bundle-relative so a digest computed on Linux
-        matches one computed on macOS.
-        """
-        import hashlib
-
-        entries: dict[str, str] = {}
-        for path in sorted(self.directory.rglob("*")):
-            if not path.is_file() or path.name == DIGESTS_FILENAME:
-                continue
-            digest = hashlib.sha256()
-            with path.open("rb") as stream:
-                for chunk in iter(lambda: stream.read(65536), b""):
-                    digest.update(chunk)
-            entries[path.relative_to(self.directory).as_posix()] = digest.hexdigest()
-
-        target = self.directory / DIGESTS_FILENAME
-        target.write_text(
-            json.dumps(
-                {
-                    "schema_version": DIGESTS_SCHEMA_VERSION,
-                    "algorithm": "sha256",
-                    "files": entries,
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        return target
+        """Hash every file in this bundle, into a sibling `digests.json`."""
+        return digest_directory(self.directory)
 
     def write_manifest(
         self, state: RepoState, status: str, failed_gate: str | None

@@ -208,6 +208,10 @@ class Bundle:
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
 
+    def write_digests(self) -> Path:
+        """Hash every file in this fleet bundle. **Written last.**"""
+        return evidence.digest_directory(self.directory)
+
     def write_summary(self, states: list[TaskState], satisfied: bool) -> None:
         counts = _counts(states)
         lines = [
@@ -341,6 +345,7 @@ def run(
     )
     bundle.write_manifest(settings, states, satisfied)
     bundle.write_summary(states, satisfied)
+    bundle.write_digests()  # LAST, so it covers the manifest and the summary
 
     return Outcome(
         directory=bundle.directory,

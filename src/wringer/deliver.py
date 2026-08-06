@@ -649,7 +649,7 @@ def _mr_body(
     else:
         lines.append("_No gate results were recorded._")
 
-    verdict = _verdict(root)
+    verdict = _verdict(root, run_dir)
     if verdict:
         lines += ["", "## Judge", "", verdict]
 
@@ -674,19 +674,56 @@ def _mr_body(
     return "\n".join(lines)
 
 
-def _verdict(root: Path) -> str | None:
+def _verdict(root: Path, run_dir: Path) -> str | None:
+    """The judge's verdict **about this run**, or None.
+
+    This used to take whichever verdict was newest and match it to nothing.
+    In a repo where anything is judged more than once — which is every repo
+    that uses `wring judge` at all — the merge request could carry a verdict
+    reached against different code, presented as if it were about the change
+    being proposed. A verdict about another change is worse than no verdict:
+    no verdict says nothing, and the wrong one makes a false claim in the one
+    artifact a human reads before approving a push.
+
+    Matched on the verdict's own `evidence_dir`, which `wring judge` records
+    as the run directory relative to the repo root. Both spellings are
+    accepted because a caller can name a run either way.
+    """
     from wringer import judge
 
     root_dir = root / judge.VERDICTS_DIRNAME
-    found = evidence.latest_run(root_dir) if root_dir.is_dir() else None
-    if found is None:
+    if not root_dir.is_dir():
         return None
+
+    wanted = {str(run_dir), run_dir.name}
     try:
-        recorded = json.loads(
-            (found / judge.VERDICT_FILENAME).read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError):
+        wanted.add(run_dir.relative_to(root).as_posix())
+    except ValueError:
+        pass
+
+    matching = []
+    for candidate in root_dir.iterdir():
+        if not candidate.is_dir():
+            continue
+        try:
+            recorded = json.loads(
+                (candidate / judge.VERDICT_FILENAME).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(recorded, dict):
+            continue
+        named = recorded.get("evidence_dir")
+        if not isinstance(named, str):
+            continue
+        if named in wanted or Path(named).name == run_dir.name:
+            matching.append((candidate, recorded))
+    if not matching:
         return None
+
+    # Newest FIRST among those about this run: judging twice is ordinary, and
+    # the later verdict is the one that stands.
+    found, recorded = max(matching, key=lambda pair: evidence._started_at(pair[0]))
     if not recorded.get("verdict"):
         return None
     note = f" — {recorded['note']}" if recorded.get("note") else ""
@@ -767,6 +804,14 @@ class Bundle:
             return path.read_text(encoding="utf-8")
         except OSError:
             return planned.commit_message
+
+    def write_digests(self) -> Path:
+        """Hash every file in this delivery bundle. **Written last.**
+
+        The attestation's `delivered_as` clause names this bundle; without a
+        digest file the clause could be made and never checked.
+        """
+        return evidence.digest_directory(self.directory)
 
     def write_manifest(
         self, mode: str, planned: Plan, delivered: dict[str, Any]

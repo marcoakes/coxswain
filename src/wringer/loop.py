@@ -165,6 +165,10 @@ class Bundle:
         path.write_text(self.redactor.scrub(text), encoding="utf-8")
         return path
 
+    def write_digests(self) -> Path:
+        """Hash every file in this loop bundle. **Written last.**"""
+        return evidence.digest_directory(self.directory)
+
     def write_manifest(
         self,
         state: git.RepoState,
@@ -640,6 +644,7 @@ def run(
         final_run=final_run,
     )
     _write_summary(bundle, state, status, reason, iterations, final_run)
+    bundle.write_digests()  # LAST, so it covers the manifest and the summary
 
     return Outcome(
         directory=bundle.directory,

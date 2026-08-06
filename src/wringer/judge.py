@@ -438,6 +438,16 @@ class Bundle:
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         return path
 
+    def write_digests(self) -> Path:
+        """Hash every file in this verdict bundle. **Written last.**
+
+        `wring attest` names the rubric a change was judged against and claims
+        the verdict backing it is unaltered. Without this file that claim has
+        nothing to rest on, and attest's own rule — *cannot attest what cannot
+        be checked* — would refuse every `judged_by` clause it exists to make.
+        """
+        return evidence.digest_directory(self.directory)
+
     def write_summary(
         self, mode: str, evidence_dir: str, rubric: Rubric, verdict: Verdict
     ) -> Path:

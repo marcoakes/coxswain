@@ -871,6 +871,9 @@ def cmd_judge(args: argparse.Namespace) -> int:
         mode, shown, loaded, cfg.judge.endpoint, cfg.judge.model, verdict, duration_ms
     )
     bundle.write_summary(mode, shown, loaded, verdict)
+    # LAST, so it covers verdict.json, request.json and the summary — the
+    # three files `wring attest` names when it makes a `judged_by` clause.
+    bundle.write_digests()
 
     if args.json:
         print(
@@ -1487,6 +1490,10 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         except deliver.DeliverError as exc:
             bundle.event("delivery.failed", why=str(exc))
             bundle.write_manifest(mode, planned, delivered)
+            # A failed delivery is still a bundle somebody may audit, and a
+            # bundle without digests is one `wring audit` has to refuse. The
+            # failure path gets the same treatment as the happy one.
+            bundle.write_digests()
             print(f"wring deliver: {exc}", file=sys.stderr)
             return EXIT_CONFIG
 
@@ -1495,6 +1502,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
             delivered["merge_request"] = opened
 
     bundle.write_manifest(mode, planned, delivered)
+    bundle.write_digests()  # LAST, so it covers the manifest
 
     if args.json:
         print(
