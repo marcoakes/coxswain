@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from wringer import config, gates
+from wringer.redact import Redactor
 
 SCHEMA_VERSION = "wringer.vacuity.v1"
 VACUITY_FILENAME = "vacuity.json"
@@ -135,13 +136,24 @@ def prove(
     results: list[gates.GateResult],
     bundle_dir: Path,
     dirty: bool,
+    redactor: Redactor | None = None,
 ) -> Result:
     """Run the declared gates against the pre-change tree and compare.
 
     Called only when every required gate has already passed — there is nothing
     to prove about a failure, which is law 3's shape.
+
+    `redactor` reaches every gate run below. It was missing, and these logs
+    land INSIDE the run bundle — so the pre-change half of a `--prove` run
+    was the one set of bundle files written with no scrubbing at all, not
+    even the default `*TOKEN*`/`*SECRET*`/`*KEY*` patterns. SECURITY.md and
+    AGENTS.md both say redaction happens before the write, and that every
+    bundle file goes through the Bundle's redactor; this is the path that
+    did not.
     """
     from wringer import fleet
+
+    redactor = redactor or Redactor()
 
     if not dirty:
         return not_applicable(
@@ -175,7 +187,7 @@ def prove(
 
     prove_started = time.monotonic()
     try:
-        setup = _run_setup(cfg, worktree, logs)
+        setup = _run_setup(cfg, worktree, logs, redactor)
         if setup is not None and not setup["ok"]:
             return Result(
                 verdict=INCONCLUSIVE,
@@ -200,7 +212,9 @@ def prove(
                 # not decide the outcome, so its sensitivity cannot make a
                 # green tick mean more or less than it did.
                 continue
-            row = _compare(gate, index, changed, worktree, logs, bundle_dir)
+            row = _compare(
+                gate, index, changed, worktree, logs, bundle_dir, redactor
+            )
             rows.append(row)
     finally:
         # Pass, fail or Ctrl-C — the scratch tree goes.
@@ -247,7 +261,7 @@ def prove(
 
 
 def _run_setup(
-    cfg: config.Config, worktree: Path, logs: Path
+    cfg: config.Config, worktree: Path, logs: Path, redactor: Redactor
 ) -> dict[str, Any] | None:
     """`run.prove_setup` in the scratch worktree, if the repo declared one."""
     command = cfg.run.prove_setup if cfg.run is not None else None
@@ -261,6 +275,7 @@ def _run_setup(
         cwd=worktree,
         stdout_path=logs / "prove_setup.stdout.log",
         stderr_path=logs / "prove_setup.stderr.log",
+        redactor=redactor,
     )
     return {
         "command": command,
@@ -278,11 +293,16 @@ def _compare(
     worktree: Path,
     logs: Path,
     bundle_dir: Path,
+    redactor: Redactor,
 ) -> GateRow:
     stdout_path = logs / f"{index:03d}_{gate.id}.stdout.log"
     stderr_path = logs / f"{index:03d}_{gate.id}.stderr.log"
     pre = gates.run(
-        gate, cwd=worktree, stdout_path=stdout_path, stderr_path=stderr_path
+        gate,
+        cwd=worktree,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        redactor=redactor,
     )
     sensitive = changed.passed and not pre.passed
     return GateRow(

@@ -229,7 +229,11 @@ def run(
             )
         else:
             proved = vacuity.prove(
-                root, cfg, planned, results, bundle.directory, state.dirty
+                root, cfg, planned, results, bundle.directory, state.dirty,
+                # The pre-change gates write into THIS bundle, so they get
+                # this bundle's redactor. Without it they were the one set of
+                # bundle files written with no scrubbing at all.
+                redactor=bundle.redactor,
             )
         bundle.event(
             "vacuity.finished", verdict=proved.verdict, reason=proved.reason

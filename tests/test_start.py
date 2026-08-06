@@ -1095,3 +1095,57 @@ def test_every_line_a_successful_launch_prints_fits_the_canvas(
         f"{len(too_wide)} line(s) overflow the {start.CONSOLE_WIDTH}-column "
         f"canvas: {too_wide[:3]}"
     )
+
+
+# --- a key the user wrote, even an empty one, is theirs --------------------
+
+WROTE_EMPTY_KEYS = """\
+version: 1
+gates:
+  - id: mine
+    run: "true"
+
+workspace:
+run:
+"""
+
+
+def top_level_keys(text: str) -> list[str]:
+    """Every top-level key IN THE BYTES, duplicates included.
+
+    `yaml.safe_load` cannot answer this: it silently keeps the last of a
+    duplicated key, which is exactly how a second `run:` looked correct.
+    """
+    node = yaml.compose(text)
+    if node is None or not isinstance(node.value, list):
+        return []
+    return [key.value for key, _ in node.value]
+
+
+def test_an_empty_key_the_user_wrote_is_refused_not_shadowed(repo):
+    """§3d — the wizard adds only ABSENT sections and refuses rather than
+    rewriting one the user wrote. An empty `run:` parses as absent, so the
+    emitter appended a second one: the file ended with two top-level `run:`
+    keys, PyYAML kept the last (ours), and the round-trip check passed because
+    it still parsed. The user's own line was silently overridden — which is
+    the thing exit 3 exists to prevent."""
+    (repo / config.CONFIG_FILENAME).write_text(WROTE_EMPTY_KEYS, encoding="utf-8")
+
+    with pytest.raises(start.Refused):
+        start.emit(repo, workspace="../work")
+    with pytest.raises(start.Refused):
+        start.emit(repo, worker=config.AcpWorker(command="x"))
+
+    assert (repo / config.CONFIG_FILENAME).read_text("utf-8") == WROTE_EMPTY_KEYS
+
+
+def test_no_emitted_config_ever_repeats_a_top_level_key(repo):
+    """The general property, not just the case that was found. A config with a
+    duplicated key is one whose meaning depends on which parser reads it."""
+    for body in (MINIMAL, HAND_WRITTEN):
+        (repo / config.CONFIG_FILENAME).write_text(body, encoding="utf-8")
+        emission = start.emit(
+            repo, worker=config.AcpWorker(command="x", env_passthrough=("K",))
+        )
+        keys = top_level_keys(emission.text)
+        assert len(keys) == len(set(keys)), f"duplicated: {keys}"

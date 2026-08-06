@@ -708,3 +708,39 @@ def test_the_scratch_worktree_is_gone_after_a_ctrl_c(changed, monkeypatch,
     assert not (changed / ".wringer" / "worktrees").exists() or not list(
         (changed / ".wringer" / "worktrees").iterdir()
     )
+
+
+def test_the_pre_change_gate_logs_are_redacted_like_every_other_bundle_file(
+    repo, write_config, monkeypatch, capsys
+):
+    """`--prove` runs the gates a second time, in a scratch worktree, and
+    writes their output INTO the run bundle — through `gates.run` with no
+    redactor at all, so the default `*TOKEN*`/`*SECRET*`/`*KEY*` patterns did
+    not apply either. SECURITY.md and AGENTS.md both say redaction happens
+    before the write and that every bundle file goes through the Bundle's
+    redactor. These did not."""
+    secret = "notarealtoken-6b1f09c7d2e4a583"
+    monkeypatch.setenv("WRINGER_PROVE_TOKEN", secret)
+    write_config(
+        repo,
+        'version: 1\n'
+        'gates:\n'
+        '  - id: leaky\n'
+        '    run: "echo $WRINGER_PROVE_TOKEN"\n'
+        'run:\n'
+        '  worker: "true"\n'
+        '  prove: true\n',
+    )
+    (repo / "change.txt").write_text("a change to prove something about\n", "utf-8")
+    monkeypatch.chdir(repo)
+
+    cli.main(["verify"])
+    capsys.readouterr()
+
+    hits = [
+        path.relative_to(repo).as_posix()
+        for path in (repo / ".wringer").rglob("*")
+        if path.is_file()
+        and secret in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert hits == [], f"the pre-change gate logs carried a live secret: {hits}"

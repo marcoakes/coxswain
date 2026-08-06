@@ -165,17 +165,31 @@ def emit(
             # the message worse rather than better.
             raise StartError(str(exc)) from exc
 
+    # Which keys the user WROTE, read from the bytes rather than from the
+    # parsed config. The two answer different questions and the difference is
+    # a defect: an empty `run:` parses as absent, so appending a second one
+    # left the file with two top-level `run:` keys. PyYAML keeps the last —
+    # ours — so the round-trip check passed and the user's own line was
+    # silently overridden, which is exactly what exit 3 exists to prevent.
+    written = _declared_keys(base)
+
     added: list[str] = []
     already: list[str] = []
     text = base
 
     if workspace is not None:
         wanted = workspace.strip()
-        if current.workspace is None:
+        if "workspace" not in written:
             text = _append(text, _WORKSPACE_NOTE, _render({"workspace": wanted}))
             added.append("workspace")
         elif current.workspace == wanted:
             already.append("workspace")
+        elif current.workspace is None:
+            raise Refused(
+                f"{path.name} has a 'workspace:' line with nothing after it. "
+                "That is yours, so this command will not write over it or "
+                "around it — fill it in, or delete the line and run again"
+            )
         else:
             raise Refused(
                 f"{path.name} already declares 'workspace: {current.workspace}' "
@@ -185,11 +199,17 @@ def emit(
             )
 
     if worker is not None:
-        if current.run is None:
+        if "run" not in written:
             text = _append(text, _RUN_NOTE, worker_stanza(worker))
             added.append("run")
-        elif current.run.worker == worker:
+        elif current.run is not None and current.run.worker == worker:
             already.append("run")
+        elif current.run is None:
+            raise Refused(
+                f"{path.name} has a 'run:' line with nothing under it. That is "
+                "yours, so this command will not write over it or around it — "
+                "fill it in, or delete the line and run again"
+            )
         else:
             raise Refused(
                 f"{path.name} already declares a 'run:' section with a worker "
@@ -208,6 +228,16 @@ def emit(
             f"refusing to write {path.name}: the result would not parse "
             f"({exc}). Nothing was changed"
         ) from exc
+
+    # And that it says each thing once. Parsing is not enough: a duplicated
+    # top-level key parses fine and means whatever the reader's parser decides,
+    # so a config with one is a config that lies to somebody.
+    repeated = _repeated_keys(text)
+    if repeated:
+        raise Refused(
+            f"refusing to write {path.name}: it would declare "
+            f"{', '.join(repeated)} more than once. Nothing was changed"
+        )
 
     return Emission(
         path=path,
@@ -263,6 +293,31 @@ def _append(text: str, note: str, rendered: str) -> str:
     if text and not text.endswith("\n"):
         text += "\n"
     return f"{text}\n{note}{rendered}"
+
+
+def _top_level_keys(text: str) -> list[str]:
+    """Every top-level key in the BYTES, duplicates included.
+
+    `yaml.safe_load` cannot answer this — it silently keeps the last of a
+    duplicated key, and a key written with no value comes back
+    indistinguishable from one nobody wrote at all.
+    """
+    try:
+        node = yaml.compose(text)
+    except yaml.YAMLError:
+        return []
+    if node is None or not isinstance(getattr(node, "value", None), list):
+        return []
+    return [key.value for key, _ in node.value if hasattr(key, "value")]
+
+
+def _declared_keys(text: str) -> set[str]:
+    return set(_top_level_keys(text))
+
+
+def _repeated_keys(text: str) -> list[str]:
+    keys = _top_level_keys(text)
+    return sorted({key for key in keys if keys.count(key) > 1})
 
 
 def _parse(text: str, source: str) -> config.Config:
