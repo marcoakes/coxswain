@@ -90,6 +90,16 @@ gates:
 """
 
 
+def real_gates(repo: Path) -> None:
+    """Give a scratch repo a gate that is not the placeholder.
+
+    A launch in a repo with nothing to detect ends on the template
+    refusal (§4), which is correct and is its own test. Every test that
+    is about something else needs to get past it.
+    """
+    (repo / config.CONFIG_FILENAME).write_text(MINIMAL, encoding="utf-8")
+
+
 def read_config(repo: Path) -> config.Config:
     return config.load(repo / config.CONFIG_FILENAME)
 
@@ -130,7 +140,11 @@ def test_every_answer_except_the_key_has_a_flag():
 def test_start_writes_a_config_where_there_was_none(repo, monkeypatch, capsys):
     monkeypatch.chdir(repo)
 
-    assert cli.main(["start", "--accept-gates", "--no-agent"]) == cli.EXIT_OK
+    # Exit 3, not 0: a repo with nothing to detect gets the placeholder
+    # gate, and a launch does not call that a pass — see
+    # test_a_template_only_launch_says_so_and_attempts_no_receipt. What
+    # this test is about is the file that appeared.
+    assert cli.main(["start", "--accept-gates", "--no-agent"]) == cli.EXIT_REFUSED
     capsys.readouterr()
 
     cfg = read_config(repo)
@@ -222,7 +236,7 @@ def test_no_start_section_is_ever_written(repo, monkeypatch, capsys):
     code = cli.main(
         ["start", "--workspace", "../work", "--accept-gates", "--no-agent"]
     )
-    assert code == cli.EXIT_OK
+    assert code == cli.EXIT_REFUSED  # the placeholder gate, as above
     capsys.readouterr()
 
     assert "start" not in raw_config(repo)
@@ -370,6 +384,7 @@ def test_an_absent_agent_is_named_with_its_install_command_and_nothing_is_run(
 def test_a_detected_agent_is_written_as_an_acp_worker(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3c — the wizard writes the worker stanza with consent, and `--agent
     <id>` is that consent given ahead of time."""
     monkeypatch.chdir(repo)
@@ -388,6 +403,7 @@ def test_a_detected_agent_is_written_as_an_acp_worker(
 def test_the_wizard_writes_an_acp_worker_or_no_worker_at_all(
     repo, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3a-ii — a shell worker inherits the operator's ENTIRE environment
     (`gates.py:95-102` passes no `env=`), so a wizard that wrote one would
     silently hand the agent every secret in the shell. Declining writes no
@@ -453,6 +469,7 @@ def test_the_acp_spec_no_longer_promises_a_consent_based_install():
 def test_an_already_set_variable_satisfies_the_key_step(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3b, row 5 — the key's non-interactive form is the named variable
     already being set. That is how every other command in the program receives
     a credential, and it is what makes the launch runnable in CI."""
@@ -487,6 +504,7 @@ def test_the_key_step_exits_2_naming_the_variable_with_no_terminal(
 def test_the_key_appears_in_no_file_the_wizard_writes(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§8 — the key appears in no file the wizard writes, asserted by a test
     that greps for the value."""
     monkeypatch.setenv(fake_agent.key_env, FAKE_KEY)
@@ -508,6 +526,7 @@ def test_the_key_appears_in_no_file_the_wizard_writes(
 def test_the_config_records_the_name_and_writes_no_judge_section(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3a — the wizard writes the key's variable name into
     `run.worker.acp.env_passthrough` and **nowhere else**. Not
     `judge.api_key_env`: that key exists only under `judge:`, whose parser
@@ -546,6 +565,7 @@ def test_the_declared_name_is_folded_into_the_redactor(repo, fake_agent):
 def test_the_persistence_command_is_printed_and_never_run(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3a — it is never persisted. At the end the exact command to make it
     durable is printed, and neither it nor anything else is run. Storing a
     credential is a larger power than launching a build, and this slice was
@@ -681,6 +701,7 @@ def test_no_prompt_is_reachable_when_stdin_is_not_a_tty(
 def test_the_gates_step_prompts_when_there_is_a_terminal(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3b, row 1 — TTY and answers missing: prompt for exactly those."""
     monkeypatch.setattr(start, "prompts", lambda: scripted(["y", fake_agent.id]))
     monkeypatch.chdir(repo)
@@ -718,6 +739,7 @@ def test_the_gate_prompt_defaults_to_no(repo, fake_agent, monkeypatch, capsys):
 def test_choosing_no_agent_at_the_prompt_writes_no_run_section(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     monkeypatch.setattr(start, "prompts", lambda: scripted(["y", "none"]))
     monkeypatch.chdir(repo)
 
@@ -747,6 +769,7 @@ def test_an_unrecognised_agent_answer_is_asked_again_then_refused(
 def test_the_key_is_read_through_the_seam_and_never_printed(
     repo, fake_agent, monkeypatch, capsys
 ):
+    real_gates(repo)
     """§3a — typed at a prompt, held in memory, echoed nowhere. The reader is
     injected so the suite never reaches `getpass`, which would open /dev/tty
     and block (§3a-i)."""
@@ -791,6 +814,8 @@ def test_the_whole_surface_runs_with_stdin_closed_and_does_not_hang(
     timeout: the shape a CI job and an agent both present."""
     import subprocess
 
+    real_gates(repo)
+
     proc = subprocess.run(
         [
             sys.executable, "-m", "wringer", "start",
@@ -804,3 +829,230 @@ def test_the_whole_surface_runs_with_stdin_closed_and_does_not_hang(
     )
 
     assert proc.returncode == cli.EXIT_OK, proc.stdout + proc.stderr
+
+
+# --- step 7: the first build, and the two things it refuses to call a pass --
+
+REAL_GATE = """\
+version: 1
+gates:
+  - id: test
+    run: "true"
+"""
+
+FAILING_GATE = """\
+version: 1
+gates:
+  - id: test
+    run: "false"
+"""
+
+MISSING_COMMAND = """\
+version: 1
+gates:
+  - id: test
+    run: "definitely-not-a-real-command-xyz -q"
+"""
+
+
+def attestations(repo: Path) -> list[Path]:
+    root = repo / ".wringer" / "attestations"
+    return sorted(root.iterdir()) if root.is_dir() else []
+
+
+def runs(repo: Path) -> list[Path]:
+    root = repo / ".wringer" / "runs"
+    return sorted(root.iterdir()) if root.is_dir() else []
+
+
+def test_the_launch_ends_on_a_receipt_a_stranger_could_check(
+    repo, monkeypatch, capsys
+):
+    """§8, box 1 — every answer supplied non-interactively, in a repo with
+    real gates, running start to finish with no prompt and ending on a real
+    `wring attest` receipt."""
+    (repo / config.CONFIG_FILENAME).write_text(REAL_GATE, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
+    out = capsys.readouterr().out
+
+    assert code == cli.EXIT_OK
+    assert len(runs(repo)) == 1, "the launch ran no gates"
+    assert len(attestations(repo)) == 1, "the launch left no receipt"
+    assert "wring audit" in out, "the reader was not told how to check it"
+
+
+def test_a_template_only_launch_says_so_and_attempts_no_receipt(
+    repo, monkeypatch, capsys
+):
+    """§4 and §8 — the blank template ships a placeholder gate running `true`.
+    A launch that ended "your first build passed" over it would be a vacuous
+    green produced by the onboarding flow: the exact failure this project
+    exists to prevent. It reports the template state, names the next real
+    step, and does NOT attest."""
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_REFUSED
+    assert len(runs(repo)) == 1, "the gates should still have run"
+    assert attestations(repo) == [], (
+        "a receipt was written over a run that proved nothing"
+    )
+    assert "placeholder" in (captured.out + captured.err)
+
+
+def test_failing_gates_are_exit_1_and_leave_no_receipt(repo, monkeypatch, capsys):
+    """§2 — 1 means the gates answered no. A real answer, not a tool error."""
+    (repo / config.CONFIG_FILENAME).write_text(FAILING_GATE, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
+    capsys.readouterr()
+
+    assert code == cli.EXIT_GATE_FAILED
+    assert attestations(repo) == []
+
+
+def test_a_gate_whose_command_is_missing_is_diagnosed_not_crashed(
+    repo, monkeypatch, capsys
+):
+    """§4 — `pytest: command not found` is the documented first failure
+    (QUICKSTART.md). It is Wringer working correctly: it ran what the repo
+    declared. Say that, rather than showing a shell error to someone who has
+    just installed the tool."""
+    (repo / config.CONFIG_FILENAME).write_text(MISSING_COMMAND, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_GATE_FAILED
+    assert "not on PATH" in captured.out + captured.err
+
+
+def test_the_key_reaches_no_bundle_even_when_a_gate_echoes_it(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§8, box 3 — the typed key appears in no file the wizard writes, no
+    ledger and no bundle, asserted by a test that greps for the value. A gate
+    is a shell command that inherits the whole environment, so it is the
+    easiest thing in the program to leak a credential with."""
+    (repo / config.CONFIG_FILENAME).write_text(
+        f'version: 1\ngates:\n  - id: test\n    run: "echo ${fake_agent.key_env}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cli.main(["start", "--accept-gates", "--agent", fake_agent.id])
+    capsys.readouterr()
+
+    hits = [
+        path.relative_to(repo).as_posix()
+        for path in (repo / ".wringer").rglob("*")
+        if path.is_file()
+        and FAKE_KEY in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert hits == [], f"the credential reached the evidence: {hits}"
+
+
+# --- §3e: a clone is untrusted input ---------------------------------------
+
+
+def test_a_clone_stops_before_any_gate_runs(
+    repo, tmp_path_factory, monkeypatch, capsys
+):
+    """Ruling 5, and it is the most important refusal in the command.
+    `SPEC_GET_V0.md` is binding for the machinery being reused: *runs nothing
+    it cloned*. A guided launch that cloned and then executed would be the
+    most dangerous command in the program, aimed at the least technical user
+    it has."""
+    launchpad = tmp_path_factory.mktemp("launchpad")
+    monkeypatch.chdir(launchpad)
+
+    code = cli.main(
+        ["start", "--clone", f"file://{repo}", "--workspace", "work"]
+    )
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_REFUSED
+    cloned = launchpad / "work" / repo.name
+    assert (cloned / ".git").is_dir(), "nothing was cloned"
+    assert not (cloned / ".wringer" / "runs").exists(), (
+        "a gate ran in a repository this command had just downloaded"
+    )
+    assert not (cloned / ".wringer" / "loops").exists()
+    # The warning `wring get` already prints, and the second invocation.
+    assert ".wringer.yaml" in captured.out
+    assert "wring start" in captured.out
+
+
+def test_a_clone_records_where_it_came_from(
+    repo, tmp_path_factory, monkeypatch, capsys
+):
+    """The provenance half of §3e: it stops, but it does not stop silently."""
+    import json as _json
+
+    launchpad = tmp_path_factory.mktemp("launchpad")
+    monkeypatch.chdir(launchpad)
+
+    cli.main(["start", "--clone", f"file://{repo}", "--workspace", "work"])
+    capsys.readouterr()
+
+    manifests = sorted((launchpad / ".wringer" / "acquired").rglob("manifest.json"))
+    assert len(manifests) == 1
+    payload = _json.loads(manifests[0].read_text(encoding="utf-8"))
+    assert payload["origin"] == f"file://{repo}"
+    assert payload["head_sha"]
+
+
+def test_cloning_without_a_workspace_exits_2_naming_the_flag(
+    tmp_path_factory, monkeypatch, capsys
+):
+    """Config precedes clone (§4): `wring get` requires `workspace:` before it
+    will clone, and there is no default because Wringer does not choose where
+    to put your code."""
+    launchpad = tmp_path_factory.mktemp("launchpad")
+    monkeypatch.chdir(launchpad)
+
+    code = cli.main(["start", "--clone", "file:///nowhere/at/all"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_CONFIG
+    assert "--workspace" in captured.err
+
+
+def test_a_repo_and_a_clone_together_are_refused():
+    """Step 3 is EITHER a directory already on disk OR a clone (§1)."""
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["start", "--repo", ".", "--clone", "https://example.invalid/x"]
+        )
+
+
+MISSING_MODULE = """\
+version: 1
+gates:
+  - id: test
+    run: "python3 -m nosuchmodule_xyz"
+"""
+
+
+def test_a_gate_whose_module_is_missing_is_diagnosed_too(
+    repo, monkeypatch, capsys
+):
+    """The same failure wears two faces. `pytest -q` with no pytest is
+    `command not found` and exit 127; `python3 -m pytest` with no pytest is
+    exit 1 and "No module named pytest". A real launch on this machine hit
+    the second one, and only the first was diagnosed."""
+    (repo / config.CONFIG_FILENAME).write_text(MISSING_MODULE, encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_GATE_FAILED
+    assert "not installed in the environment" in captured.out + captured.err

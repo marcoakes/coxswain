@@ -72,10 +72,21 @@ def build_parser() -> argparse.ArgumentParser:
         "start",
         help="the guided launch: preflight, config, and your first build",
     )
-    parser_start.add_argument(
+    where_from = parser_start.add_mutually_exclusive_group()
+    where_from.add_argument(
         "--repo",
         metavar="DIR",
         help="the repository to launch in; defaults to the current directory",
+    )
+    where_from.add_argument(
+        "--clone",
+        metavar="URL",
+        help=(
+            "clone this repository into the workspace and STOP. A fresh clone "
+            "is untrusted input and its '.wringer.yaml' is code, so no gate of "
+            "its runs in the same invocation — read it, then run wring start "
+            "again inside it"
+        ),
     )
     parser_start.add_argument(
         "--workspace",
@@ -462,9 +473,13 @@ def cmd_start(args: argparse.Namespace) -> int:
             "ask\n  for one before it clones."
         )
 
-    # [3/7] repo in. A directory already on disk: the human put it there, and
-    # every other Wringer command already trusts that.
+    # [3/7] repo in. EITHER a directory already on disk — the human put it
+    # there, and every other Wringer command already trusts that — OR a clone,
+    # which records what it fetched and stops before any gate (§3e).
     _start_step(3, "repo")
+    if args.clone:
+        return _start_clone(here, args.clone, args.workspace)
+
     root = git.find_root(here.resolve())
     if not git.is_repo(root):
         print(
@@ -509,7 +524,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         return refused
 
     _report_start(emission, key_name)
-    return EXIT_OK
+
+    # [7/7] the first build: verify, then the loop if there is something to
+    # repair, then the receipt.
+    _start_step(7, "first build")
+    return _start_build(root, worker)
 
 
 def _start_gates(
@@ -648,6 +667,82 @@ def _start_agent(
     return None, EXIT_CONFIG
 
 
+def _start_clone(here: Path, url: str, workspace: str | None) -> int:
+    """Clone, record where it came from, and **stop** (§3e, ruling 5).
+
+    This is the most important refusal in the command. `SPEC_GET_V0.md:85-87`
+    is binding for the machinery being reused — *"Runs nothing it cloned. No
+    gate, no hook, no install step — a fresh clone is untrusted input, and
+    SECURITY.md's `.wringer.yaml`-is-code warning is exactly why"* — and
+    `AGENTS.md` forbids widening that without a spec change and a SECURITY.md
+    update. A guided launch that cloned and then executed would be the most
+    dangerous command in the program, aimed at the least technical user it
+    has. The second invocation costs one line of typing and is the entire
+    safety property.
+    """
+    root = git.find_root(here.resolve())
+    try:
+        cfg_workspace = (
+            config.load(root / config.CONFIG_FILENAME).workspace
+            if (root / config.CONFIG_FILENAME).is_file()
+            else None
+        )
+    except config.ConfigError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if workspace is None and cfg_workspace is None:
+        # Config precedes clone (§4): `wring get` requires `workspace:` before
+        # it will clone, and there is no default because Wringer does not
+        # choose where to put someone's code.
+        print(
+            "\nwring start: --clone needs somewhere to put it. There is no "
+            "default:\nWringer does not choose where your code lives. Add "
+            "--workspace <DIR>.",
+            file=sys.stderr,
+        )
+        return EXIT_CONFIG
+
+    # The config is written FIRST, so the workspace this clone lands in is
+    # recorded before anything is fetched — and so `wring get` works here
+    # afterwards without asking again.
+    try:
+        emission = start.emit(root, workspace=workspace)
+    except start.StartError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+    except start.Refused as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
+    emission.write()
+
+    try:
+        acquire.check_url(url)
+        target = acquire.destination(
+            url, (root / (workspace or cfg_workspace or ".")).resolve(), None
+        )
+        acquired = acquire.clone(url, target)
+        manifest = acquire.record(root, acquired)
+    except acquire.AcquireError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    print(f"  cloned {acquired.origin}\n  into   {acquired.directory}")
+    if acquired.head_sha:
+        print(f"  at     {acquired.head_sha[:12]} on {acquired.default_branch or '?'}")
+    print(f"\nProvenance: {_relative(manifest, root)}")
+    print(
+        "\nNothing in it has been run, and this launch stops here.\n"
+        f"A repository's gates are code: {config.CONFIG_FILENAME} says what "
+        "commands\nWringer will execute with your privileges, so read that "
+        "file before\nanything runs it.\n\n"
+        f"When you have:\n  cd {acquired.directory}\n  wring start"
+    )
+    # Exit 3, not 0: a precondition this command will not run untrusted code
+    # for (§2). The launch did not complete — it deliberately did not.
+    return EXIT_REFUSED
+
+
 def _start_key(
     worker: config.AcpWorker | None, asking: start.Prompts
 ) -> tuple[str | None, int | None]:
@@ -709,6 +804,162 @@ def _start_key(
     return name, None
 
 
+def _start_build(root: Path, worker: config.AcpWorker | None) -> int:
+    """Verify, repair if there is something to repair, then the receipt.
+
+    The loop runs only when the gates said no. `wring run` exists to hand a
+    failure to a worker; starting an agent against a green tree would spend
+    someone's money to be told nothing, and §1's "verify, then the loop" reads
+    as a sequence rather than an obligation to run all of it.
+    """
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+        planned = verify.plan(cfg, None)
+    except config.ConfigError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    try:
+        outcome = verify.run(root, cfg, planned, on_gate=_report_gate)
+    except evidence.EvidenceError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    if outcome.interrupted is not None:
+        return EXIT_INTERRUPTED
+
+    if outcome.failed_gate is not None and worker is not None:
+        outcome = _start_repair(root, cfg, outcome)
+        if outcome is None:
+            return EXIT_CONFIG
+
+    if outcome.failed_gate is not None:
+        _report_run(
+            outcome.bundle, root, outcome.results, outcome.failed_gate,
+            outcome.status, template_only=outcome.template_only,
+        )
+        _diagnose_failure(outcome)
+        if worker is None:
+            print(
+                "\nNo agent is configured, so nothing tried to fix it. Read "
+                "the log\nabove, or configure one and run: wring run"
+            )
+        return EXIT_GATE_FAILED
+
+    if outcome.template_only:
+        # §4 — the blank template's only gate runs `true`. A launch that ended
+        # "your first build passed" over it would be a vacuous green produced
+        # by the onboarding flow, which is the failure this project exists to
+        # prevent. No receipt is attempted: `attest` would happily certify it
+        # (its vacuity hook only fires on a `--prove` verdict), and a receipt
+        # over a placeholder is a cryptographic-sounding wrapper around
+        # nothing.
+        #
+        # Exit 3 rather than 0: the launch did not complete its last step, and
+        # a placeholder gate is a precondition this command will not guess
+        # past. An agent reading only the exit code is exactly the reader who
+        # would over-read a 0 here.
+        print(
+            f"\n! {detect.TEMPLATE_WARNING}\n"
+            f"\nEvidence written to:\n{_bundle_path(outcome.bundle, root)}/"
+            f"\n\nNo receipt was written: there is nothing yet to attest to."
+            f"\n\nNext:\n  edit {config.CONFIG_FILENAME} — replace the "
+            "placeholder gate with the\n  commands that prove your change is "
+            "mergeable, then: wring start"
+        )
+        return EXIT_REFUSED
+
+    print("\n✓ every required gate passed.")
+    print(f"Evidence: {_bundle_path(outcome.bundle, root)}/")
+    return _start_receipt(root, outcome.bundle.directory)
+
+
+def _start_repair(
+    root: Path, cfg: config.Config, failed: verify.Outcome
+) -> verify.Outcome | None:
+    """Hand the failure to the configured agent, then report what came back."""
+    print("\nThe gates said no. Handing it to the agent you configured.")
+    try:
+        loop_outcome = loop.run(
+            root,
+            cfg,
+            on_iteration=_report_iteration,
+            on_gate=_report_gate,
+            on_worker=_report_worker,
+        )
+    except evidence.EvidenceError as exc:
+        print(f"wring start: {exc}", file=sys.stderr)
+        return None
+    _report_loop(loop_outcome, root)
+    # The loop's own final verification is the one that counts; without it the
+    # receipt would be written over the bundle from BEFORE the repair.
+    return loop_outcome.final if loop_outcome.final is not None else failed
+
+
+def _diagnose_failure(outcome: verify.Outcome) -> None:
+    """Name the failure shape a new user hits first.
+
+    `pytest: command not found` is the documented first failure
+    (QUICKSTART.md:36-41) and it is Wringer working correctly — it ran what
+    the repo declared. Showing a bare shell error to someone who installed the
+    tool ten seconds ago teaches them the tool is broken.
+
+    **It wears two faces, and a real launch on the maintainer's Mac hit the
+    second one.** A gate of `pytest -q` with no pytest is exit 127 and
+    `command not found`; a gate of `python3 -m pytest` with no pytest is exit
+    1 and `No module named pytest` — same cause, same fix, entirely different
+    text. Both are named here.
+    """
+    failure = next(
+        (r for r in outcome.results if r.gate.id == outcome.failed_gate), None
+    )
+    if failure is None:
+        return
+    stderr = ""
+    try:
+        stderr = failure.stderr_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+
+    if failure.exit_code == 127 or "command not found" in stderr:
+        missing = "ran a command that is not on PATH"
+    elif "No module named" in stderr:
+        missing = "needs a package that is not installed in the environment"
+    else:
+        return
+
+    print(
+        f"\n! `{failure.gate.id}` {missing}. That is Wringer working "
+        f"correctly:\n  it ran what {config.CONFIG_FILENAME} declares. Install "
+        "this project's own\n  dependencies into the environment you run wring "
+        f"from, or edit\n  {config.CONFIG_FILENAME}."
+    )
+
+
+def _start_receipt(root: Path, anchor: Path) -> int:
+    """The last thing a new user sees: a receipt a stranger could check."""
+    from wringer import attest
+
+    try:
+        built = attest.build(root, anchor)
+    except (attest.Refused, attest.AttestError) as exc:
+        # §2 — a bundle that cannot be attested is 3, not 1. `1` means the
+        # gates answered no; conflating them would make the exit code lie
+        # about which half failed.
+        print(f"wring start: the receipt could not be made: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
+
+    bundle = attest.Bundle.create(root, built.payload["attestation_id"])
+    written = bundle.write(built.payload)
+    print(f"\nReceipt:  {_relative(written, root)}")
+    print(f"\n! {attest.UNSIGNED_LIMIT}")
+    print(
+        f"\nCheck it yourself — offline, no config, no network:\n"
+        f"  wring audit {_relative(written, root)}"
+    )
+    return EXIT_OK
+
+
 def _report_start(emission: start.Emission, key_name: str | None) -> None:
     name = emission.path.name
     if emission.created:
@@ -733,7 +984,6 @@ def _report_start(emission: start.Emission, key_name: str | None) -> None:
             f"  {start.PERSIST_HINT.format(name=key_name)}"
         )
 
-    print(f"\nNext:\n  read {name}, then: wring verify")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
