@@ -13,6 +13,8 @@ Behaviour is chosen by argv so one file covers every case the loop needs:
     permission ask for permission, then fix
     idle       do nothing and stop cleanly
     crash      exit mid-turn, before answering the prompt
+    loudcrash  say something, THEN exit mid-turn — the shape where the
+               agent's last words are the whole diagnostic value
     hang       accept the prompt and never answer
     deaf       answer session/new, then never read stdin again (pipe fills)
     garbage    emit a line that is not JSON, then behave
@@ -120,6 +122,11 @@ def main() -> int:
                     if not line:
                         return 0
             notify(session_id, f"working ({BEHAVIOUR})")
+
+            if BEHAVIOUR == "loudcrash":
+                notify(session_id, "THE LAST THING THE AGENT SAID")
+                sys.stdout.flush()
+                return 3
 
             if BEHAVIOUR == "leak":
                 # Both paths acp.py writes: the child's own stderr, which

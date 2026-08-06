@@ -754,12 +754,18 @@ def _run_acp_worker(
         # Not a verdict about the code — a failed worker turn, which the
         # evidence will judge on the next lap like any other.
         timed_out = "deadline" in str(exc)
+        # APPENDED, never written over. `run_turn`'s `finally` has already put
+        # whatever the agent managed to say into this file, and on a failed
+        # turn that is the entire diagnostic value of the bundle — the last
+        # words before it died. Overwriting them left a log that recorded only
+        # that something went wrong, which is the half a reader already knows.
+        # A shell worker keeps its stdout when it crashes; SPEC_ACP_V0 §2 says
+        # an ACP worker leaves the same shape of evidence, so it keeps its own.
+        #
         # Scrubbed like every other write into a bundle: the message quotes
         # what the agent said, and what the agent said may be a credential.
-        stdout_path.write_text(
-            bundle.redactor.scrub(f"[wringer: ACP turn failed] {exc}\n"),
-            encoding="utf-8",
-        )
+        with stdout_path.open("a", encoding="utf-8") as log:
+            log.write(bundle.redactor.scrub(f"[wringer: ACP turn failed] {exc}\n"))
         if not stderr_path.exists():
             stderr_path.write_text("", encoding="utf-8")
         result = gates.GateResult(

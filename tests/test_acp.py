@@ -472,3 +472,34 @@ def test_an_env_passthrough_value_is_redacted_even_with_an_unremarkable_name(
         "a declared passthrough variable's value reached the evidence — the "
         "promise in config.py's own comment was not kept"
     )
+
+
+def test_a_failed_turn_keeps_what_the_agent_said_before_it_died(
+    repo, monkeypatch, capsys
+):
+    """SPEC_ACP_V0 §2 promises session updates reach
+    `iterations/NNN/worker.stdout.log` "so an ACP worker leaves the same shape
+    of evidence a shell worker does". It did not, on the one path where the
+    evidence matters most.
+
+    `run_turn`'s `finally` writes the updates; the AcpError then reaches
+    `loop._run_acp_worker`, whose handler wrote the failure note to the SAME
+    path with `write_text` — destroying them. A shell worker that crashes
+    keeps its stdout; this one lost the last thing the agent said before it
+    went. Pre-existing since the ACP seam shipped.
+    """
+    setup(repo, "loudcrash")
+    monkeypatch.chdir(repo)
+
+    cli.main(["run"])
+    capsys.readouterr()
+
+    logs = sorted((repo / loop.LOOPS_DIRNAME).rglob("worker.stdout.log"))
+    assert logs, "no worker log was written at all"
+    body = logs[0].read_text(encoding="utf-8")
+
+    assert "ACP turn failed" in body, "the failure itself must still be recorded"
+    assert "THE LAST THING THE AGENT SAID" in body, (
+        "the agent's own output was overwritten by the failure note — the "
+        "bundle lost the only diagnostic the turn produced"
+    )
