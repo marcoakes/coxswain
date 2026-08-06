@@ -13,6 +13,7 @@ five conditions; each one has a test that fails without it.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -1211,6 +1212,269 @@ def test_untracked_json_is_covered_by_the_digests(
         (run_dir / evidence.DIGESTS_FILENAME).read_text(encoding="utf-8")
     )
     assert evidence.UNTRACKED_FILENAME in digests["files"]
+
+
+# --- untracked identity, not untracked bytes -------------------------------
+#
+# `untracked.json` v1 hashed what `open("rb")` returned, which follows a
+# symlink, so it recorded what the GATES could read rather than what git
+# would COMMIT. An adversarial review found five consequences of that one
+# confusion, and they point in both directions: two deliveries that should
+# have been refused and were not, two refusals that could never be cleared,
+# and one hang. v2 records git's identity for the path — mode plus the
+# committed payload — and the five close together.
+#
+# The first three of these tests are the too-loose half: in each, every byte
+# the old check compared is identical and the committed tree is different.
+
+
+def test_retargeting_a_symlink_after_verify_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """Two files with identical bytes and a link moved between them.
+
+    Reading THROUGH the link gave the same sha256 both times, so nothing
+    refused — while git commits the link TEXT, which is a different blob.
+    The delivered branch carried a symlink the gates never saw.
+    """
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "one.txt").write_text("same bytes\n", encoding="utf-8")
+    (delivery_repo / "two.txt").write_text("same bytes\n", encoding="utf-8")
+    link = delivery_repo / "link"
+    link.symlink_to("one.txt")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    link.unlink()
+    link.symlink_to("two.txt")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "retarget")
+    assert "link" in str(refusal.value)
+
+
+def test_replacing_a_file_with_a_symlink_after_verify_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """A type flip: `100644` + content becomes `120000` + link text. Reading
+    through the link returned the same bytes, so the old check saw nothing."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "real.txt").write_text("payload\n", encoding="utf-8")
+    thing = delivery_repo / "thing.txt"
+    thing.write_text("payload\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    thing.unlink()
+    thing.symlink_to("real.txt")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "typeflip")
+    assert "thing.txt" in str(refusal.value)
+
+
+def test_making_a_new_file_executable_after_verify_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """Not one byte of content changed. git commits `100755` instead of
+    `100644`, which is a different tree — and a script that runs is a
+    different thing from a script that does not."""
+    (delivery_repo / "feature.py").unlink()
+    script = delivery_repo / "deploy.sh"
+    script.write_text("#!/bin/sh\necho deploying\n", encoding="utf-8")
+    script.chmod(0o644)
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    script.chmod(0o755)
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "chmod")
+    assert "deploy.sh" in str(refusal.value)
+
+
+# The too-strict half. Each of these used to refuse, and none of them could
+# ever be cleared: `wring verify` recorded `unreadable` again every time.
+
+
+def test_a_dangling_symlink_does_not_block_delivery(
+    delivery_repo, monkeypatch, capsys
+):
+    """git commits a dangling link happily — the link text is right there.
+    Refusing on it stopped a delivery that git would have made, permanently.
+    """
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "link").symlink_to("built/artifact-not-here-yet")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    recorded = json.loads(
+        (run_dir / evidence.UNTRACKED_FILENAME).read_text(encoding="utf-8")
+    )
+    assert recorded["files"]["link"].startswith("120000:"), recorded["files"]
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "dangling")
+    assert "link" in planned.changed_files
+
+
+def test_a_symlink_to_a_directory_does_not_block_delivery(
+    delivery_repo, monkeypatch, capsys
+):
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "adir").mkdir()
+    (delivery_repo / "adir" / "inner.txt").write_text("x\n", encoding="utf-8")
+    (delivery_repo / "link").symlink_to("adir")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "dirlink")
+    assert "link" in planned.changed_files
+
+
+def test_a_symlink_to_a_fifo_does_not_hang_verify(
+    delivery_repo, monkeypatch, capsys
+):
+    """**`wring verify` never returned.** `open("rb")` on a link to a pipe
+    blocks until somebody writes to it, and nobody ever does.
+
+    Bounded on a daemon thread, because a regression here does not fail a
+    test — it wedges the suite, which reads as a hung machine.
+    """
+    import threading
+
+    (delivery_repo / "feature.py").unlink()
+    os.mkfifo(delivery_repo / "pipe")
+    (delivery_repo / "link").symlink_to("pipe")
+
+    box: dict[str, object] = {}
+
+    def run() -> None:
+        try:
+            verified(delivery_repo, monkeypatch, capsys)
+            box["ok"] = True
+        except BaseException as exc:  # noqa: BLE001 — reported, not swallowed
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(60.0)
+    assert not worker.is_alive(), (
+        "wring verify did not finish — it followed the symlink and blocked "
+        "on the pipe behind it"
+    )
+    assert "error" not in box, box.get("error")
+
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    recorded = json.loads(
+        (run_dir / evidence.UNTRACKED_FILENAME).read_text(encoding="utf-8")
+    )
+    assert recorded["files"]["link"].startswith("120000:")
+    # the pipe itself is not even listed by `git status`, so it never arrives
+    assert "pipe" not in recorded["files"]
+
+
+def test_a_referent_outside_the_repo_may_drift(
+    delivery_repo, monkeypatch, capsys
+):
+    """The link is unchanged, so the committed blob is unchanged, so there is
+    nothing for delivery to refuse. Recording the referent's bytes made an
+    edit to a file OUTSIDE the repo — one git was never going to commit —
+    block the delivery.
+    """
+    (delivery_repo / "feature.py").unlink()
+    outside = delivery_repo.parent / "outside-the-repo.txt"
+    outside.write_text("first\n", encoding="utf-8")
+    (delivery_repo / "link").symlink_to(outside)
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+
+    outside.write_text("second, and none of git's business\n", encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "outside")
+    assert "link" in planned.changed_files
+
+
+# The version boundary.
+
+
+def test_a_v1_untracked_record_delivers_as_a_pre_untracked_bundle_does(
+    delivery_repo, monkeypatch, capsys
+):
+    """A v1 record answers a different question, so it cannot be compared
+    against a v2 one — and re-deriving the v1 answer would mean keeping the
+    code that hangs on a FIFO. v1 therefore falls back to names-only, exactly
+    like a bundle written before the file existed."""
+    (delivery_repo / "feature.py").unlink()
+    loose = delivery_repo / "notes.txt"
+    loose.write_text("verified content\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    recorded = run_dir / evidence.UNTRACKED_FILENAME
+    payload = json.loads(recorded.read_text(encoding="utf-8"))
+    payload["schema_version"] = evidence.UNTRACKED_SCHEMA_VERSION_V1
+    payload["files"] = {"notes.txt": "0" * 64}  # v1's bare-sha256 shape
+    recorded.write_text(json.dumps(payload), encoding="utf-8")
+
+    loose.write_text("EDITED AFTER VERIFY\n", encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "v1bundle")
+    assert "notes.txt" in planned.changed_files
+
+
+def test_an_untracked_record_from_the_future_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """An unanswerable check refuses; it does not pass. Reading a v3 record
+    as names-only would be a silent loosening dressed as compatibility."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "notes.txt").write_text("x\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    recorded = run_dir / evidence.UNTRACKED_FILENAME
+    payload = json.loads(recorded.read_text(encoding="utf-8"))
+    payload["schema_version"] = "wringer.untracked.v3"
+    recorded.write_text(json.dumps(payload), encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "future")
+    assert "v3" in str(refusal.value)
+
+
+def test_a_path_git_cannot_commit_is_refused(
+    delivery_repo, monkeypatch, capsys
+):
+    """`unsupported` is a record that no committable object exists. git
+    would not put it in the tree, so nothing can vouch for it."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "notes.txt").write_text("x\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    recorded = run_dir / evidence.UNTRACKED_FILENAME
+    payload = json.loads(recorded.read_text(encoding="utf-8"))
+    payload["files"]["notes.txt"] = evidence.UNSUPPORTED
+    recorded.write_text(json.dumps(payload), encoding="utf-8")
+
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "unsupported")
+    assert "notes.txt" in str(refusal.value)
+    assert "git will not commit it" in str(refusal.value)
 
 
 def test_an_unreachable_remote_refuses_rather_than_assuming_no_branch(

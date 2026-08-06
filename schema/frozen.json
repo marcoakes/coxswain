@@ -16,6 +16,7 @@
     "manifest.schema.json": "b94f5666f326536697383a70dba54996c43f86477ace5e0701b0ae5090665fcc",
     "rubric.schema.json": "ea555570060f143c7ab48b6ba03aa5a7ebcd8fd9be4512f1ef3c4511c8803a42",
     "spec.schema.json": "e33906faa571c4ca198de74581efcec768c93e2297a718bf7de2ddc39e99e747",
+    "untracked-v2.schema.json": "0875a645929e1f1dfdb00cd52b18b4b2902cf4eeaa1173c2cfdcecd88267d4db",
     "untracked.schema.json": "53cfc3897a4a79f9037a87d8540bbf318ded1fe2e3b444004c72ab8971a16a98"
   }
 }

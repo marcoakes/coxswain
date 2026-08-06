@@ -269,8 +269,27 @@ def check_verified_tree(root: Path, run_dir: Path, state: git.RepoState) -> None
     _check_untracked_bytes(root, run_dir, state)
 
 
+# 2026-08-06. `d0f866c` landed `untracked.json` and its commit message called
+# it "the last hole in this function's promise". It was not, and the claim is
+# left standing above rather than quietly rewritten because the repo's rule is
+# that a wrong claim gets corrected in place.
+#
+# What that version missed: it hashed the bytes `open("rb")` returned, which
+# FOLLOWS a symlink. git commits mode `120000` and a blob holding the link
+# TEXT, so retargeting a link at a file with identical bytes, or `chmod +x` on
+# a new script, changed the delivered tree without changing anything the check
+# compared. It also read three perfectly committable paths as `unreadable` — a
+# dangling link, a link to a directory — which refused delivery permanently
+# (re-verifying recorded `unreadable` again), and blocked forever on a link to
+# a FIFO. An adversarial review found all five; `wringer.untracked.v2` records
+# git's identity for the path instead, which closes them together.
+#
+# The honest general statement, which is what this function can promise: it
+# refuses when the untracked part of the tree is not the object git would have
+# committed at verify time. Whether that is the LAST hole is not something a
+# commit message gets to assert.
 def _check_untracked_bytes(root: Path, run_dir: Path, state: git.RepoState) -> None:
-    """Refuse when an untracked file's contents moved since the gates ran.
+    """Refuse when an untracked path's identity moved since the gates ran.
 
     Only for bundles that recorded them. A bundle written before
     `untracked.json` existed keeps exactly the behaviour it had — names
@@ -281,7 +300,9 @@ def _check_untracked_bytes(root: Path, run_dir: Path, state: git.RepoState) -> N
     if not recorded.is_file():
         return
     try:
-        stored = json.loads(recorded.read_text(encoding="utf-8")).get("files", {})
+        payload = json.loads(recorded.read_text(encoding="utf-8"))
+        version = payload.get("schema_version")
+        stored = payload.get("files", {})
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
         raise Refused(
             f"{run_dir.name} recorded untracked files but "
@@ -290,12 +311,39 @@ def _check_untracked_bytes(root: Path, run_dir: Path, state: git.RepoState) -> N
             1,
         ) from exc
 
+    if version == evidence.UNTRACKED_SCHEMA_VERSION_V1:
+        # A v1 record answers a different question — what a gate could read
+        # through the symlink — so it cannot be compared against a v2 one, and
+        # re-deriving the v1 answer would mean keeping the code that hangs on
+        # a FIFO. A v1 bundle therefore delivers exactly as a bundle written
+        # before this file existed: names compared, bytes not. v1 shipped
+        # unreleased and lived for one day, so this weakens nothing that was
+        # ever promised to a user.
+        return
+    if version != evidence.UNTRACKED_SCHEMA_VERSION:
+        raise Refused(
+            f"{run_dir.name} recorded its untracked files as "
+            f"{version!r}, which this version of Wringer cannot read. An "
+            "unanswerable check refuses rather than passes — upgrade Wringer, "
+            "or run 'wring verify' again with this one",
+            1,
+        )
+
     unreadable = sorted(p for p, d in stored.items() if d == evidence.UNREADABLE)
     if unreadable:
         raise Refused(
             f"{run_dir.name} could not read {', '.join(unreadable[:5])} when it "
             "verified, so their contents were never checked. Delivering would "
             "claim they were — fix the permissions and run 'wring verify' again",
+            1,
+        )
+    unsupported = sorted(p for p, d in stored.items() if d == evidence.UNSUPPORTED)
+    if unsupported:
+        raise Refused(
+            f"{', '.join(unsupported[:5])} is neither a regular file nor a "
+            "symlink, so git will not commit it and "
+            f"{run_dir.name} could not record what it holds. Remove it and run "
+            "'wring verify' again",
             1,
         )
 
@@ -309,9 +357,10 @@ def _check_untracked_bytes(root: Path, run_dir: Path, state: git.RepoState) -> N
     )
     if moved:
         raise Refused(
-            f"the contents of {', '.join(moved[:5])} differ from what "
-            f"{run_dir.name} verified. git never saw these files, so nothing "
-            "else would have caught it — run 'wring verify' again",
+            f"{', '.join(moved[:5])} is not what {run_dir.name} verified — its "
+            "contents, its file mode or its symlink target has changed. git "
+            "never saw these files, so nothing else would have caught it — run "
+            "'wring verify' again",
             1,
         )
 

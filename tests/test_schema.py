@@ -833,7 +833,12 @@ def test_a_new_schema_may_be_added_without_touching_the_freeze():
     assert recorded <= present, f"missing frozen schemas: {recorded - present}"
 
 
-# --- wringer.untracked.v1 ---------------------------------------------------
+# --- wringer.untracked.v2 ---------------------------------------------------
+#
+# v1 recorded a bare sha256 of what `open("rb")` returned, which follows a
+# symlink: it described what the gates could READ rather than what git would
+# COMMIT. v2 records git's identity for the path — `"<mode>:<sha256>"` — and
+# v1 stays published, frozen, and readable. These check both.
 
 
 def test_the_untracked_digest_file_matches_its_schema(
@@ -852,14 +857,56 @@ def test_the_untracked_digest_file_matches_its_schema(
     recorded = json.loads(
         (bundle / evidence.UNTRACKED_FILENAME).read_text(encoding="utf-8")
     )
-    check(recorded, load("untracked.schema.json"), "untracked.json")
+    check(recorded, load("untracked-v2.schema.json"), "untracked.json")
+    assert recorded["schema_version"] == "wringer.untracked.v2"
     assert recorded["algorithm"] == "sha256"
 
     # per FILE, not per directory — the whole point of the -uall fix
     assert "loose.txt" in recorded["files"]
     assert "newdir/inner.txt" in recorded["files"]
     assert "newdir/" not in recorded["files"]
-    assert all(len(d) == 64 for d in recorded["files"].values())
+    # mode and digest, in one string, for every entry
+    assert all(
+        value.split(":")[0] in ("100644", "100755", "120000")
+        and len(value.split(":")[1]) == 64
+        for value in recorded["files"].values()
+    ), recorded["files"]
+
+
+def test_a_v1_untracked_document_still_validates_against_v1(monkeypatch):
+    """The freeze is only worth something if the retired version keeps
+    working. A reader holding a bundle written before 2026-08-06 must not
+    have to care that v2 exists."""
+    built = validators()
+    document = {
+        "schema_version": "wringer.untracked.v1",
+        "algorithm": "sha256",
+        "files": {"notes.txt": "a" * 64, "gone.txt": "unreadable"},
+    }
+
+    errors = [
+        f"{e.json_path} {e.message}"
+        for e in built["untracked.schema.json"].iter_errors(document)
+    ]
+    assert not errors, "\n".join(errors)
+    # and the two versions do not accept each other's values
+    assert list(built["untracked-v2.schema.json"].iter_errors(document))
+
+
+def test_the_two_untracked_versions_are_separate_published_files():
+    """v1 was edited in place at first, which would have silently
+    reinterpreted every digest in every bundle already written."""
+    recorded = frozen_manifest()["schemas"]
+    assert "untracked.schema.json" in recorded
+    assert "untracked-v2.schema.json" in recorded
+    assert (
+        load("untracked.schema.json")["properties"]["schema_version"]["const"]
+        == "wringer.untracked.v1"
+    )
+    assert (
+        load("untracked-v2.schema.json")["properties"]["schema_version"]["const"]
+        == "wringer.untracked.v2"
+    )
 
 
 def test_a_tree_with_nothing_untracked_writes_no_untracked_file(
@@ -890,6 +937,9 @@ def test_a_real_untracked_file_validates_against_the_real_engine(
     built = validators()
     write_config(repo, TWO_GATES)
     (repo / "loose.txt").write_text("x\n", encoding="utf-8")
+    (repo / "run.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (repo / "run.sh").chmod(0o755)
+    (repo / "link").symlink_to("loose.txt")
     monkeypatch.chdir(repo)
     assert cli.main(["verify"]) == cli.EXIT_OK
     capsys.readouterr()
@@ -899,9 +949,13 @@ def test_a_real_untracked_file_validates_against_the_real_engine(
     )
     errors = [
         f"{e.json_path} {e.message}"
-        for e in built["untracked.schema.json"].iter_errors(recorded)
+        for e in built["untracked-v2.schema.json"].iter_errors(recorded)
     ]
     assert not errors, "\n".join(errors)
+    # all three modes exercised against the real engine, not just 100644
+    assert {v.split(":")[0] for v in recorded["files"].values()} == {
+        "100644", "100755", "120000"
+    }, recorded["files"]
 
 
 # --- wringer.fleet.v1 and wringer.judge.v1 ---------------------------------

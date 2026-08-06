@@ -17,7 +17,8 @@ rather than reverse-engineer it — the point of
 | [`delivery-manifest.schema.json`](delivery-manifest.schema.json) | `wringer.delivery.v1` — what a verified change became: branch, commit, push, MR |
 | [`acquired-manifest.schema.json`](acquired-manifest.schema.json) | `wringer.acquired.v1` — where a working copy came from |
 | [`digests.schema.json`](digests.schema.json) | `wringer.digests.v1` — `digests.json`, a sha256 per file in a bundle |
-| [`untracked.schema.json`](untracked.schema.json) | `wringer.untracked.v1` — `untracked.json`, a sha256 per *untracked* file in the tree the gates ran against |
+| [`untracked.schema.json`](untracked.schema.json) | `wringer.untracked.v1` — superseded by v2 below, still published and still valid; a bare sha256 per *untracked* file |
+| [`untracked-v2.schema.json`](untracked-v2.schema.json) | `wringer.untracked.v2` — `untracked.json`, git's *identity* (`"<mode>:<sha256>"`) per *untracked* path in the tree the gates ran against |
 | [`fleet-manifest.schema.json`](fleet-manifest.schema.json) | `wringer.fleet.v1` — `manifest.json` of a `wring fleet` bundle |
 | [`fleet-event.schema.json`](fleet-event.schema.json) | **one line** of a fleet's `fleet.jsonl` |
 | [`judge-verdict.schema.json`](judge-verdict.schema.json) | `wringer.judge.v1` — `verdict.json`, a rubric verdict over a finished bundle |
@@ -117,6 +118,21 @@ published format nobody promised to keep is worse than an unpublished one.
 Adding a new schema file is always allowed and is how a new format arrives;
 editing a frozen one is not, because every bundle already written was
 written against it.
+
+**`wringer.untracked.v1` is the first format this rule has retired**, and it
+is worth reading as the worked example. v1 recorded a bare sha256 of the
+bytes `open("rb")` returned for each untracked path — which follows a
+symlink, so it described what the *gates could read* rather than what *git
+would commit*, and those are different objects. Fixing it meant changing what
+the digests mean, which is exactly the change `additionalProperties` and a
+version string exist to price. So `untracked-v2.schema.json` is a new file
+carrying `wringer.untracked.v2`, `untracked.schema.json` is untouched and
+stays frozen, and anything that read a v1 bundle still reads it. `wring
+deliver` treats a v1 record the way it treats a bundle written before the
+file existed: names compared, bytes not. The alternative — editing v1's
+digest pattern so the new values fit — would have been a silent
+reinterpretation of every digest in every existing bundle, which is the one
+thing law 7 forbids.
 
 ## Targeting these formats
 

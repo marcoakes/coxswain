@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import shutil
+import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +26,7 @@ from typing import Any
 
 from wringer import gates
 from wringer.git import RepoState
+from wringer.git import honours_file_mode as git_honours_file_mode
 from wringer.redact import Redactor
 
 SCHEMA_VERSION = "wringer.evidence.v1"
@@ -44,11 +47,30 @@ DIGESTS_SCHEMA_VERSION = "wringer.digests.v1"
 # frozen, so the untracked tree's BYTES arrive as their own file rather than
 # as a manifest key. A reader that does not know it ignores it.
 UNTRACKED_FILENAME = "untracked.json"
-UNTRACKED_SCHEMA_VERSION = "wringer.untracked.v1"
+# v2, and v1 is still published and still frozen. v1 recorded a bare sha256 of
+# whatever `open("rb")` returned, which FOLLOWS a symlink: it described what
+# the gates could read rather than what git would commit, and those are
+# different objects. v2 records git's identity for the path — mode and the
+# committed payload — which is the only thing that answers the question the
+# file exists to answer. A v1 bundle is still readable by anything that read
+# one before; `wring deliver` treats it exactly as it treats a bundle written
+# before this file existed. See `hash_untracked`.
+UNTRACKED_SCHEMA_VERSION = "wringer.untracked.v2"
+UNTRACKED_SCHEMA_VERSION_V1 = "wringer.untracked.v1"
+# The three modes git can put in a tree for a path in the working tree,
+# spelled the way git spells them in `ls-files -s`.
+GIT_MODE_FILE = "100644"
+GIT_MODE_EXECUTABLE = "100755"
+GIT_MODE_SYMLINK = "120000"
 # What a file records when its bytes could not be read. Not a hash, and
 # deliberately not a valid one — `deliver` refuses on it, because a file
 # nobody could read is a file nobody verified.
 UNREADABLE = "unreadable"
+# What a path records when git could not commit it either — anything that is
+# neither a regular file nor a symlink. `git add` on a bare FIFO stores
+# nothing, and `git status` does not even list one, so this is a record that
+# no object exists rather than a guess at one.
+UNSUPPORTED = "unsupported"
 # Wringer's own directory. Excluded from the untracked digests: in a repo that
 # never ran `wring init` it is untracked, so without this a run would hash
 # every file of every PREVIOUS run's bundle — unbounded cost, describing
@@ -188,7 +210,7 @@ def untracked_subject(paths: Iterable[str]) -> tuple[str, ...]:
 
 
 def hash_untracked(root: Path, paths: Iterable[str]) -> dict[str, str]:
-    """sha256 per untracked file, keyed by repo-relative POSIX path.
+    """git's identity for each untracked path: `"<mode>:<sha256>"`.
 
     ONE implementation, called by both the writer (`Bundle.write_untracked`)
     and the reader (`wring deliver`'s check). Two implementations of the same
@@ -196,21 +218,81 @@ def hash_untracked(root: Path, paths: Iterable[str]) -> dict[str, str]:
     disagreement here reads as tampering, which is the worst possible false
     alarm for a tool whose product is trust.
 
-    A file that cannot be read records `UNREADABLE`. Not an exception and not
-    a skip: an unreadable file has not been verified, and the caller decides
-    what that costs.
+    **What is hashed is what git would COMMIT, not what a gate could read.**
+    v1 of this file did `target.open("rb")`, which follows symlinks, so it
+    recorded the referent's bytes — and git records mode `120000` and a blob
+    holding the LINK TEXT. Those are different objects, and pinning one does
+    not pin the other. Measured against `git cat-file` rather than reasoned
+    about; `tests/test_untracked.py` keeps them agreeing.
+
+    That one confusion was wrong in both directions at once. Too loose:
+    retarget a link at a file with identical bytes, or `chmod +x` a script,
+    and delivery saw nothing to refuse even though the committed tree had
+    changed. Too strict: a dangling link, and a link to a directory, both
+    raised `OSError` and recorded `UNREADABLE`, which `wring deliver` refuses
+    on — and re-running `wring verify` recorded `UNREADABLE` again, so the
+    refusal was permanent and nothing the user could do cleared it. Worse
+    still, a link to a FIFO *blocked forever*: `wring verify` never returned.
+    `os.readlink` never touches what the link points at, so all five go away
+    together.
+
+    Mode and digest live in one string. That keeps the schema's
+    `additionalProperties` a simple pattern, and it makes a type flip a
+    digest change by construction rather than by a future reader remembering
+    to compare two keys.
+
+    `UNREADABLE` survives and now means what it says: a real `OSError` on a
+    real file, which after this change is essentially a permissions problem.
+    A path that is neither a regular file nor a symlink records `UNSUPPORTED`
+    — git will not commit it either, so claiming a digest for it would be
+    inventing one.
     """
     entries: dict[str, str] = {}
+    # Asked at most once per call, and only when a regular file makes it
+    # matter: it costs a subprocess, and a tree of symlinks never needs it.
+    honours_mode: bool | None = None
+
     for relative in sorted(paths):
         target = root / relative
+        try:
+            info = os.lstat(target)  # lstat, never stat: see the docstring
+        except OSError:
+            entries[relative] = UNREADABLE
+            continue
+
+        if stat.S_ISLNK(info.st_mode):
+            try:
+                # `os.fsencode` asks for the link text as BYTES, which is
+                # what git hashes; decoding and re-encoding it would put a
+                # filesystem-encoding round trip inside a digest.
+                payload = os.readlink(os.fsencode(target))
+            except OSError:
+                entries[relative] = UNREADABLE
+                continue
+            entries[relative] = (
+                f"{GIT_MODE_SYMLINK}:{hashlib.sha256(payload).hexdigest()}"
+            )
+            continue
+
+        if not stat.S_ISREG(info.st_mode):
+            entries[relative] = UNSUPPORTED
+            continue
+
+        if honours_mode is None:
+            honours_mode = git_honours_file_mode(root)
+        # The OWNER execute bit, not "any x bit": git tests `st_mode & 0100`,
+        # so a 0654 file is committed as 100644. Measured on git 2.50.1.
+        executable = honours_mode and bool(info.st_mode & stat.S_IXUSR)
+        mode = GIT_MODE_EXECUTABLE if executable else GIT_MODE_FILE
         try:
             digest = hashlib.sha256()
             with target.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(65536), b""):
                     digest.update(chunk)
-            entries[relative] = digest.hexdigest()
         except OSError:
             entries[relative] = UNREADABLE
+            continue
+        entries[relative] = f"{mode}:{digest.hexdigest()}"
     return entries
 
 

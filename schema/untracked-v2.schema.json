@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/untracked-v2.schema.json",
+  "title": "Wringer untracked-file identities",
+  "description": "`untracked.json` — git's IDENTITY for every UNTRACKED file in the working tree when the gates ran. A SIBLING of manifest.json, like digests.json and for the same reason: `wringer.evidence.v1` is frozen, so the tree's untracked state arrives as its own file rather than as a manifest key, and a reader that does not know this file ignores it. It exists because git cannot diff a file it has never seen: `diff.patch` is silent about untracked content, so without this a content-only edit to a new file between `wring verify` and `wring deliver` was undetectable. Untracked is not ignored: anything in .gitignore never appears here, so the cost is bounded by what `git status` already reports. Absent from a bundle whose tree had nothing untracked — an empty file would be a claim about a state that never existed. Supersedes `wringer.untracked.v1`, which recorded a bare sha256 of the bytes a gate could READ: that follows symlinks, and git commits mode 120000 plus a blob holding the link TEXT, so v1 pinned a different object from the one being delivered. v1 remains published and frozen and every v1 bundle stays valid; `wring deliver` reads a v1 bundle exactly as it reads a bundle written before this file existed.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "algorithm",
+    "files"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.untracked.v2"
+    },
+    "algorithm": {
+      "description": "The digest algorithm. Named rather than assumed, so a future change is a value rather than a silent reinterpretation of every existing file.",
+      "enum": [
+        "sha256"
+      ]
+    },
+    "files": {
+      "description": "Repo-relative POSIX path -> `\"<mode>:<digest>\"`, where mode is the one git would put in the tree and digest is the sha256 of the payload git would store: a regular file's content for 100644 and 100755, and the LINK TEXT for 120000. Mode and digest are one string so that a type flip — a file replaced by a symlink to a file with the same bytes — is a digest change by construction rather than by a reader remembering to compare two keys. Two literal values stand in for a path that has no such identity: \"unreadable\" for a real file whose bytes could not be read (a permissions problem, after v2 made dangling and directory-targeted symlinks recordable), and \"unsupported\" for a path that is neither a regular file nor a symlink, which git would not commit either. `wring deliver` refuses on both: a path nobody could check is a path nobody verified, and silence would be the friendlier lie.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^((100644|100755|120000):[0-9a-f]{64}|unreadable|unsupported)$"
+      }
+    }
+  }
+}

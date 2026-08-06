@@ -93,6 +93,29 @@ def is_repo(root: Path) -> bool:
     return _git(["rev-parse", "--is-inside-work-tree"], cwd=root) == "true"
 
 
+# What git reads as false in a boolean config value. Git's own list, which is
+# longer than "false" and does not include, say, "no thanks".
+_CONFIG_FALSE = {"false", "no", "off", "0", ""}
+
+
+def honours_file_mode(root: Path) -> bool:
+    """Whether git will record a file's executable bit in this repository.
+
+    `core.fileMode` is false on filesystems that cannot hold the bit, and
+    there git adds even a `0755` file as `100644` — measured on git 2.50.1,
+    not assumed. `untracked.json` records what git will COMMIT, so it has to
+    ask rather than read the mode off the disk and hope.
+
+    Unset, unreadable, or no git at all answers *true*: that is git's own
+    POSIX default, and guessing false would silently stop recording a
+    distinction git is making.
+    """
+    value = _git(["config", "--get", "core.fileMode"], cwd=root)
+    if value is None:
+        return True
+    return value.strip().lower() not in _CONFIG_FALSE
+
+
 def in_progress(root: Path) -> str | None:
     """The half-finished git operation in this tree, if any.
 
