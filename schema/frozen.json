@@ -18,6 +18,7 @@
     "rubric.schema.json": "ea555570060f143c7ab48b6ba03aa5a7ebcd8fd9be4512f1ef3c4511c8803a42",
     "spec.schema.json": "e33906faa571c4ca198de74581efcec768c93e2297a718bf7de2ddc39e99e747",
     "untracked-v2.schema.json": "0875a645929e1f1dfdb00cd52b18b4b2902cf4eeaa1173c2cfdcecd88267d4db",
-    "untracked.schema.json": "53cfc3897a4a79f9037a87d8540bbf318ded1fe2e3b444004c72ab8971a16a98"
+    "untracked.schema.json": "53cfc3897a4a79f9037a87d8540bbf318ded1fe2e3b444004c72ab8971a16a98",
+    "vacuity.schema.json": "7bbfd0fc3b64705583084e6ea47c41605192cd7357a5da98e7eb8e8b8852ee79"
   }
 }

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from wringer import detect, evidence
 from wringer.config import Gate
@@ -45,6 +46,7 @@ def write(
     status: str = "passed",
     interrupted: Interrupted | None = None,
     template_only: bool = False,
+    vacuity: Any = None,
 ) -> Path:
     """Write `summary.md` into the bundle and return its path."""
     lines = [
@@ -89,6 +91,9 @@ def write(
     for gate in skipped:
         lines.append(f"| {gate.id} | skipped | — | — |")
 
+    if vacuity is not None:
+        lines += _vacuity_section(vacuity)
+
     if failed_gate is not None:
         lines += [
             "",
@@ -102,6 +107,54 @@ def write(
     path = bundle.directory / SUMMARY_FILENAME
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def _vacuity_section(result: Any) -> list[str]:
+    """What `--prove` found, per gate, with each `sensitive` row citing why.
+
+    The citation is the load-bearing part, not decoration. A detached
+    worktree carries tracked files only, so in a repo whose dependencies are
+    gitignored EVERY pre-change gate fails on a missing environment — and the
+    comparison reads that as proof. `ModuleNotFoundError: No module named
+    'yourproject'` in the row is what makes a false `proven` legible at a
+    glance instead of convincing.
+    """
+    from wringer import vacuity as vacuity_module
+
+    verdict = result.verdict
+    lines = ["", f"## Vacuity — **{verdict}**", "", result.reason, ""]
+    if result.setup and not result.setup.get("ok"):
+        lines += [
+            f"`run.prove_setup` (`{result.setup['command']}`) failed: "
+            f"{result.setup.get('cites')}",
+            "",
+        ]
+    if result.rows:
+        lines += [
+            "| gate | changed tree | pre-change tree | tests this change | "
+            "because |",
+            "|---|---|---|---|---|",
+        ]
+        for row in result.rows:
+            lines.append(
+                f"| {row.gate_id} | {row.changed} | {row.pre_change} "
+                f"| {'yes' if row.sensitive else 'NO'} "
+                f"| {row.cites or '—'} |"
+            )
+        lines.append("")
+    if verdict == vacuity_module.GATES_VACUOUS:
+        lines += [
+            "> ⚠ **Every required gate passed without the change too, so they "
+            "proved nothing about it.** Write a test that fails without your "
+            "change, then verify again.",
+            "",
+        ]
+    lines.append(
+        f"Both trees' output: [`{vacuity_module.VACUITY_DIRNAME}/`]"
+        f"({vacuity_module.VACUITY_DIRNAME}/) · "
+        f"worktree {result.worktree_ms}ms, prove {result.prove_ms}ms"
+    )
+    return lines
 
 
 def _repo_line(state: RepoState) -> str:

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/vacuity.schema.json",
+  "title": "Wringer vacuity verdict",
+  "description": "`vacuity.json` — what `wring verify --prove` found when it ran the same declared gates against the PRE-CHANGE tree. A SIBLING of manifest.json, like digests.json and untracked.json and for the same reason: `wringer.evidence.v1` is frozen, so this arrives as its own file and a reader that does not know it ignores it. The mechanism is a scratch worktree detached at HEAD, which IS the pre-change tree — tracked edits absent, untracked files naturally missing, no reverse-patching. A gate that passes on the changed tree and FAILS on the pre-change one tests this change; a gate that passes on both is insensitive to it. A lint gate passing on both is ordinary. EVERY required gate passing on both is the signal, and the verdict is `gates_vacuous`: the change ships with a green tick that proved nothing. Absent from any bundle whose run did not prove — every repo that has not opted in is unaffected, and `wring deliver` behaves for those exactly as it always has.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "verdict",
+    "reason",
+    "worktree_ms",
+    "prove_ms",
+    "setup",
+    "gates"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "wringer.vacuity.v1"
+    },
+    "verdict": {
+      "description": "`proven` — at least one required gate failed on the pre-change tree, so the gates test this change. `gates_vacuous` — every required gate passed without it too. `not_applicable` — there was nothing to be vacuous about: an unchanged tree, or a required gate that failed the normal run, in which case the prove pass never runs at all (there is nothing to prove about a failure). `inconclusive` — the measurement could not be made honestly: the scratch worktree could not be created, or `run.prove_setup` failed, which would leave every pre-change gate failing on a broken environment rather than on the change. `inconclusive` is never `proven`, and it is never silently dropped.",
+      "enum": ["proven", "gates_vacuous", "not_applicable", "inconclusive"]
+    },
+    "reason": {
+      "description": "The verdict in a sentence, naming the gates it rests on. A refusal that only says no converts this feature into something people turn off.",
+      "type": "string"
+    },
+    "worktree_ms": {
+      "description": "How long building the scratch worktree took. Recorded because ruling 3 refuses a configurable ceiling — every answer to 'what happens when you hit it' is worse than the cost, and skipping the pass would re-introduce the vacuity this feature exists to catch. So the cost is MEASURED instead, and a repo decides with numbers rather than guessing a threshold. There is no ceiling key in the config, here or anywhere.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "prove_ms": {
+      "description": "How long the pre-change gates took, setup included. See `worktree_ms`.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "setup": {
+      "description": "What `run.prove_setup` did in the scratch worktree, or null when the repo declared none. A detached worktree carries tracked files ONLY — no .venv, no node_modules, because those are gitignored — so in a repo whose dependencies are not committed every pre-change gate fails on a missing environment, and the comparison reads that as proof. That is a false `proven`, and it would fire on every run however tautological the tests. `run.prove_setup` is half of what closes it; a failing one yields `inconclusive`.",
+      "type": ["object", "null"],
+      "required": ["command", "ok", "exit_code", "duration_ms", "cites"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {"type": "string"},
+        "ok": {"type": "boolean"},
+        "exit_code": {"type": "integer"},
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "cites": {"type": ["string", "null"]}
+      }
+    },
+    "gates": {
+      "description": "One row per REQUIRED gate that ran on both trees. Optional gates are absent: they do not decide the outcome, so their sensitivity cannot make a green tick mean more or less than it did.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "gate_id", "changed", "pre_change", "sensitive", "cites",
+          "pre_change_log"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "gate_id": {"type": "string"},
+          "changed": {
+            "description": "How the gate did on the tree being verified.",
+            "enum": ["passed", "failed"]
+          },
+          "pre_change": {
+            "description": "How the same gate did in the scratch worktree at HEAD.",
+            "enum": ["passed", "failed"]
+          },
+          "sensitive": {
+            "description": "True when the gate passed on the changed tree and failed on the pre-change one — the shape that means it tests this change.",
+            "type": "boolean"
+          },
+          "cites": {
+            "description": "One line saying WHY the pre-change gate failed, present exactly when `sensitive` is true — the other half of what closes the false-`proven` trap. A `sensitive` row means 'this failed without the change', and the reader has to be able to see whether that failure was the change or a missing environment: `ModuleNotFoundError: No module named 'yourproject'` is instantly legible as the latter. Deliberately NOT classified into environment-or-regression. Making the failure visible is the product; guessing at its meaning would be the cleverness this format exists to refuse.",
+            "type": ["string", "null"]
+          },
+          "pre_change_log": {
+            "description": "Bundle-relative path to the pre-change run's stdout, under `vacuity/`. Evidence, not summary: a reader who doubts a row can read both trees' output.",
+            "type": ["string", "null"]
+          }
+        }
+      }
+    }
+  }
+}

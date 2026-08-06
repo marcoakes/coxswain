@@ -379,6 +379,22 @@ evidence:
     - git.status
     - env
     - logs
+
+# Prove the gates can FAIL. With this on, every `wring run` re-runs the gates
+# against the pre-change tree in a scratch worktree: a gate that passes on
+# both proved nothing about your change. Roughly doubles gate time, and a
+# green tick that cannot fail is worth nothing.
+#
+# It lives here rather than on a flag on purpose — the party being audited
+# does not get to choose whether the audit runs. There is no `--no-prove`.
+#
+# run:
+#   worker: "your-agent ..."
+#   prove: true
+#   # Run in the scratch worktree first, because a detached worktree has no
+#   # .venv or node_modules and every gate would otherwise fail on a missing
+#   # environment — which the comparison would read as proof.
+#   prove_setup: "uv sync --frozen"
 """
 
 

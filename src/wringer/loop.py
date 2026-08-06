@@ -446,6 +446,10 @@ def run(
     on_gate: verify.GateReporter | None = None,
     on_worker: Reporter | None = None,
     resuming: Resumable | None = None,
+    # Tightens only. `run.prove: true` is read inside `verify.wants_prove`,
+    # so a False here can never turn off what the repo declared — which is
+    # the point: the agent being supervised often invokes this command.
+    prove: bool = False,
 ) -> Outcome:
     """Drive the loop. `cfg.run` must not be None — the caller checks that,
     because a missing `run:` section is a config error with its own message.
@@ -523,7 +527,7 @@ def run(
             on_iteration(iteration, budget)
         bundle.event("iteration.started", iteration=iteration)
 
-        final = verify.run(root, cfg, planned, on_gate=on_gate)
+        final = verify.run(root, cfg, planned, on_gate=on_gate, prove=prove)
         signature = failure_signature(final)
         bundle.event(
             "verify.finished",

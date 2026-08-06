@@ -18,7 +18,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from wringer import __version__, config, detect, evidence, gates, git, redact, summary
+from wringer import (
+    __version__,
+    config,
+    detect,
+    evidence,
+    gates,
+    git,
+    redact,
+    summary,
+    vacuity,
+)
 
 # Called as each gate finishes, so a console can report a long run as it
 # happens rather than after it. None for callers that want no output.
@@ -94,12 +104,32 @@ def plan(cfg: config.Config, requested: str | None) -> list[tuple[int, config.Ga
     )
 
 
+def wants_prove(cfg: config.Config, flag: bool) -> bool:
+    """Whether this run proves its gates can fail — SPEC_VACUITY_V0 §3a.
+
+    **The config declares the policy; a flag may only tighten it.** `or` is
+    the whole rule, and it is load-bearing rather than lazy: there is no
+    expression here through which a caller could turn `run.prove: true` off,
+    and there is deliberately no `--no-prove` and no environment variable for
+    one to read.
+
+    The reason is authority over the supervised party. `wring run` drives an
+    agent that writes code, and `--prove` exists precisely to catch that agent
+    writing tautological tests — so if switching it on were a flag, whoever
+    invokes `wring run` would decide whether the check happens, and that
+    invoker is increasingly the agent itself.
+    """
+    declared = cfg.run.prove if cfg.run is not None else False
+    return bool(declared or flag)
+
+
 def run(
     root: Path,
     cfg: config.Config,
     planned: list[tuple[int, config.Gate]],
     output: str | None = None,
     on_gate: GateReporter | None = None,
+    prove: bool = False,
 ) -> Outcome:
     """Verify once and write the bundle. Raises `evidence.EvidenceError` if
     the bundle cannot be opened; the caller decides what that costs."""
@@ -182,6 +212,24 @@ def run(
     # `wringer.evidence.v1` is frozen and cannot grow a field for this.
     template_only = detect.is_untouched_template(cfg.gates)
 
+    # The prove pass, when the repo declared it or a flag tightened to it.
+    # AFTER the gates and only when they all passed: there is nothing to prove
+    # about a failure, which is law 3's shape.
+    proved: vacuity.Result | None = None
+    if wants_prove(cfg, prove):
+        if status != "passed":
+            proved = vacuity.not_applicable(
+                "a required gate failed, so there is nothing to prove about "
+                "this run — fix the gate first"
+            )
+        else:
+            proved = vacuity.prove(
+                root, cfg, planned, results, bundle.directory, state.dirty
+            )
+        bundle.event(
+            "vacuity.finished", verdict=proved.verdict, reason=proved.reason
+        )
+
     bundle.write_manifest(state=state, status=status, failed_gate=failed_gate)
     summary.write(
         bundle,
@@ -192,11 +240,17 @@ def run(
         status=status,
         interrupted=interrupted,
         template_only=template_only,
+        vacuity=proved,
     )
     # Before the digests, so the digest covers it. git cannot diff a file it
     # has never seen, so without this an untracked file's *contents* are
     # absent from the bundle and delivery could only compare their names.
     bundle.write_untracked(root, state.untracked)
+    if proved is not None:
+        # Also before the digests, so the verdict and the pre-change logs are
+        # covered by the bundle's own tamper-evidence rather than sitting
+        # beside it.
+        vacuity.write(bundle.directory, proved)
     # LAST, so it covers everything else the run wrote. `digests.json` is what
     # lets a later `wring attest` say "and none of it has been altered since"
     # about the whole bundle rather than only the ledger.

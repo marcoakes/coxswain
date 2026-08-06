@@ -85,6 +85,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="write the bundle here instead of a new .wringer/runs/<run_id>/",
     )
     parser_verify.add_argument(
+        "--prove",
+        action="store_true",
+        help=(
+            "after the gates pass, run them again against the pre-change tree "
+            "in a scratch worktree. A gate that passes on both proved nothing "
+            "about this change. Roughly doubles gate time. There is no "
+            "--no-prove: a flag may tighten what '.wringer.yaml' declares, "
+            "never loosen it"
+        ),
+    )
+    parser_verify.add_argument(
         "--json",
         action="store_true",
         help="emit one JSON object instead of the human report",
@@ -112,6 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="SECONDS",
         help="stop the whole loop after this long, whatever the iteration count",
+    )
+    parser_run.add_argument(
+        "--prove",
+        action="store_true",
+        help=(
+            "prove the gates can fail on every iteration. Declare "
+            "'run.prove: true' in '.wringer.yaml' to make it permanent — and "
+            "note there is no --no-prove, deliberately: the audited party does "
+            "not get to choose whether the audit runs"
+        ),
     )
     parser_run.add_argument(
         "--json",
@@ -447,6 +468,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
             # Printed as each gate finishes, so a long run reports as it
             # happens; --json wants one object and nothing else.
             on_gate=None if args.json else _report_gate,
+            # The flag TIGHTENS; `run.prove: true` in the config is read
+            # inside `verify.wants_prove` and nothing here can turn it off.
+            prove=args.prove,
         )
     except evidence.EvidenceError as exc:
         print(f"wring verify: {exc}", file=sys.stderr)
@@ -521,6 +545,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             on_iteration=None if quiet else _report_iteration,
             on_gate=None if quiet else _report_gate,
             on_worker=None if quiet else _report_worker,
+            prove=args.prove,
         )
     except evidence.EvidenceError as exc:
         print(f"wring run: {exc}", file=sys.stderr)

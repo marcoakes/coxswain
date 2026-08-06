@@ -19,6 +19,43 @@ here, not the fixes.
 
 ### Added
 
+- **`wring verify --prove`** — vacuity detection
+  ([SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md)). After the gates pass, re-run
+  them against the *pre-change* tree in a scratch worktree detached at HEAD. A
+  gate that passes on both proved nothing about the change; **every** required
+  gate passing on both is the verdict `gates_vacuous`, which `wring deliver`
+  refuses — exit 1, naming the insensitive gates, the one-line fix, and the
+  path to both trees' output. There is no `--allow-vacuous`.
+
+  **Switched on by the config, not by a flag.** `run.prove: true` in
+  `.wringer.yaml`; `--prove` tightens for one run; `--no-prove` does not exist
+  and `wring run --no-prove` exits 2. The reason is authority over the
+  supervised party rather than convenience — `wring run` drives an agent that
+  writes code, and this check exists to catch that agent writing tautological
+  tests, so the invoker must not get to switch it off. Matched deliberately to
+  the `approved: false` interlock, so *flags may tighten, never loosen* is one
+  rule rather than two precedents.
+
+  **The trap this was built around**, and the reason it is worth the
+  complexity: a detached worktree carries tracked files and nothing else, so
+  in any repo whose dependencies are gitignored every pre-change gate fails on
+  a missing environment — and the comparison reads that as PROOF. The feature
+  built to catch reward-hacking would have certified it, on every run. Closed
+  by `run.prove_setup` (a failing one yields `inconclusive`, never `proven`)
+  and by requiring every `sensitive` row to cite the failure it rests on, so
+  `ModuleNotFoundError: No module named 'yourproject'` is legible at a glance
+  rather than convincing.
+
+  No configurable ceiling exists, by ruling: skipping the pass would
+  reintroduce the vacuity this feature exists to catch. The cost is measured
+  instead — `worktree_ms` and `prove_ms` beside the per-gate rows.
+
+  **The limit, stated rather than discovered later:** the pre-change tree is
+  HEAD, so this catches green-baseline reward hacking and *cannot* tell you an
+  agent neutered a test that was already failing — that gate really does fail
+  at HEAD. Catching it would need reverse-patching, which the spec rules out
+  by name. Recorded in SPEC_VACUITY_V0 §5a, in the docs, and pinned by a test.
+
 - **`wring attest` and `wring audit`** — tamper-evident provenance
   ([SPEC_PROVENANCE_V0.md](SPEC_PROVENANCE_V0.md)). `attest` assembles the
   claim: *change C, authorized by spec S, proven by gates G against tree T,
@@ -79,6 +116,11 @@ here, not the fixes.
   and relative paths.
 
 ### Schema notes
+
+- **`wringer.vacuity.v1`** (`schema/vacuity.schema.json`) — a new sibling
+  file, `vacuity.json`, so `wringer.evidence.v1` is untouched. Absent from
+  every bundle whose run did not prove, which is what keeps repos that have
+  not opted in behaving exactly as they do today.
 
 - **`wringer.attestation.v1`** (`schema/attestation.schema.json`) — a new
   format, so purely additive; no frozen schema is touched. Its optional

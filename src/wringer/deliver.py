@@ -440,6 +440,27 @@ def _check_no_case_aliases(root: Path, carried: tuple[str, ...]) -> None:
     )
 
 
+def _check_not_vacuous(run_dir: Path) -> None:
+    """Refuse a bundle whose own gates proved nothing (SPEC_VACUITY_V0 §3b).
+
+    A bundle with no `vacuity.json` — every bundle from a repo that has not
+    opted in — reaches this and returns, unchanged.
+    """
+    from wringer import vacuity
+
+    recorded = vacuity.read_verdict(run_dir)
+    if recorded is None or recorded.verdict != vacuity.GATES_VACUOUS:
+        return
+    raise Refused(
+        vacuity.refusal_message(
+            run_dir.name,
+            recorded,
+            f"{run_dir.name}/{vacuity.VACUITY_DIRNAME}",
+        ),
+        1,
+    )
+
+
 def resolve_base(root: Path, settings: config.Deliver) -> tuple[str, str | None]:
     """The branch the MR targets, and the remote's default branch.
 
@@ -508,6 +529,21 @@ def plan(
             + ". An unverified change does not get a branch",
             1,
         )
+    # Directly beside "its gates did not pass", because it is the same
+    # statement: this bundle is not evidence that the change is mergeable.
+    #
+    # The refusal attaches to the BUNDLE, not to the user or the flag. A run
+    # without `--prove` writes no `vacuity.json`, so every repo that has not
+    # opted in behaves exactly as it does today. The strictness applies only
+    # to runs that actually measured, and only when the measurement came back
+    # saying nothing was proven — which is the correct thing to be blocked by.
+    #
+    # There is no `--allow-vacuous`, and that is not an oversight: ruling 1
+    # established that flags may tighten and never loosen, and a flag waving
+    # this through would be the first counter-example one section later in the
+    # same spec. The escape is the same as for a failing gate — make the
+    # evidence better, not the check weaker.
+    _check_not_vacuous(run_dir)
 
     state = git.inspect(root)
     check_verified_tree(root, run_dir, state)

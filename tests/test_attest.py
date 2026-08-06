@@ -802,3 +802,26 @@ def test_the_committed_pre_0_2_example_bundle_is_refused(project, monkeypatch,
     err = capsys.readouterr().err
     assert "cannot attest what cannot be checked" in err
     assert "digests.json" in err
+
+
+def test_attest_refuses_a_really_vacuous_run_end_to_end(
+    project, monkeypatch, capsys
+):
+    """The hook in `attest` and the file `wring verify --prove` actually
+    writes, joined up — not a hand-written sibling. The two features were
+    built in separate commits and this is the only test that proves they
+    agree on the verdict string.
+    """
+    (project / ".wringer.yaml").write_text(CONFIG, encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    assert cli.main(["verify", "--prove"]) == cli.EXIT_OK
+    capsys.readouterr()
+    recorded = json.loads(
+        (only(project, ".wringer", "runs") / "vacuity.json").read_text("utf-8")
+    )
+    assert recorded["verdict"] == "gates_vacuous", recorded
+    # the gate is `true`, which passes on any tree at all
+
+    assert cli.main(["attest"]) == cli.EXIT_GATE_FAILED
+    assert "gates_vacuous" in capsys.readouterr().err

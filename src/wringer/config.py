@@ -81,7 +81,20 @@ REF_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _GATE_KEYS = {"id", "run", "timeout", "optional", "required"}
 _EVIDENCE_KEYS = {"include", "redact"}
 _REDACT_KEYS = {"env"}
-_RUN_KEYS = {"worker", "max_iterations", "worker_timeout", "wall_clock"}
+_RUN_KEYS = {
+    "worker", "max_iterations", "worker_timeout", "wall_clock",
+    # SPEC_VACUITY_V0 §3a. `prove` lives HERE and not on a flag because the
+    # audited party does not get to choose whether the audit runs: `wring run`
+    # increasingly gets invoked by the agent itself, or by a script the agent
+    # wrote. `.wringer.yaml` is committed and reviewed like code, and what
+    # counts as *proven* for a repository belongs there.
+    "prove", "prove_setup",
+    # There is deliberately NO ceiling key here (ruling 3). Every answer to
+    # "what happens when you hit it" is worse than the cost: skipping
+    # re-introduces the vacuity the feature exists to catch, refusing is a
+    # worse-timed block, warning does nothing. `vacuity.json` records
+    # `worktree_ms` and `prove_ms` so a repo decides with numbers instead.
+}
 _FLEET_KEYS = {
     "concurrency",
     "deadline",
@@ -146,6 +159,20 @@ class Run:
     # iterations x worker_timeout, so a wall clock is a second opinion the
     # repo asks for rather than one Wringer imposes.
     wall_clock: int | None = None
+    # SPEC_VACUITY_V0 §3a — the repo's declaration that a green tick here has
+    # to be one that could have been red. **A flag may only tighten this.**
+    # `--prove` turns it on for one run; there is no `--no-prove` and no
+    # environment variable, so nothing can turn off what the repo declared.
+    # Same shape as `approved: false` in SPEC_INTENT_V0, and matching it
+    # deliberately: *flags may tighten, never loosen* is then one rule people
+    # learn once rather than a per-feature surprise.
+    prove: bool = False
+    # Run in the scratch worktree before the pre-change gates — `uv sync
+    # --frozen`, `npm ci`. Optional, and repos with committed dependencies
+    # leave it unset and lose nothing. Without it, a project whose deps are
+    # gitignored fails every pre-change gate on a missing environment, and
+    # §1's comparison table reads that as PROOF. See vacuity.py's docstring.
+    prove_setup: str | None = None
 
 
 @dataclass(frozen=True)
@@ -668,7 +695,34 @@ def _parse_run(raw: Any, source: str) -> Run | None:
             if raw.get("wall_clock") is None
             else _positive_int(raw, "wall_clock", 1, source)
         ),
+        prove=_bool(raw, "prove", False, source, section="run"),
+        prove_setup=_optional_command(raw, "prove_setup", source, section="run"),
     )
+
+
+def _bool(
+    raw: dict, key: str, default: bool, source: str, section: str
+) -> bool:
+    value = raw.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigError(
+            f"{source}: '{section}.{key}' must be true or false, not "
+            f"{type(value).__name__}"
+        )
+    return value
+
+
+def _optional_command(
+    raw: dict, key: str, source: str, section: str
+) -> str | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"{source}: '{section}.{key}' must be a non-empty string"
+        )
+    return value
 
 
 def _parse_worker(raw: Any, source: str) -> str | AcpWorker:

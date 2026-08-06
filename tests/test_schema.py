@@ -1211,3 +1211,75 @@ def test_the_attestation_schema_declares_the_clauses_that_may_be_absent():
         "description": schema["properties"]["signature"]["description"],
         "type": "null",
     }
+
+
+# --- wringer.vacuity.v1 ----------------------------------------------------
+
+
+def _proved(repo: Path, monkeypatch, capsys, config_body: str) -> dict:
+    from test_vacuity import git
+
+    from wringer import vacuity
+
+    (repo / "README.md").write_text("a project\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "initial")
+    (repo / "calc.py").write_text("FIXED\n", encoding="utf-8")
+    (repo / ".wringer.yaml").write_text(config_body, encoding="utf-8")
+    monkeypatch.chdir(repo)
+    assert cli.main(["verify", "--prove"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    run_dir = sorted((repo / evidence.RUNS_DIRNAME).iterdir())[-1]
+    return json.loads(
+        (run_dir / vacuity.VACUITY_FILENAME).read_text(encoding="utf-8")
+    )
+
+
+def test_a_real_vacuity_verdict_matches_its_schema(repo, monkeypatch, capsys):
+    """Both halves exercised: a `sensitive` row with its citation, and the
+    `setup` object, which is null on every run that declares no setup."""
+    recorded = _proved(
+        repo, monkeypatch, capsys,
+        'version: 1\ngates:\n  - id: test\n    run: "grep -q FIXED calc.py"\n'
+        'run:\n  worker: "true"\n  prove_setup: "true"\n',
+    )
+    schema = load("vacuity.schema.json")
+
+    check(recorded, schema, "vacuity.json")
+    assert recorded["schema_version"] == "wringer.vacuity.v1"
+    check(recorded["setup"], schema["properties"]["setup"], "vacuity setup")
+    for row in recorded["gates"]:
+        check(row, schema["properties"]["gates"]["items"], "vacuity gate row")
+    # the optional keys really were exercised, or this proves less than it looks
+    assert any(row["sensitive"] for row in recorded["gates"])
+    assert any(row["cites"] for row in recorded["gates"])
+
+
+def test_a_real_vacuity_verdict_validates_against_the_real_engine(
+    repo, monkeypatch, capsys
+):
+    built = validators()
+    recorded = _proved(
+        repo, monkeypatch, capsys,
+        'version: 1\ngates:\n  - id: test\n    run: "grep -q FIXED calc.py"\n',
+    )
+
+    errors = [
+        f"{e.json_path} {e.message}"
+        for e in built["vacuity.schema.json"].iter_errors(recorded)
+    ]
+    assert not errors, "\n".join(errors)
+    assert recorded["setup"] is None  # the no-setup shape, also legal
+
+
+def test_every_vacuity_verdict_the_schema_declares_is_reachable():
+    """A schema branch nothing can produce is a claim without a gate."""
+    from wringer import vacuity
+
+    declared = set(load("vacuity.schema.json")["properties"]["verdict"]["enum"])
+    produced = {
+        vacuity.PROVEN, vacuity.GATES_VACUOUS, vacuity.NOT_APPLICABLE,
+        vacuity.INCONCLUSIVE,
+    }
+    assert declared == produced, declared ^ produced

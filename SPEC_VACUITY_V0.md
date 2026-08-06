@@ -250,6 +250,35 @@ enough to fix in the spec rather than discover in a third field report.)*
    gate fail, which §1's table reads as proof. Closed by `run.prove_setup`
    and by requiring a `sensitive` verdict to cite the failure it rests on.
 
+## 5a. Found during the build, 2026-08-06 — the HEAD baseline's real reach
+
+*Measured while implementing §1, and recorded here because the repo's rule is
+that a discovered limit gets written down rather than absorbed. **No ruling
+changes.** This is what the approved mechanism does and does not reach.*
+
+The pre-change tree is **HEAD**, so a gate fails there exactly when HEAD was
+already red and the change fixed it. Two consequences follow, and only the
+first was obvious when this was drafted:
+
+- **`--prove` is a strong check against green-baseline reward hacking.** A
+  repo whose gates pass, given a change with a tautological test, reports
+  `gates_vacuous` — §7's second acceptance case, captured.
+- **It cannot tell you an agent neutered a test that was already failing.**
+  Delete the failing assertion and the gate genuinely does fail at HEAD, so
+  the verdict is `proven` — for the wrong reason. Catching that would need the
+  new tests applied to the *old source*, which is reverse-patching, which §1
+  rules out by name.
+
+So `--prove` answers *"did this change add anything that could have failed?"*
+and not *"is the suite still the suite?"*. The second question belongs to the
+`judged_by` clause and to a human reading `diff.patch`; conflating them would
+make a green `proven` mean more than it does, which is the failure this whole
+spec is about.
+
+Pinned by `test_prove_cannot_see_a_neutered_failing_test`, which asserts the
+`proven` verdict *and* says in its docstring that closing the limit means
+updating the docs — so the behaviour cannot drift into a surprise.
+
 ## 6. Non-goals (binding once approved)
 
 Mutation testing (per-mutant analysis is a different product) · flakiness

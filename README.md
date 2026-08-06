@@ -189,6 +189,23 @@ needed no changes to accept one. The captured loop is
 [`docs/issue-to-mr.md`](docs/issue-to-mr.md). Contract:
 **[SPEC_GET_V0.md](SPEC_GET_V0.md)**.
 
+## Prove the gates can fail
+
+The failure everyone in this field fears: the agent writes tautological tests,
+its gates pass, and the green tick means nothing. `wring verify --prove` is the
+deterministic counter — it re-runs the same gates against the *pre-change* tree
+in a scratch worktree, and **a gate that passes on both proved nothing about
+your change**. Every required gate passing on both is the verdict
+`gates_vacuous`, and `wring deliver` refuses that bundle: exit 1, naming the
+insensitive gates and the fix. There is no `--allow-vacuous`.
+
+Switched on in `.wringer.yaml`, not by a flag — `run.prove: true`. The audited
+party does not get to choose whether the audit runs, and that invoker is
+increasingly the agent itself. `--prove` tightens for one run; there is no
+`--no-prove`. Captured both ways, with the limits stated, in
+[`docs/prove-the-gates-can-fail.md`](docs/prove-the-gates-can-fail.md).
+Contract: **[SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md)**.
+
 ## And a claim you can check without trusting anyone
 
 `wring attest` assembles the provenance claim — *change C, authorized by spec
