@@ -26,7 +26,7 @@ from __future__ import annotations
 import getpass
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -262,22 +262,78 @@ def key_in_environment(name: str) -> bool:
     return bool(os.environ.get(name))
 
 
-def prompt_for_key(name: str, reader: Callable[[str], str] | None = None) -> str:
-    """Ask for the credential, without echoing it.
+# How many times a mistyped answer is asked again before the wizard gives up
+# and refuses with the flag to use instead. Bounded on purpose: a wizard that
+# loops forever on bad input is a hazard in a script, and one that gives up on
+# the first typo is an annoyance to the person it was built for.
+MAX_ATTEMPTS = 3
 
-    **Only ever called behind `has_terminal()`, and that ordering is a safety
-    property rather than a style** (§3a-i). CPython's `getpass` opens
-    `/dev/tty` directly and falls back to `sys.stdin` only if that fails — so
-    closing or redirecting stdin does not stop it. Reached under the demo
-    recorder it would open the operator's real terminal, print its prompt
-    where the recording cannot see it, and block forever.
 
-    `reader` is the seam the suite drives instead of a terminal. It defaults to
-    `getpass`, which is the whole point: no runtime dependency, no TUI, and the
-    same mechanism `SETUP.md`'s `read -rs` already documents.
+@dataclass
+class Prompts:
+    """**The one place `wring start` reads anything from a human.**
+
+    An interactive command that could only be exercised by a person is one
+    nothing in CI ever runs — and this is the command a new user meets first,
+    so it is the last one that should be untested. Every reader is a field, so
+    the suite drives the whole wizard with no terminal anywhere.
+
+    `read_secret` defaults to `getpass`, which is **only ever reached behind
+    `interactive()`** (§3a-i): `getpass` opens `/dev/tty` rather than stdin, so
+    a closed stdin does not stop it — it would block on a terminal nobody is
+    watching. `interactive` tests **stdin, not stdout** (§3b): a pipeline, a CI
+    job and the demo recorder all present a non-interactive stdin while stdout
+    may still be a tty.
+
+    No runtime dependency, no TUI (§7): `input`, `getpass`, and nothing else.
     """
-    ask = reader if reader is not None else getpass.getpass
-    return ask(f"  {name}: ")
+
+    read: Callable[[str], str] = input
+    read_secret: Callable[[str], str] = getpass.getpass
+    interactive: Callable[[], bool] = has_terminal
+
+    def confirm(self, question: str) -> bool:
+        """Ask a yes/no question. **A bare Enter is not consent.**
+
+        The one prompt that gates running someone's declared commands, so its
+        default is the safe answer and the capital in `[y/N]` means it.
+        """
+        try:
+            answer = self.read(f"  {question} [y/N] ")
+        except EOFError:
+            return False
+        return answer.strip().lower() in ("y", "yes")
+
+    def choose(self, question: str, options: Sequence[str]) -> str | None:
+        """Ask for one of `options`, or None if the human wanted none of them.
+
+        Returns None for the explicit "none" answer AND for giving up after
+        `MAX_ATTEMPTS`; the caller tells those apart by asking again, which is
+        why it gets a separate `chose_none` signal instead. Kept simple
+        deliberately — see `_ask_agent` in `cli.py`.
+        """
+        for _ in range(MAX_ATTEMPTS):
+            try:
+                answer = self.read(f"  {question} ").strip()
+            except EOFError:
+                return None
+            if answer in options or answer == NONE_ANSWER:
+                return answer
+            print(f"  not one of: {', '.join([*options, NONE_ANSWER])}")
+        return None
+
+    def secret(self, name: str) -> str:
+        return self.read_secret(f"  {name}: ")
+
+
+# What a human types to decline every option in a `choose`.
+NONE_ANSWER = "none"
+
+
+def prompts() -> Prompts:
+    """The injection point. The suite replaces this to drive the wizard
+    without a terminal; `cli.py` calls it once and passes the result down."""
+    return Prompts()
 
 
 def hold(name: str, value: str) -> None:

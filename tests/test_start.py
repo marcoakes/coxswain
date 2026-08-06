@@ -628,3 +628,179 @@ def test_the_key_step_cannot_hang_when_a_controlling_terminal_exists(
     text = output.decode("utf-8", errors="replace")
     assert os.waitstatus_to_exitcode(status) == cli.EXIT_CONFIG, text
     assert fake_agent.key_env in text
+
+
+# --- prompts, and a terminal the whole surface can live without ------------
+
+
+def scripted(answers=None, secret=None, interactive=True) -> start.Prompts:
+    """A `Prompts` the suite drives instead of a terminal.
+
+    The whole reason this seam exists: an interactive command that could only
+    be exercised by a human is one nothing in CI ever runs, and `wring start`
+    is the command a new user meets first.
+    """
+    queue = list(answers or [])
+
+    def read(question: str) -> str:
+        assert queue, f"the wizard asked one question too many: {question!r}"
+        return queue.pop(0)
+
+    def read_secret(question: str) -> str:
+        assert secret is not None, f"the wizard asked for a secret: {question!r}"
+        return secret
+
+    return start.Prompts(
+        read=read, read_secret=read_secret, interactive=lambda: interactive
+    )
+
+
+def refusing() -> start.Prompts:
+    """A `Prompts` that fails loudly if anything tries to ask a question."""
+
+    def never(question: str) -> str:
+        raise AssertionError(f"a prompt was reached with no terminal: {question!r}")
+
+    return start.Prompts(read=never, read_secret=never, interactive=lambda: False)
+
+
+def test_no_prompt_is_reachable_when_stdin_is_not_a_tty(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§8 — no prompt is reachable when stdin is not a TTY. Asserted by making
+    every reader raise: if the `isatty` gate is ever bypassed, this fails with
+    the question it tried to ask rather than hanging in CI."""
+    monkeypatch.setattr(start, "prompts", refusing)
+    monkeypatch.delenv(fake_agent.key_env, raising=False)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start"]) == cli.EXIT_CONFIG
+    capsys.readouterr()
+
+
+def test_the_gates_step_prompts_when_there_is_a_terminal(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3b, row 1 — TTY and answers missing: prompt for exactly those."""
+    monkeypatch.setattr(start, "prompts", lambda: scripted(["y", fake_agent.id]))
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert read_config(repo).run is not None
+
+
+def test_declining_the_gates_at_the_prompt_writes_nothing(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """A gate is a command that runs on this machine with the user's
+    privileges. "No" stops the launch and leaves the repo untouched."""
+    monkeypatch.setattr(start, "prompts", lambda: scripted(["n"]))
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start"])
+    capsys.readouterr()
+
+    assert code == cli.EXIT_REFUSED
+    assert not (repo / config.CONFIG_FILENAME).exists()
+
+
+def test_the_gate_prompt_defaults_to_no(repo, fake_agent, monkeypatch, capsys):
+    """A bare Enter is not consent. `[y/N]` and it means it."""
+    monkeypatch.setattr(start, "prompts", lambda: scripted([""]))
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start"]) == cli.EXIT_REFUSED
+    capsys.readouterr()
+
+
+def test_choosing_no_agent_at_the_prompt_writes_no_run_section(
+    repo, fake_agent, monkeypatch, capsys
+):
+    monkeypatch.setattr(start, "prompts", lambda: scripted(["y", "none"]))
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert read_config(repo).run is None
+
+
+def test_an_unrecognised_agent_answer_is_asked_again_then_refused(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """Bounded re-asking. A wizard that loops forever on bad input is a
+    hazard; one that gives up on the first typo is an annoyance."""
+    monkeypatch.setattr(
+        start, "prompts", lambda: scripted(["y", "nope", "still-nope", "wrong"])
+    )
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_CONFIG
+    assert "--agent" in captured.err
+
+
+def test_the_key_is_read_through_the_seam_and_never_printed(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3a — typed at a prompt, held in memory, echoed nowhere. The reader is
+    injected so the suite never reaches `getpass`, which would open /dev/tty
+    and block (§3a-i)."""
+    typed = "sk-ant-notarealkey-prompted-9d21"
+    monkeypatch.delenv(fake_agent.key_env, raising=False)
+    monkeypatch.setattr(
+        start, "prompts", lambda: scripted(["y", fake_agent.id], secret=typed)
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start"]) == cli.EXIT_OK
+    captured = capsys.readouterr()
+
+    assert typed not in captured.out + captured.err
+    assert os.environ[fake_agent.key_env] == typed, (
+        "the key never reached the environment the launched agent reads"
+    )
+    assert typed not in (repo / config.CONFIG_FILENAME).read_text("utf-8")
+
+
+def test_an_empty_key_at_the_prompt_is_not_an_answer(
+    repo, fake_agent, monkeypatch, capsys
+):
+    monkeypatch.delenv(fake_agent.key_env, raising=False)
+    monkeypatch.setattr(
+        start, "prompts", lambda: scripted(["y", fake_agent.id], secret="   ")
+    )
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_CONFIG
+    assert fake_agent.key_env in captured.err
+
+
+def test_the_whole_surface_runs_with_stdin_closed_and_does_not_hang(
+    repo, fake_agent
+):
+    """§8 — the whole surface runs with no terminal and does not hang. A real
+    subprocess with stdin at /dev/null, every answer supplied, bounded by a
+    timeout: the shape a CI job and an agent both present."""
+    import subprocess
+
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "wringer", "start",
+            "--accept-gates", "--agent", fake_agent.id,
+        ],
+        cwd=repo,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert proc.returncode == cli.EXIT_OK, proc.stdout + proc.stderr

@@ -427,6 +427,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
         return EXIT_CONFIG
 
+    # The one place this command reads from a human, built once and passed
+    # down. Everything below asks through it or does not ask at all, which is
+    # what makes the whole wizard runnable with no terminal.
+    asking = start.prompts()
+
     print("wring start — set this up and start your first build")
 
     # [1/7] preflight. Diagnose, never repair: `wring doctor`'s own checks,
@@ -474,13 +479,13 @@ def cmd_start(args: argparse.Namespace) -> int:
     # [4/7] gates. Detection's proposal, or what the repo already declares —
     # shown before it is written, because `.wringer.yaml` is code.
     _start_step(4, "gates")
-    refused = _start_gates(root, args.accept_gates)
+    refused = _start_gates(root, args.accept_gates, asking)
     if refused is not None:
         return refused
 
     # [5/7] agent. Detected, never assumed — and never installed (§3c-i).
     _start_step(5, "agent")
-    worker, refused = _start_agent(args.agent, args.no_agent)
+    worker, refused = _start_agent(args.agent, args.no_agent, asking)
     if refused is not None:
         return refused
 
@@ -499,7 +504,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     # idempotent, so stopping here leaves a valid repo and a re-runnable
     # command rather than a half-configured one.
     _start_step(6, "key")
-    key_name, refused = _start_key(worker)
+    key_name, refused = _start_key(worker, asking)
     if refused is not None:
         return refused
 
@@ -507,7 +512,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _start_gates(root: Path, accepted: bool) -> int | None:
+def _start_gates(
+    root: Path, accepted: bool, asking: start.Prompts
+) -> int | None:
     """Show what will be declared and run, or refuse for want of consent."""
     path = root / config.CONFIG_FILENAME
     if path.is_file():
@@ -533,22 +540,37 @@ def _start_gates(root: Path, accepted: bool) -> int | None:
                 "nothing\n  about your code until you replace it."
             )
 
-    if not accepted:
-        # Exit 2 naming the answer, per §3b. Not a default, and not a guess:
-        # these commands run through a shell with the user's privileges, and
-        # a wizard that assumed consent to that would be the worst thing here.
+    if accepted:
+        return None
+
+    if asking.interactive():
+        # §3b, row 1: a TTY and a missing answer means ask for exactly that
+        # one. Declining is not an error to explain away — it is a person
+        # reading a list of commands and saying no, which is the entire
+        # reason the list is printed first.
+        if asking.confirm("Run these commands to verify this repo?"):
+            return None
         print(
-            "\nwring start: this repository's gates are commands that will run "
-            "on\nthis machine, so nothing is written or run until you say so. "
-            "Re-run\nwith --accept-gates once you have read the list above.",
+            "\nwring start: not accepted, so nothing was written and nothing "
+            "ran.",
             file=sys.stderr,
         )
-        return EXIT_CONFIG
-    return None
+        return EXIT_REFUSED
+
+    # Exit 2 naming the answer, per §3b. Not a default, and not a guess:
+    # these commands run through a shell with the user's privileges, and a
+    # wizard that assumed consent to that would be the worst thing here.
+    print(
+        "\nwring start: this repository's gates are commands that will run on"
+        "\nthis machine, so nothing is written or run until you say so. Re-run"
+        "\nwith --accept-gates once you have read the list above.",
+        file=sys.stderr,
+    )
+    return EXIT_CONFIG
 
 
 def _start_agent(
-    chosen: str | None, declined: bool
+    chosen: str | None, declined: bool, asking: start.Prompts
 ) -> tuple[config.AcpWorker | None, int | None]:
     """Detect, propose, and hand back the stanza — or refuse.
 
@@ -598,11 +620,25 @@ def _start_agent(
             print(f"    {line}")
         return worker, None
 
+    installed = []
     for agent, where in agents.survey():
         if where is not None:
             print(f"  ✓ {agent.id:<14}{where}")
+            installed.append(agent.id)
         else:
             print(f"  - {agent.id:<14}not installed:  {agent.install}")
+
+    if asking.interactive() and installed:
+        picked = asking.choose(
+            f"Which one? ({', '.join(installed)}, or "
+            f"{start.NONE_ANSWER})",
+            installed,
+        )
+        if picked == start.NONE_ANSWER:
+            return _start_agent(None, True, asking)
+        if picked is not None:
+            return _start_agent(picked, False, asking)
+
     print(
         "\nwring start: choose one with --agent <id>, or --no-agent to "
         "configure\nnone. There is no default: Wringer drives the agent you "
@@ -612,7 +648,9 @@ def _start_agent(
     return None, EXIT_CONFIG
 
 
-def _start_key(worker: config.AcpWorker | None) -> tuple[str | None, int | None]:
+def _start_key(
+    worker: config.AcpWorker | None, asking: start.Prompts
+) -> tuple[str | None, int | None]:
     """The credential: prompted, held in memory, written nowhere (§3a).
 
     Never a flag. `--key <value>` is a process listing, which §3a forbids in
@@ -638,7 +676,7 @@ def _start_key(worker: config.AcpWorker | None) -> tuple[str | None, int | None]
     # closed stdin would not stop it — it would block on a terminal nobody is
     # watching. stdin, not stdout: a pipeline, a CI job and the demo recorder
     # all present a non-interactive stdin while stdout may still be a tty.
-    if not start.has_terminal():
+    if not asking.interactive():
         print(
             f"\nwring start: {name} is not set, and this is not a terminal — "
             "so there is\nnothing to prompt. Set it and run this again:\n\n"
@@ -654,7 +692,7 @@ def _start_key(worker: config.AcpWorker | None) -> tuple[str | None, int | None]
         "  into this repository, and not stored anywhere."
     )
     try:
-        value = start.prompt_for_key(name)
+        value = asking.secret(name)
     except EOFError:
         print("\nwring start: nothing was typed", file=sys.stderr)
         return None, EXIT_CONFIG
