@@ -494,7 +494,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         return EXIT_REFUSED
     emission.write()
 
-    _report_start(emission, root)
+    # [6/7] key. Typed here, held in memory, written nowhere (§3a). The config
+    # is already on disk by this point and that is deliberate: the launch is
+    # idempotent, so stopping here leaves a valid repo and a re-runnable
+    # command rather than a half-configured one.
+    _start_step(6, "key")
+    key_name, refused = _start_key(worker)
+    if refused is not None:
+        return refused
+
+    _report_start(emission, key_name)
     return EXIT_OK
 
 
@@ -603,7 +612,66 @@ def _start_agent(
     return None, EXIT_CONFIG
 
 
-def _report_start(emission: start.Emission, root: Path) -> None:
+def _start_key(worker: config.AcpWorker | None) -> tuple[str | None, int | None]:
+    """The credential: prompted, held in memory, written nowhere (§3a).
+
+    Never a flag. `--key <value>` is a process listing, which §3a forbids in
+    the same breath as the ledger and the bundle.
+    """
+    if worker is None or not worker.env_passthrough:
+        print(
+            "  no agent is configured, so there is no credential to hold.\n"
+            "  Nothing else in Wringer ever asks for one."
+        )
+        return None, None
+
+    name = worker.env_passthrough[0]
+    if start.key_in_environment(name):
+        # The name is the answer; the value is never printed, prefixed or
+        # otherwise hinted at — `wring doctor` has held that line since it
+        # shipped and this step holds the same one.
+        print(f"  {name} is already set here (value not shown).")
+        return name, None
+
+    # CHECKED BEFORE `getpass` IS EVER CALLED, and that ordering is the safety
+    # property (§3a-i): `getpass` opens /dev/tty rather than stdin, so a
+    # closed stdin would not stop it — it would block on a terminal nobody is
+    # watching. stdin, not stdout: a pipeline, a CI job and the demo recorder
+    # all present a non-interactive stdin while stdout may still be a tty.
+    if not start.has_terminal():
+        print(
+            f"\nwring start: {name} is not set, and this is not a terminal — "
+            "so there is\nnothing to prompt. Set it and run this again:\n\n"
+            f"  {start.PERSIST_HINT.format(name=name)}\n\n"
+            "There is deliberately no --key flag: a value on a command line is "
+            "a\nprocess listing anyone on the machine can read.",
+            file=sys.stderr,
+        )
+        return None, EXIT_CONFIG
+
+    print(
+        f"  {name} is not set. Type it here — it is not echoed, not written\n"
+        "  into this repository, and not stored anywhere."
+    )
+    try:
+        value = start.prompt_for_key(name)
+    except EOFError:
+        print("\nwring start: nothing was typed", file=sys.stderr)
+        return None, EXIT_CONFIG
+    if not value.strip():
+        print(
+            f"\nwring start: {name} was left empty. Run this again when you "
+            "have it.",
+            file=sys.stderr,
+        )
+        return None, EXIT_CONFIG
+
+    start.hold(name, value)
+    print("  Held in memory for this launch.")
+    return name, None
+
+
+def _report_start(emission: start.Emission, key_name: str | None) -> None:
     name = emission.path.name
     if emission.created:
         print(f"\nWrote {name}.")
@@ -613,6 +681,19 @@ def _report_start(emission: start.Emission, root: Path) -> None:
         print(f"\n{name} already says everything this launch would have added.")
     for section in emission.already:
         print(f"  '{section}' was already declared — left exactly as it was.")
+
+    if key_name is not None:
+        # §3a — it is never persisted. The command is printed and neither it
+        # nor anything else is run: storing a credential is a larger power
+        # than launching a build, and this slice was not granted it. A
+        # keychain is a declared non-goal (§7) until a field report shows
+        # people losing the key between sessions.
+        print(
+            f"\nWringer stored nothing. {name} records the NAME "
+            f"{key_name}, never a\nvalue. To have it set next time, run this "
+            "yourself:\n\n"
+            f"  {start.PERSIST_HINT.format(name=key_name)}"
+        )
 
     print(f"\nNext:\n  read {name}, then: wring verify")
 

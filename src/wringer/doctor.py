@@ -71,7 +71,7 @@ def run_checks(root: Path) -> list[Check]:
     blocking ✗ makes a true statement into a false problem.
     """
     here = in_repository(root)
-    machine = [_python(), _wring(), _git(), _runtime(), _api_key()]
+    machine = [_python(), _wring(), _git(), _runtime(), _api_key(root)]
     if not here:
         skipped = [
             Check(name, SKIP, "not a git repository — run from your repo to check",
@@ -211,19 +211,58 @@ def _workspace(root: Path) -> Check:
     return Check("workspace writable", OK, f"{probe} is writable")
 
 
-def _api_key() -> Check:
-    """Only relevant once a judge or spec step is configured, so its absence
-    is never fatal. Values are never printed — the name is the answer."""
-    named = [
-        name for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
-        if os.environ.get(name)
-    ]
+# The names to look for when the repository has not declared one — or when
+# there is no repository to ask. Used ONLY as a fallback: a config that names
+# its own variable is the authority on what this machine needs.
+WELL_KNOWN_KEY_ENVS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+
+
+def _declared_key_names(root: Path) -> tuple[str, ...]:
+    """The variable names this repository says hold an LLM credential.
+
+    Narrower than `config.declared_secret_names`, deliberately: that one
+    answers "what must the redactor erase" and includes `forge.token_env`,
+    which is a forge token and not an LLM key. Reporting a set `FORGE_TOKEN`
+    as "llm key: ok" would be a check that lies to pass.
+
+    Best-effort: an unreadable or invalid config is `_config`'s problem to
+    report, and this check must not fail twice for it.
+    """
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except (config.ConfigError, OSError):
+        return ()
+    names: list[str] = []
+    if cfg.judge is not None and cfg.judge.api_key_env:
+        names.append(cfg.judge.api_key_env)
+    if cfg.run is not None and isinstance(cfg.run.worker, config.AcpWorker):
+        names.extend(cfg.run.worker.env_passthrough)
+    return tuple(dict.fromkeys(names))
+
+
+def _api_key(root: Path) -> Check:
+    """Only relevant once a judge or an agent is configured, so its absence is
+    never fatal. Values are never printed — the name is the answer.
+
+    It reads the names the CONFIG declares first. Hardcoding the two
+    well-known ones meant a repo whose agent wants a differently-named
+    variable got "no LLM API key" with the key correctly set, and no
+    indication of which name doctor had actually looked for. `wring start`
+    writes exactly such a name.
+    """
+    declared = _declared_key_names(root)
+    looked_for = declared or WELL_KNOWN_KEY_ENVS
+    named = [name for name in looked_for if os.environ.get(name)]
     if named:
         return Check("llm key", OK, f"set: {', '.join(named)} (value not shown)")
     return Check(
-        "llm key", WARN, "no LLM API key in the environment",
-        "Only needed for `wring judge --send`. Provide it when you launch, "
-        "and never paste it to an agent",
+        "llm key", WARN,
+        f"no LLM API key set — looked for {', '.join(looked_for)}",
+        "Only needed for `wring judge --send` and for an agent driving "
+        "`wring run`"
+        + ("" if declared else "; this repo declares no name, so those are "
+                               "the well-known ones")
+        + ". Provide it when you launch, and never paste it to an agent",
     )
 
 

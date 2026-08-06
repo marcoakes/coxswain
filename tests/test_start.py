@@ -9,7 +9,9 @@ bytes that landed on disk and push them back through `config.parse`.
 from __future__ import annotations
 
 import os
+import pty
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,11 @@ from wringer import agents, cli, config, start
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
+# Obviously fake, and deliberately so: a fixture credential that could be
+# mistaken for a real one is a hazard in a repo whose product is evidence.
+FAKE_KEY = "sk-ant-notarealkey-3c81f0a6d2e94b57"
 
 
 @pytest.fixture
@@ -40,6 +47,11 @@ def fake_agent(tmp_path_factory, monkeypatch):
     binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     binary.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    # The launch has a key step, and its non-interactive form is the named
+    # variable already being set (§3b, row 5). Set here so every test that
+    # merely needs a working agent gets past it; the tests that are ABOUT the
+    # key remove it again.
+    monkeypatch.setenv(agent.key_env, FAKE_KEY)
     return agent
 
 
@@ -435,3 +447,184 @@ def test_the_acp_spec_no_longer_promises_a_consent_based_install():
     text = (repo_root() / "SPEC_ACP_V0.md").read_text(encoding="utf-8")
     assert "Consent-based install belongs to" not in text
     assert "never installs" in text or "does not install" in text
+
+
+# --- the key: prompted, held in memory, written nowhere --------------------
+def test_an_already_set_variable_satisfies_the_key_step(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3b, row 5 — the key's non-interactive form is the named variable
+    already being set. That is how every other command in the program receives
+    a credential, and it is what makes the launch runnable in CI."""
+    monkeypatch.setenv(fake_agent.key_env, FAKE_KEY)
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--agent", fake_agent.id])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_OK
+    assert fake_agent.key_env in captured.out, "the variable was not named"
+    assert FAKE_KEY not in captured.out + captured.err, (
+        "the value was printed — the name is the answer, never the value"
+    )
+
+
+def test_the_key_step_exits_2_naming_the_variable_with_no_terminal(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3b, row 5 — unset and no TTY is exit 2 naming the variable. Never a
+    guess, never a hang."""
+    monkeypatch.delenv(fake_agent.key_env, raising=False)
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--agent", fake_agent.id])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_CONFIG
+    assert fake_agent.key_env in captured.err
+
+
+def test_the_key_appears_in_no_file_the_wizard_writes(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§8 — the key appears in no file the wizard writes, asserted by a test
+    that greps for the value."""
+    monkeypatch.setenv(fake_agent.key_env, FAKE_KEY)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start", "--accept-gates", "--agent", fake_agent.id]) == 0
+    capsys.readouterr()
+
+    hits = [
+        path.relative_to(repo).as_posix()
+        for path in repo.rglob("*")
+        if path.is_file()
+        and ".git/" not in path.relative_to(repo).as_posix()
+        and FAKE_KEY in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert hits == [], f"the credential reached {hits}"
+
+
+def test_the_config_records_the_name_and_writes_no_judge_section(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3a — the wizard writes the key's variable name into
+    `run.worker.acp.env_passthrough` and **nowhere else**. Not
+    `judge.api_key_env`: that key exists only under `judge:`, whose parser
+    hard-requires `endpoint`, `model` and `rubric` — three values law 5
+    forbids guessing and that §1 never collects. Judging is not part of the
+    launch."""
+    monkeypatch.setenv(fake_agent.key_env, FAKE_KEY)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start", "--accept-gates", "--agent", fake_agent.id]) == 0
+    capsys.readouterr()
+
+    raw = raw_config(repo)
+    assert "judge" not in raw
+    assert raw["run"]["worker"]["acp"]["env_passthrough"] == [fake_agent.key_env]
+
+
+def test_the_declared_name_is_folded_into_the_redactor(repo, fake_agent):
+    """§3a — the value is folded into the redactor before anything runs, the
+    way `cmd_judge` already does it. Fold first, then act: the order is the
+    guarantee, and the config the wizard wrote is what carries the name."""
+    from wringer import redact
+
+    start.emit(repo, worker=agents.worker(fake_agent)).write()
+    cfg = read_config(repo)
+
+    assert config.declared_secret_names(cfg) == (fake_agent.key_env,)
+    redactor = redact.Redactor.from_config(
+        cfg.evidence,
+        environ={fake_agent.key_env: FAKE_KEY},
+        extra_names=config.declared_secret_names(cfg),
+    )
+    assert redactor.scrub(f"leaked {FAKE_KEY}") == "leaked [REDACTED]"
+
+
+def test_the_persistence_command_is_printed_and_never_run(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3a — it is never persisted. At the end the exact command to make it
+    durable is printed, and neither it nor anything else is run. Storing a
+    credential is a larger power than launching a build, and this slice was
+    not granted it."""
+    monkeypatch.setenv(fake_agent.key_env, FAKE_KEY)
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["start", "--accept-gates", "--agent", fake_agent.id]) == 0
+    out = capsys.readouterr().out
+
+    assert start.PERSIST_HINT.format(name=fake_agent.key_env) in out
+    assert "stores nothing" in out or "stored nothing" in out
+
+
+@pytest.mark.skipif(os.name != "posix", reason="pty is POSIX-only, like the rest")
+def test_the_key_step_cannot_hang_when_a_controlling_terminal_exists(
+    repo, fake_agent, monkeypatch
+):
+    """§3a-i, and it is a §8 box. CPython's `getpass` opens **/dev/tty**, not
+    stdin, falling back to stdin only if that fails. So closing or redirecting
+    stdin does NOT stop it: reached under the demo recorder it would open the
+    operator's real terminal, print its prompt where the recording cannot see
+    it, and block forever — the recorder's read loop exits only on pty EOF or
+    child exit, and its 30-second cap sits after that loop.
+
+    So the `stdin.isatty()` gate is checked BEFORE `getpass` is ever called,
+    and that ordering is a safety property rather than a style. This is the
+    shape that hangs without it: stdin closed AND a controlling tty present.
+    """
+    import select
+    import signal
+    import time
+
+    env = dict(os.environ)
+    env.pop(fake_agent.key_env, None)
+    argv = [
+        sys.executable, "-m", "wringer", "start",
+        "--accept-gates", "--agent", fake_agent.id,
+    ]
+
+    pid, master = pty.fork()
+    if pid == 0:  # pragma: no cover - the child never returns
+        try:
+            os.chdir(repo)
+            # pty.fork() made the pty this process's CONTROLLING terminal and
+            # its stdin. Put /dev/null back on fd 0: stdin is then not a tty
+            # while /dev/tty is still openable — exactly a recorder's shape.
+            devnull = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(devnull, 0)
+            os.execve(argv[0], argv, env)
+        finally:
+            os._exit(127)
+
+    deadline = time.monotonic() + 30
+    status: int | None = None
+    output = b""
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([master], [], [], 0.2)
+        if ready:
+            try:
+                output += os.read(master, 65536)
+            except OSError:  # the pty closed with the child
+                pass
+        finished, code = os.waitpid(pid, os.WNOHANG)
+        if finished == pid:
+            status = code
+            break
+
+    if status is None:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        os.close(master)
+        pytest.fail(
+            "wring start blocked with stdin closed and a controlling terminal "
+            "present — the isatty gate is gone, and getpass is reading "
+            "/dev/tty. Nothing would ever answer it"
+        )
+
+    os.close(master)
+    text = output.decode("utf-8", errors="replace")
+    assert os.waitstatus_to_exitcode(status) == cli.EXIT_CONFIG, text
+    assert fake_agent.key_env in text

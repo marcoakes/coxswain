@@ -140,8 +140,13 @@ def run(
     patch = git.diff(root, state.head_sha)
     status_text = git.status(root)
     # Built from the environment this run inherits, so the gates' own
-    # secrets are the ones erased.
-    redactor = redact.Redactor.from_config(cfg.evidence)
+    # secrets are the ones erased — plus every variable this config names as
+    # holding a credential. A gate is a shell command that inherits the whole
+    # environment, so the key `run.worker.acp.env_passthrough` declares for an
+    # agent is one a gate can echo just as easily.
+    redactor = redact.Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
     if output is not None:
         bundle = evidence.Bundle.at(Path(output), redactor=redactor)
     else:

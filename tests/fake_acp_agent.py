@@ -16,15 +16,25 @@ Behaviour is chosen by argv so one file covers every case the loop needs:
     hang       accept the prompt and never answer
     deaf       answer session/new, then never read stdin again (pipe fills)
     garbage    emit a line that is not JSON, then behave
+    leak       print a passed-through credential to stderr AND into a
+               session/update, then fix. The shape §8 asks for: a secret
+               planted in agent output, so a test can grep the bundle.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 
 BEHAVIOUR = sys.argv[1] if len(sys.argv) > 1 else "fix"
+
+# The variables `leak` will echo if they reached it. One matches the
+# redactor's default `*KEY*` pattern and one deliberately matches none of
+# them, so the two tests can tell the acp.py scrub apart from the
+# env_passthrough folding.
+LEAKABLE = ("WRINGER_TEST_API_KEY", "WRINGER_TEST_CREDENTIAL")
 
 
 def send(message: dict) -> None:
@@ -111,6 +121,18 @@ def main() -> int:
                         return 0
             notify(session_id, f"working ({BEHAVIOUR})")
 
+            if BEHAVIOUR == "leak":
+                # Both paths acp.py writes: the child's own stderr, which
+                # used to be a raw file handle, and a session/update, whose
+                # text used to be joined and written unscrubbed.
+                for name in LEAKABLE:
+                    value = os.environ.get(name)
+                    if value:
+                        sys.stderr.write(f"stderr says {name}={value}\n")
+                        sys.stderr.flush()
+                        notify(session_id, f"update says {name}={value}")
+
+
             if BEHAVIOUR == "permission":
                 outbound += 1
                 request(outbound, "session/request_permission", {
@@ -122,7 +144,7 @@ def main() -> int:
                     ],
                 })
 
-            if BEHAVIOUR in ("fix", "permission", "garbage"):
+            if BEHAVIOUR in ("fix", "permission", "garbage", "leak"):
                 outbound += 1
                 request(outbound, "fs/write_text_file", {
                     "sessionId": session_id,

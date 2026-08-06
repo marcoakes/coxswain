@@ -478,7 +478,13 @@ def run(
     whole_loop = wall_clock if wall_clock is not None else settings.wall_clock
 
     planned = verify.plan(cfg, None)
-    redactor = Redactor.from_config(cfg.evidence)
+    # `extra_names` matters most HERE: this is the command that hands an agent
+    # a credential by name, and `config.py` has always promised those values
+    # are folded in. Without it a passthrough variable was protected only when
+    # its name happened to match one of the default patterns.
+    redactor = Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
     state = git.inspect(root)
 
     if resuming is not None:
@@ -736,6 +742,10 @@ def _run_acp_worker(
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             on_spawn=remember,
+            # The agent's stderr and its session updates both become files in
+            # this bundle, so they get the bundle's redactor — the same one
+            # every other write path here already uses.
+            redactor=bundle.redactor,
         )
     except acp.AcpError as exc:
         # It is over either way, so the pgid goes: a stale one names a process
@@ -744,7 +754,12 @@ def _run_acp_worker(
         # Not a verdict about the code — a failed worker turn, which the
         # evidence will judge on the next lap like any other.
         timed_out = "deadline" in str(exc)
-        stdout_path.write_text(f"[wringer: ACP turn failed] {exc}\n", encoding="utf-8")
+        # Scrubbed like every other write into a bundle: the message quotes
+        # what the agent said, and what the agent said may be a credential.
+        stdout_path.write_text(
+            bundle.redactor.scrub(f"[wringer: ACP turn failed] {exc}\n"),
+            encoding="utf-8",
+        )
         if not stderr_path.exists():
             stderr_path.write_text("", encoding="utf-8")
         result = gates.GateResult(

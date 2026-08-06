@@ -23,12 +23,22 @@ rulings that make writing a config safe (§3d):
 
 from __future__ import annotations
 
+import getpass
+import os
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from wringer import config, detect
+
+# What a human runs to have the variable set next time. Printed, never run —
+# and it is `SETUP.md`'s own line, because the route a credential takes from a
+# person's head into a process should be the one route this project documents.
+# `read -rs` keeps it off the terminal and out of shell history.
+PERSIST_HINT = 'read -rs -p "{name}: " {name} && export {name}'
 
 
 class StartError(Exception):
@@ -218,6 +228,74 @@ def _parse(text: str, source: str) -> config.Config:
         raise StartError(f"{source} is not valid YAML: {exc}") from exc
     except config.ConfigError as exc:
         raise StartError(str(exc)) from exc
+
+
+# --- the credential ---------------------------------------------------------
+#
+# SPEC_START_V0.md §3a: prompted, held in memory for the process this launches,
+# written nowhere. Not to config, not to disk, not to the ledger, not to a
+# bundle, not to a process listing.
+
+
+def has_terminal(stream: object | None = None) -> bool:
+    """Whether there is a human to ask. **stdin, not stdout** (§3b).
+
+    A pipeline, a CI job and the demo recorder all present a non-interactive
+    stdin while stdout may still be a terminal, so testing the wrong stream
+    would make every one of them look answerable.
+    """
+    stream = stream if stream is not None else sys.stdin
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, ValueError):
+        # A closed or replaced stdin is not a terminal, and asking it is not
+        # an error worth raising here.
+        return False
+
+
+def key_in_environment(name: str) -> bool:
+    """Whether the named variable already carries a value.
+
+    The non-interactive form of the key answer (§3b, row 5), and it is how
+    every other command in the program already receives a credential.
+    """
+    return bool(os.environ.get(name))
+
+
+def prompt_for_key(name: str, reader: Callable[[str], str] | None = None) -> str:
+    """Ask for the credential, without echoing it.
+
+    **Only ever called behind `has_terminal()`, and that ordering is a safety
+    property rather than a style** (§3a-i). CPython's `getpass` opens
+    `/dev/tty` directly and falls back to `sys.stdin` only if that fails — so
+    closing or redirecting stdin does not stop it. Reached under the demo
+    recorder it would open the operator's real terminal, print its prompt
+    where the recording cannot see it, and block forever.
+
+    `reader` is the seam the suite drives instead of a terminal. It defaults to
+    `getpass`, which is the whole point: no runtime dependency, no TUI, and the
+    same mechanism `SETUP.md`'s `read -rs` already documents.
+    """
+    ask = reader if reader is not None else getpass.getpass
+    return ask(f"  {name}: ")
+
+
+def hold(name: str, value: str) -> None:
+    """Put the credential where this launch's children will find it.
+
+    In this process's environment and **nowhere else** — so it reaches the ACP
+    agent through `run.worker.acp.env_passthrough`, which passes named
+    variables and withholds everything else (`acp.py`'s minimal env). It is
+    not written to the config, and there is no flag that could have carried
+    it: `--key <value>` is a process listing.
+
+    This is exactly what `SETUP.md`'s `read -rs … && export` does today, one
+    process narrower and with no shell history to leak into. Every command
+    that writes a bundle folds the names in `config.declared_secret_names`
+    into its redactor, so the value is scrubbed out of the evidence even if a
+    gate or an agent echoes it.
+    """
+    os.environ[name] = value
 
 
 def gate_summary(cfg: config.Config) -> str:

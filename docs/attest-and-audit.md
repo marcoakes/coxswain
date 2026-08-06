@@ -135,8 +135,8 @@ $ wring doctor
 ✓ git repository        …/wringer-capture-attest/repo
 ✓ gates                 1 gate(s): test
 ✓ workspace writable    …/repo/.wringer is writable
-! llm key               no LLM API key in the environment
-                        → Only needed for `wring judge --send`. Provide it when you launch, and never paste it to an agent
+! llm key               no LLM API key set — looked for ANTHROPIC_API_KEY, OPENAI_API_KEY
+                        → Only needed for `wring judge --send` and for an agent driving `wring run`; this repo declares no name, so those are the well-known ones. Provide it when you launch, and never paste it to an agent
 
 Ready. The ! lines are optional extras, not problems.
 ```

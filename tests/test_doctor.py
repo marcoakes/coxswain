@@ -280,3 +280,84 @@ def test_the_json_shape_carries_skip(tmp_path, monkeypatch, capsys):
     statuses = {c["name"]: c["status"] for c in payload["checks"]}
     assert statuses["git repository"] == doctor.SKIP
     assert statuses["python"] == doctor.OK
+
+
+# --- the key check must read the names the CONFIG declares -----------------
+#
+# `_api_key` was hardcoded to ANTHROPIC_API_KEY and OPENAI_API_KEY. It read
+# neither `judge.api_key_env` nor `run.worker.acp.env_passthrough`, so a user
+# whose agent wants a differently-named variable saw "no LLM API key" with the
+# key correctly set — and `wring start` walks straight into it, because the
+# name it writes comes from the agent table rather than from that pair.
+
+DECLARES_ITS_OWN_NAME = """\
+version: 1
+gates:
+  - id: t
+    run: "true"
+
+run:
+  worker:
+    acp:
+      command: some-agent
+      env_passthrough: [MY_AGENT_CREDENTIAL]
+"""
+
+
+def test_doctor_reads_the_key_name_the_config_declares(
+    repo, write_config, monkeypatch
+):
+    write_config(repo, DECLARES_ITS_OWN_NAME)
+    monkeypatch.setenv("MY_AGENT_CREDENTIAL", "notarealkey-8812fa03")
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    check = by_name(doctor.run_checks(repo))["llm key"]
+
+    assert check.status == doctor.OK, (
+        "the key is set under the name this repo declared, and doctor said no"
+    )
+    assert "MY_AGENT_CREDENTIAL" in check.detail
+    assert "notarealkey" not in check.detail  # the name is the answer
+
+
+def test_doctor_names_the_variable_it_looked_for(repo, write_config, monkeypatch):
+    """A warning that does not say which name it wanted sends the reader to
+    export the wrong one."""
+    write_config(repo, DECLARES_ITS_OWN_NAME)
+    for name in ("MY_AGENT_CREDENTIAL", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    check = by_name(doctor.run_checks(repo))["llm key"]
+
+    assert check.status == doctor.WARN
+    assert "MY_AGENT_CREDENTIAL" in check.detail
+
+
+# The name guard above compares NAMES only — which is exactly how a change to
+# this check's wording left three documents quoting a sentence the program no
+# longer printed. Captured transcripts are evidence (law 8): change the line
+# and the documents showing it are recaptured in the same commit.
+
+DOCS_WITH_KEY_TRANSCRIPT = ("SETUP.md", "docs/attest-and-audit.md")
+
+
+def test_the_key_line_a_doc_shows_is_the_line_doctor_prints(tmp_path, monkeypatch):
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    real = by_name(doctor.run_checks(tmp_path))["llm key"].detail
+
+    offenders = []
+    for doc in DOCS_WITH_KEY_TRANSCRIPT:
+        path = repo_root() / doc
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text("utf-8").splitlines(), 1):
+            if line.startswith("! llm key"):
+                shown = line.split("llm key", 1)[1].strip()
+                if shown != real:
+                    offenders.append(f"{doc}:{number} shows {shown!r}")
+    assert not offenders, (
+        f"a doctor transcript no longer matches what doctor prints ({real!r}): "
+        + "; ".join(offenders)
+    )

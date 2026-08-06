@@ -491,8 +491,8 @@ A real captured run, on a Mac with no container runtime installed:
 ✓ git repository        /Users/you/wringer
 ✓ gates                 2 gate(s): lint, test
 ✓ workspace writable    /Users/you/wringer/.wringer is writable
-! llm key               no LLM API key in the environment
-                        → Only needed for `wring judge --send`. Provide it when you launch, and never paste it to an agent
+! llm key               no LLM API key set — looked for ANTHROPIC_API_KEY, OPENAI_API_KEY
+                        → Only needed for `wring judge --send` and for an agent driving `wring run`; this repo declares no name, so those are the well-known ones. Provide it when you launch, and never paste it to an agent
 
 Ready. The ! lines are optional extras, not problems.
 doctor exit: 0
@@ -527,8 +527,8 @@ cd /tmp && mkdir -p not-a-repo && cd not-a-repo && wring doctor; echo "doctor ex
 - git repository        not a git repository — run from your repo to check
 - gates                 not a git repository — run from your repo to check
 - workspace writable    not a git repository — run from your repo to check
-! llm key               no LLM API key in the environment
-                        → Only needed for `wring judge --send`. Provide it when you launch, and never paste it to an agent
+! llm key               no LLM API key set — looked for ANTHROPIC_API_KEY, OPENAI_API_KEY
+                        → Only needed for `wring judge --send` and for an agent driving `wring run`; this repo declares no name, so those are the well-known ones. Provide it when you launch, and never paste it to an agent
 
 This machine is ready. The - lines describe a repository and were not checked here — run `wring doctor` from your repo for those.
 doctor exit: 0

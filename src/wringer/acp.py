@@ -28,6 +28,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from wringer import gates
+from wringer.redact import Redactor
+
 PROTOCOL_VERSION = 1
 
 # What Wringer, as a client, offers the agent. Terminal is deliberately
@@ -48,6 +51,10 @@ REQUEST_TIMEOUT_SECONDS = 120
 # that hangs without draining stdin wedges the supervisor indefinitely.
 # Short, because a healthy agent drains its input immediately.
 WRITE_TIMEOUT_SECONDS = 30
+
+# How long to keep reading a stopped agent's stderr before giving up on
+# it. `gates._drain`'s number and `gates._drain`'s reason.
+DRAIN_TIMEOUT_SECONDS = 5
 
 
 class AcpError(Exception):
@@ -241,6 +248,7 @@ def run_turn(
     stdout_path: Path,
     stderr_path: Path,
     on_spawn: Callable[[int], None] | None = None,
+    redactor: Redactor | None = None,
 ) -> tuple[Turn, int]:
     """Hold one ACP session and return what it did, plus the exit status.
 
@@ -251,7 +259,16 @@ def run_turn(
     loop records a group to reap. It matches `gates.run`'s callback of the
     same name deliberately: the two worker forms must be supervisable through
     the same mechanism, or "an ACP worker is a worker" is only a comment.
+
+    **Both log paths are scrubbed before the write**, the way `gates.py` has
+    always done it. They were not: the child was handed a raw file handle for
+    its stderr, and `turn.updates` were joined and written untouched. An agent
+    that echoed a credential — and an agent is given one, by name, through
+    `env_passthrough` — put it straight into a bundle. That is why stderr
+    travels through a pipe here rather than into the file directly; redaction
+    has to happen before the bytes land, never as a cleanup pass.
     """
+    redactor = redactor or Redactor()
     env = {
         "PATH": os.environ.get("PATH", ""),
         "HOME": os.environ.get("HOME", ""),
@@ -268,7 +285,10 @@ def run_turn(
             env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=stderr_path.open("wb"),
+            # A PIPE, not `stderr_path.open("wb")`. The file handle meant the
+            # agent's stderr reached the disk unscrubbed — and leaked the
+            # handle besides.
+            stderr=subprocess.PIPE,
             start_new_session=os.name == "posix",
         )
     except OSError as exc:
@@ -276,6 +296,14 @@ def run_turn(
             f"could not start the ACP agent {command!r}: {exc}. Wringer never "
             "installs an agent — install the one you declared"
         ) from exc
+
+    # Drained continuously on its own thread: a stderr pipe nobody reads fills
+    # its buffer and blocks the agent, which would look exactly like a hang.
+    stderr_chunks: list[bytes] = []
+    stderr_pump = threading.Thread(
+        target=_pump, args=(proc.stderr, stderr_chunks), daemon=True
+    )
+    stderr_pump.start()
 
     if on_spawn is not None:
         # Before the handshake, not after it: an agent that hangs during
@@ -319,9 +347,37 @@ def run_turn(
         connection.drain()
     finally:
         _stop(proc, timeout)
-        stdout_path.write_text("\n".join(turn.updates) + "\n", encoding="utf-8")
+        # Bounded, for `gates._drain`'s reason: the agent is dead by now, but
+        # anything it spawned and left running still holds the inherited pipe
+        # open, and a supervisor that waits for that never returns.
+        stderr_pump.join(DRAIN_TIMEOUT_SECONDS)
+        _write_log(
+            stdout_path, ("\n".join(turn.updates) + "\n").encode(), redactor
+        )
+        _write_log(stderr_path, b"".join(stderr_chunks), redactor)
 
     return turn, proc.returncode if proc.returncode is not None else 0
+
+
+def _pump(stream: Any, sink: list[bytes]) -> None:
+    """Read a stream to EOF, keeping every byte for the caller to scrub."""
+    if stream is None:  # pragma: no cover - always piped by the caller
+        return
+    try:
+        for raw in stream:
+            sink.append(raw)
+    except (OSError, ValueError):  # pragma: no cover - the pipe died with it
+        pass
+
+
+def _write_log(path: Path, data: bytes, redactor: Redactor) -> None:
+    """Scrub, bound, write — `gates._write_logs`'s order, and its reason.
+
+    Truncation must never be what saves a secret, so the limit applies to the
+    already-redacted text.
+    """
+    bounded, _ = gates.truncate(redactor.scrub_bytes(data), gates.MAX_LOG_BYTES)
+    path.write_bytes(bounded)
 
 
 def _handle(message: dict, connection: Connection, root: Path, turn: Turn) -> None:

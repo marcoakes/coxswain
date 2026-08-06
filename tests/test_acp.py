@@ -391,3 +391,84 @@ def test_a_healthy_agent_is_not_slowed_by_the_write_ceiling(repo, monkeypatch,
 
     capsys.readouterr()
     assert (repo / "calc.py").read_text(encoding="utf-8").strip() == "FIXED"
+
+
+# --- a secret in the agent's output must not reach the bundle --------------
+#
+# `acp.py` handed the child a RAW stderr handle and wrote its session updates
+# with no scrub, unlike the shell path (`gates.py:167-180`, which captures
+# through a pipe precisely so redaction can happen BEFORE the write). Those
+# logs land in a bundle, so until this was fixed a key passed to an agent
+# could reach one — which made SPEC_START_V0.md §8's "no bundle" box
+# unmeetable. Both tests plant a real secret in real agent output and grep.
+
+
+def wringer_tree(repo: Path) -> list[Path]:
+    return [p for p in (repo / ".wringer").rglob("*") if p.is_file()]
+
+
+def mentions(repo: Path, needle: str) -> list[str]:
+    hits = []
+    for path in wringer_tree(repo):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # pragma: no cover - nothing here is unreadable
+            continue
+        if needle in text:
+            hits.append(path.relative_to(repo).as_posix())
+    return hits
+
+
+def test_a_secret_the_agent_echoes_never_reaches_the_bundle(
+    repo, monkeypatch, capsys
+):
+    """The acp.py scrub, isolated. The variable's NAME matches the redactor's
+    default `*KEY*` pattern, so the redactor knows the value however
+    `env_passthrough` is handled — the only thing that can leak it is an
+    unscrubbed write path."""
+    secret = "sk-ant-notarealkey-4a7f2c9e1b6d8035"
+    monkeypatch.setenv("WRINGER_TEST_API_KEY", secret)
+    setup(
+        repo,
+        "leak",
+        env_passthrough="      env_passthrough: [WRINGER_TEST_API_KEY]\n",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["run"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert wringer_tree(repo), "the loop wrote no bundle to grep"
+    assert mentions(repo, secret) == [], (
+        "the agent's own output carried a live credential into the evidence"
+    )
+    # The scrub happened rather than the leak simply not being written: the
+    # placeholder is there in its place.
+    assert mentions(repo, "[REDACTED]"), "nothing was scrubbed at all"
+
+
+def test_an_env_passthrough_value_is_redacted_even_with_an_unremarkable_name(
+    repo, monkeypatch, capsys
+):
+    """`config.py:190-192` promises every named passthrough variable's value is
+    folded into the redactor, and no code did it — `loop.run` built the
+    redactor with no `extra_names`. So a passthrough variable was only
+    protected if its NAME happened to match `*TOKEN*`/`*SECRET*`/`*KEY*`.
+    `WRINGER_TEST_CREDENTIAL` matches none of them, which is the whole point.
+    """
+    secret = "notarealcredential-9f3e11c4a7028dd6"
+    monkeypatch.setenv("WRINGER_TEST_CREDENTIAL", secret)
+    setup(
+        repo,
+        "leak",
+        env_passthrough="      env_passthrough: [WRINGER_TEST_CREDENTIAL]\n",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["run"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert mentions(repo, secret) == [], (
+        "a declared passthrough variable's value reached the evidence — the "
+        "promise in config.py's own comment was not kept"
+    )

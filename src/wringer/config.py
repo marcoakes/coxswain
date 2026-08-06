@@ -808,6 +808,36 @@ def _positive_int(
     return value
 
 
+def declared_secret_names(cfg: Config) -> tuple[str, ...]:
+    """Every environment variable NAME this config says holds a credential.
+
+    One place, because there are now four of them — `judge.api_key_env`,
+    `forge.token_env` and every name under `run.worker.acp.env_passthrough` —
+    and a caller that folds three of the four into its redactor protects
+    almost everything.
+
+    `AcpWorker`'s own docstring has always said "each named variable's value is
+    is folded into the redactor", and this module's comment on
+    `env_passthrough` says it too. **Nothing did it.** `loop.run` built its
+    redactor from `evidence:` alone, so a passthrough variable was redacted
+    only if its name happened to match `*TOKEN*`, `*SECRET*` or `*KEY*` — a
+    variable called anything else was handed to an agent and then written to
+    the bundle verbatim if the agent echoed it. This function is what makes
+    the promise true; `verify.run` and `loop.run` are its callers.
+
+    Order is stable and duplicates are dropped: the result reaches
+    `Redactor.from_config`, which turns names into values.
+    """
+    names: list[str] = []
+    if cfg.judge is not None and cfg.judge.api_key_env:
+        names.append(cfg.judge.api_key_env)
+    if cfg.forge is not None and cfg.forge.token_env:
+        names.append(cfg.forge.token_env)
+    if cfg.run is not None and isinstance(cfg.run.worker, AcpWorker):
+        names.extend(cfg.run.worker.env_passthrough)
+    return tuple(dict.fromkeys(names))
+
+
 def substitute(command: str, **values: Any) -> str:
     """Fill a worker command's placeholders.
 
