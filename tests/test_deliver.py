@@ -993,6 +993,47 @@ def test_a_renamed_file_is_not_resurrected_on_the_delivered_branch(
     assert "src.py" not in git(delivery_repo, "status", "--porcelain")
 
 
+def test_a_rename_made_in_an_editor_is_not_resurrected_either(
+    delivery_repo, monkeypatch, capsys
+):
+    """The same hole, reached through the porcelain's OTHER column.
+
+    A rename done by `git mv` flags the index column; a rename done in an
+    editor and then declared with `git add -N` flags the worktree column
+    (` R b.c\\0a.c\\0`), and the parser used to test the index column alone.
+    With the two-entry shape unrecognised the source was read as a status
+    line of its own, so a 3-character path sliced to the empty string, which
+    then vanished from the NUL-joined pathspec. `git commit --only` never
+    named the deletion and the delivered branch kept `a.c` — no refusal, no
+    error, exactly the outcome the rename fix above existed to prevent.
+    """
+    (delivery_repo / "feature.py").unlink()  # start from the fixture's clean base
+    (delivery_repo / "a.c").write_text("int original(void) { return 1; }\n", "utf-8")
+    git(delivery_repo, "add", "-A")
+    git(delivery_repo, "commit", "-m", "add source")
+    (delivery_repo / "a.c").rename(delivery_repo / "b.c")
+    git(delivery_repo, "add", "-N", "b.c")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "editorrename")
+    bundle = deliver.Bundle.create(delivery_repo / deliver.DELIVERIES_DIRNAME)
+    bundle.write_plan(planned)
+    deliver.send(delivery_repo, bundle, planned, push=False)
+
+    shipped = set(
+        git(
+            delivery_repo, "ls-tree", "-r", "--name-only", "wringer/editorrename"
+        ).split()
+    )
+    assert "b.c" in shipped
+    assert "a.c" not in shipped, (
+        "the delivered branch resurrected a file the verified tree deleted"
+    )
+    assert "a.c" not in git(delivery_repo, "status", "--porcelain")
+
+
 def test_a_file_added_inside_an_untracked_directory_is_refused(
     delivery_repo, monkeypatch, capsys
 ):

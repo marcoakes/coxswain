@@ -191,9 +191,22 @@ def _parse_status(porcelain: str | None) -> tuple[tuple[str, ...], tuple[str, ..
         entry = entries[index]
         code, path = entry[:2], entry[3:]  # "XY path"
         index += 1
-        if code[:1] in ("R", "C"):
+        if "R" in code or "C" in code:
             # A rename or copy is followed by its source path in the NEXT
             # NUL-separated entry. Both paths are changes.
+            #
+            # BOTH columns are tested, not just the index one. Measured on
+            # git 2.50.1, a rename wears three codes — `R ` from `git mv`,
+            # ` R` from a rename made in an editor and then declared with
+            # `git add -N`, and `RM` from `git mv` plus an edit. Reading the
+            # index column alone missed the middle one, and missing it did
+            # not merely lose a path: with the two-entry shape unrecognised
+            # the source was parsed as a status line of its own, so
+            # `entry[3:]` sliced a 3-character path down to the empty string.
+            # That empty string then vanished into the NUL join that builds
+            # `wring deliver`'s pathspec, `git commit --only` never named the
+            # deletion, and the delivered branch kept a file the gates had
+            # seen removed — silently, which is the whole problem.
             #
             # This used to skip the source, reasoning that the new path is
             # the one that exists now. True of the source as a *file*, false

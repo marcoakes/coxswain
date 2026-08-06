@@ -300,3 +300,63 @@ def test_a_rename_source_is_not_confused_with_an_untracked_file(repo: Path, git_
 
     assert set(state.changed_files) == {"src.py", "dst.py"}, state.changed_files
     assert state.untracked == ("loose.txt",), state.untracked
+
+
+# --- a rename wears its flag in EITHER column -------------------------------
+#
+# The first version of the fix above tested `code[:1]`, which is the INDEX
+# column alone. Measured on git 2.50.1, a rename wears three different codes,
+# and only the first of them puts the R there:
+#
+#   "R  b.c\0a.c\0"   git mv                       flag in the index column
+#   " R b.c\0a.c\0"   mv in the editor + git add -N     the WORKTREE column
+#   "RM b.c\0a.c\0"   git mv, then edit the result           both columns
+#
+# The middle shape desynchronised the parser rather than merely losing a
+# path: with the two-entry form unrecognised, the source `a.c` was read as
+# its own status line, so `entry[3:]` sliced a 3-character path down to the
+# empty string and `changed_files` came back as `('b.c', '')`. The empty
+# entry then disappeared into the NUL join that builds deliver's pathspec, so
+# `git commit --only` never named the deletion and the delivered branch kept
+# a file the gates had seen removed. Same consequence as the bug above,
+# reached through the door the fix left open.
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["index-column", "worktree-column", "both-columns"],
+)
+def test_a_rename_records_both_paths_whichever_column_flags_it(
+    repo: Path, git_run, shape: str
+):
+    (repo / "a.c").write_text("x = 1\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-qm", "add source")
+
+    if shape == "worktree-column":
+        # What an editor's rename looks like: git never ran the move, and
+        # `add -N` is what makes git detect it as one.
+        (repo / "a.c").rename(repo / "b.c")
+        git_run(repo, "add", "-N", "b.c")
+    else:
+        git_run(repo, "mv", "a.c", "b.c")
+        if shape == "both-columns":
+            (repo / "b.c").write_text("x = 2\n", encoding="utf-8")
+
+    state = git.inspect(repo)
+
+    assert set(state.changed_files) == {"a.c", "b.c"}, (
+        f"{shape}: {git.status(repo)!r} parsed as {state.changed_files!r}"
+    )
+    assert "" not in state.changed_files, (
+        "a source path read as a status line slices to the empty string, "
+        "which then vanishes from deliver's NUL-joined pathspec"
+    )
+
+
+def test_the_parser_reads_a_rename_flagged_in_the_worktree_column():
+    """The exact bytes, so a future reader can see the shape without a repo."""
+    changed, untracked = git._parse_status(" R b.c\0a.c\0")
+
+    assert set(changed) == {"a.c", "b.c"}, changed
+    assert untracked == ()
