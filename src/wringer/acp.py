@@ -102,21 +102,32 @@ class Connection:
         stream = self._proc.stdout
         if stream is None:  # pragma: no cover - always piped by the caller
             return
-        for raw in stream:
-            line = raw.decode("utf-8", errors="replace").strip()
-            if not line:
-                continue
-            try:
-                message = json.loads(line)
-            except json.JSONDecodeError:
-                # A line we cannot parse is the agent's problem, not a reason
-                # to abandon the turn: keep reading and let the timeout rule.
-                continue
-            with self._lock:
-                if "id" in message and ("result" in message or "error" in message):
-                    self._responses[message["id"]] = message
-                else:
-                    self._inbound.append(message)
+        try:
+            for raw in stream:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    # A line we cannot parse is the agent's problem, not a
+                    # reason to abandon the turn: keep reading and let the
+                    # timeout rule.
+                    continue
+                with self._lock:
+                    if "id" in message and (
+                        "result" in message or "error" in message
+                    ):
+                        self._responses[message["id"]] = message
+                    else:
+                        self._inbound.append(message)
+        except (OSError, ValueError):
+            # The turn ended and `_close_streams` took the pipe back while
+            # this thread was still in `read`. That is the ordinary shutdown
+            # race, not a fault — and an unhandled exception in a daemon
+            # thread prints a traceback onto the console this tool works to
+            # keep clean.
+            pass
         self._done.set()
 
     def send_request(self, method: str, params: dict) -> dict:
@@ -355,8 +366,36 @@ def run_turn(
             stdout_path, ("\n".join(turn.updates) + "\n").encode(), redactor
         )
         _write_log(stderr_path, b"".join(stderr_chunks), redactor)
+        _close_streams(proc)
 
     return turn, proc.returncode if proc.returncode is not None else 0
+
+
+def _close_streams(proc: subprocess.Popen) -> None:
+    """Give back every descriptor this turn opened.
+
+    Measured: without this, ONE TURN LEAKS THREE — stdin, stdout and stderr.
+    `_stop` closes stdin only when it has to kill the process, so an agent
+    that exited cleanly, which is the common case, leaked all three.
+
+    A `wring fleet` drives hundreds of turns inside one process. At three
+    descriptors each that reaches the open-file limit well inside a long run,
+    and it surfaces somewhere else entirely as `too many open files` — a
+    supervisor brought down by its own bookkeeping, which is the class of
+    failure this module exists to not have.
+
+    Closed AFTER the drain, so nothing is taken away from a reader still
+    working, and tolerantly: a stream a thread is mid-read on is exactly the
+    case, and a traceback printed from a daemon thread would land on the
+    console this project works to keep clean.
+    """
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except (OSError, ValueError):  # pragma: no cover - already gone
+            pass
 
 
 def _pump(stream: Any, sink: list[bytes]) -> None:

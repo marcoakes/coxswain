@@ -9,6 +9,7 @@ protocol. No network, no API key, no vendor binary.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -503,3 +504,102 @@ def test_a_failed_turn_keeps_what_the_agent_said_before_it_died(
         "the agent's own output was overwritten by the failure note — the "
         "bundle lost the only diagnostic the turn produced"
     )
+
+
+# --- the stderr pipe: the questions a review would ask ---------------------
+#
+# `run_turn` used to hand the child a raw file handle for stderr. It is a PIPE
+# now, drained by a daemon thread, because redaction has to happen before the
+# write. A pipe nobody drains fills its buffer and blocks the writer — so the
+# change traded a leak for a possible HANG, in the seam built around an
+# eight-hour unsupervised hang. These are that trade, measured.
+
+
+def open_fds() -> int:
+    """How many descriptors this process holds. /dev/fd on macOS and Linux."""
+    return len(os.listdir("/dev/fd"))
+
+
+def test_a_turn_gives_back_every_descriptor_it_opened(
+    repo, tmp_path_factory, monkeypatch
+):
+    """`_stop` closes the child's stdin only when it has to KILL the process,
+    so an agent that exited cleanly — the common case — left stdin, stdout and
+    stderr all open. A `wring fleet` drives hundreds of turns inside one
+    process, and running out of file handles surfaces somewhere else entirely
+    as `too many open files`.
+
+    Asserted on the mechanism rather than on a descriptor count, deliberately.
+    Counting was tried first and thrown away: CPython's refcounting reclaims
+    most of these on its own, so the measurement moved with GC timing and the
+    test passed with the fix REVERTED. Measured directly, 12 turns grew the
+    count by 3 without this and by 0 with it — real, but not something to
+    assert a number about.
+
+    This fails if the call is removed (the spy never runs) and fails if the
+    function is gutted (the streams are still open when it does).
+    """
+    from wringer import acp
+
+    real = acp._close_streams
+    observed: list[list[bool]] = []
+
+    def spy(proc):
+        real(proc)
+        observed.append(
+            [s is None or s.closed for s in (proc.stdin, proc.stdout, proc.stderr)]
+        )
+
+    monkeypatch.setattr(acp, "_close_streams", spy)
+    logs = tmp_path_factory.mktemp("onelog")
+
+    acp.run_turn(
+        command=sys.executable,
+        args=(str(AGENT), "idle"),
+        env_passthrough=(),
+        brief="do nothing",
+        root=repo,
+        timeout=20,
+        stdout_path=logs / "out",
+        stderr_path=logs / "err",
+    )
+
+    assert observed, "the turn ended without handing its descriptors back"
+    assert all(all(flags) for flags in observed), (
+        f"a stream was still open when the turn ended: {observed}"
+    )
+
+
+def test_a_noisy_agent_does_not_wedge_the_turn(repo, monkeypatch, capsys):
+    """200 KB of stderr, against a pipe buffer that holds 64. If the pump
+    thread were not draining, the agent would block on write and the turn
+    would hang until the worker timeout — a supervisor stalled by output,
+    which is the one failure this module exists to not have."""
+    setup(repo, "noisy", timeout=25)
+    monkeypatch.chdir(repo)
+
+    started = time.monotonic()
+    assert cli.main(["run"]) == cli.EXIT_OK
+    elapsed = time.monotonic() - started
+    capsys.readouterr()
+
+    assert elapsed < 20, (
+        f"the turn took {elapsed:.0f}s — the agent was blocked writing to a "
+        "pipe nobody was reading"
+    )
+    log = next((only_loop(repo)).rglob("worker.stderr.log"))
+    assert log.stat().st_size > 0, "the flood was captured nowhere"
+
+
+def test_the_last_bytes_an_agent_wrote_are_captured(repo, monkeypatch, capsys):
+    """The agent writes and exits in the same breath, so those bytes are in
+    flight while the client is already stopping the process. Losing them is
+    losing exactly the line that says why it went."""
+    setup(repo, "lastword")
+    monkeypatch.chdir(repo)
+
+    cli.main(["run"])
+    capsys.readouterr()
+
+    log = next((only_loop(repo)).rglob("worker.stderr.log"))
+    assert "THE LAST BYTES BEFORE THE EXIT" in log.read_text(encoding="utf-8")

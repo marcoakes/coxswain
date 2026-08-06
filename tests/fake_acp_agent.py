@@ -18,6 +18,11 @@ Behaviour is chosen by argv so one file covers every case the loop needs:
     hang       accept the prompt and never answer
     deaf       answer session/new, then never read stdin again (pipe fills)
     garbage    emit a line that is not JSON, then behave
+    noisy      flood stderr with far more than a pipe buffer holds, then
+               fix. With stderr on a PIPE, nothing draining it means the
+               agent blocks on write and the turn wedges.
+    lastword   write to stderr and exit IMMEDIATELY — the bytes are in
+               flight while the client is already stopping the process.
     leak       print a passed-through credential to stderr AND into a
                session/update, then fix. The shape §8 asks for: a secret
                planted in agent output, so a test can grep the bundle.
@@ -128,6 +133,17 @@ def main() -> int:
                 sys.stdout.flush()
                 return 3
 
+            if BEHAVIOUR == "noisy":
+                # 200 KB, well past the 64 KB a pipe buffer holds.
+                for n in range(2000):
+                    sys.stderr.write(f"noise line {n:05d} " + "x" * 90 + "\n")
+                sys.stderr.flush()
+
+            if BEHAVIOUR == "lastword":
+                sys.stderr.write("THE LAST BYTES BEFORE THE EXIT\n")
+                sys.stderr.flush()
+                return 0
+
             if BEHAVIOUR == "leak":
                 # Both paths acp.py writes: the child's own stderr, which
                 # used to be a raw file handle, and a session/update, whose
@@ -151,7 +167,7 @@ def main() -> int:
                     ],
                 })
 
-            if BEHAVIOUR in ("fix", "permission", "garbage", "leak"):
+            if BEHAVIOUR in ("fix", "permission", "garbage", "leak", "noisy"):
                 outbound += 1
                 request(outbound, "fs/write_text_file", {
                     "sessionId": session_id,
