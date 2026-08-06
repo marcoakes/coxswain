@@ -17,6 +17,7 @@ from pathlib import Path
 from wringer import (
     __version__,
     acquire,
+    agents,
     config,
     deliver,
     detect,
@@ -89,6 +90,24 @@ def build_parser() -> argparse.ArgumentParser:
             "confirm the gates this repo declares, or the ones detection "
             "proposes, without being asked. There is deliberately no flag for "
             "the API key: a key on a command line is a process listing"
+        ),
+    )
+    agent_choice = parser_start.add_mutually_exclusive_group()
+    agent_choice.add_argument(
+        "--agent",
+        metavar="ID",
+        help=(
+            "the agent that drives the repair loop, by id "
+            f"({', '.join(agents.known())}). It must already be installed: "
+            "Wringer names what to install and never installs it"
+        ),
+    )
+    agent_choice.add_argument(
+        "--no-agent",
+        action="store_true",
+        help=(
+            "configure no worker at all. The gates still run; the loop has "
+            "nothing to drive it, and no 'run:' section is written"
         ),
     )
     parser_start.set_defaults(func=cmd_start)
@@ -459,8 +478,14 @@ def cmd_start(args: argparse.Namespace) -> int:
     if refused is not None:
         return refused
 
+    # [5/7] agent. Detected, never assumed — and never installed (§3c-i).
+    _start_step(5, "agent")
+    worker, refused = _start_agent(args.agent, args.no_agent)
+    if refused is not None:
+        return refused
+
     try:
-        emission = start.emit(root, workspace=args.workspace)
+        emission = start.emit(root, workspace=args.workspace, worker=worker)
     except start.StartError as exc:
         print(f"wring start: {exc}", file=sys.stderr)
         return EXIT_CONFIG
@@ -511,6 +536,71 @@ def _start_gates(root: Path, accepted: bool) -> int | None:
         )
         return EXIT_CONFIG
     return None
+
+
+def _start_agent(
+    chosen: str | None, declined: bool
+) -> tuple[config.AcpWorker | None, int | None]:
+    """Detect, propose, and hand back the stanza — or refuse.
+
+    Every agent name printed here comes out of `agents.py`. This function
+    contains no product name, which is what makes swapping the offered set a
+    table edit rather than a grep (AGENTS.md rule 5).
+    """
+    if declined:
+        print(
+            "  none — no 'run:' section will be written.\n"
+            "  The gates still run; there is just nothing configured to fix "
+            "them for you."
+        )
+        return None, None
+
+    if chosen is not None:
+        agent = agents.find(chosen)
+        if agent is None:
+            print(
+                f"wring start: no agent with id {chosen!r}. Known: "
+                f"{', '.join(agents.known())}",
+                file=sys.stderr,
+            )
+            return None, EXIT_CONFIG
+        where = agents.located(agent)
+        if where is None:
+            # SPEC_ACP_V0 rule 3 fixes the code, and §3c-i fixes the posture:
+            # named, with the exact command printed for the human to run.
+            # Wringer runs neither it nor anything else here.
+            print(f"  {agent.id} is not on PATH.")
+            print(
+                f"\nwring start: install it yourself, then run this again:\n\n"
+                f"  {agent.install}\n\n"
+                "Wringer never installs an agent. Running your package manager "
+                "is a\nlarger power than launching a build, and this command "
+                "was not granted it.",
+                file=sys.stderr,
+            )
+            return None, EXIT_CONFIG
+
+        worker = agents.worker(agent)
+        print(f"  ✓ {agent.id:<14}{where}")
+        # Consent IS the written stanza (§3c), so the human sees the exact
+        # YAML — from the same function that writes it, not a second renderer.
+        print("\n  This is what will be added:\n")
+        for line in start.worker_stanza(worker).rstrip("\n").splitlines():
+            print(f"    {line}")
+        return worker, None
+
+    for agent, where in agents.survey():
+        if where is not None:
+            print(f"  ✓ {agent.id:<14}{where}")
+        else:
+            print(f"  - {agent.id:<14}not installed:  {agent.install}")
+    print(
+        "\nwring start: choose one with --agent <id>, or --no-agent to "
+        "configure\nnone. There is no default: Wringer drives the agent you "
+        "wrote down,\nnever one it guessed.",
+        file=sys.stderr,
+    )
+    return None, EXIT_CONFIG
 
 
 def _report_start(emission: start.Emission, root: Path) -> None:

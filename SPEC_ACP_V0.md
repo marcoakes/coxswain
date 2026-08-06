@@ -44,8 +44,15 @@ any other key, is a config error. Strict validation as everywhere else.
    *not* named is not passed: the agent gets a minimal environment, not
    the operator's whole shell.
 3. **The agent binary is never bundled or auto-installed by Wringer.**
-   Absent binary → exit 2 naming what to install. (Consent-based install
-   belongs to `wring start`, P4.)
+   Absent binary → exit 2 naming what to install. **`wring start` does not
+   install one either** — it detects, names the absent agent, and prints the
+   exact install command for the human to run
+   ([SPEC_START_V0.md](SPEC_START_V0.md) §3c-i, ruled 2026-08-06). An earlier
+   draft of this line promised consent-based install in P4; that promise was
+   struck rather than kept, because two shipped error strings already tell a
+   user Wringer never installs an agent (`config.py`'s "Wringer never bundles
+   or installs one", `acp.py`'s "Wringer never installs an agent"), and
+   falsifying live error messages to save one paste is the wrong trade.
 
 ## 2. The exchange, per iteration
 

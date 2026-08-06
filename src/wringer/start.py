@@ -118,7 +118,7 @@ def emit(
     if workspace is not None:
         wanted = workspace.strip()
         if current.workspace is None:
-            text = _append(text, _WORKSPACE_NOTE, {"workspace": wanted})
+            text = _append(text, _WORKSPACE_NOTE, _render({"workspace": wanted}))
             added.append("workspace")
         elif current.workspace == wanted:
             already.append("workspace")
@@ -132,7 +132,7 @@ def emit(
 
     if worker is not None:
         if current.run is None:
-            text = _append(text, _RUN_NOTE, {"run": {"worker": _acp(worker)}})
+            text = _append(text, _RUN_NOTE, worker_stanza(worker))
             added.append("run")
         elif current.run.worker == worker:
             already.append("run")
@@ -179,17 +179,33 @@ def _acp(worker: config.AcpWorker) -> dict[str, object]:
     return {"acp": acp}
 
 
-def _append(text: str, note: str, section: dict[str, object]) -> str:
-    """Add one top-level section to a config, as text.
+def worker_stanza(worker: config.AcpWorker) -> str:
+    """The exact YAML `emit` appends for this worker.
 
-    Rendered by `yaml.safe_dump` rather than by hand: a workspace path or an
-    agent argument that needs quoting must get it, and a wizard that hand-rolls
-    YAML escaping is a wizard that eventually writes a file its own parser
-    rejects.
+    Public because consent IS the written stanza (§3c): the wizard shows what
+    it proposes and does not write until the human accepts. Displayed and
+    written come from this one function rather than from two renderers that
+    agree today — the `_listing_step` lesson (`tests/test_docs.py:403-416`),
+    where a demo showed one command and ran another for two days because
+    nothing tied them together.
     """
-    rendered = yaml.safe_dump(
+    return _render({"run": {"worker": _acp(worker)}})
+
+
+def _render(section: dict[str, object]) -> str:
+    """One top-level section as YAML.
+
+    `yaml.safe_dump` rather than hand-rolled text: a workspace path or an agent
+    argument that needs quoting must get it, and a wizard that hand-rolls YAML
+    escaping is a wizard that eventually writes a file its own parser rejects.
+    """
+    return yaml.safe_dump(
         section, sort_keys=False, default_flow_style=False, allow_unicode=True
     )
+
+
+def _append(text: str, note: str, rendered: str) -> str:
+    """Add one rendered section to a config, after everything already there."""
     if text and not text.endswith("\n"):
         text += "\n"
     return f"{text}\n{note}{rendered}"

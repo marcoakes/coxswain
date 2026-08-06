@@ -8,12 +8,56 @@ bytes that landed on disk and push them back through `config.parse`.
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 import pytest
 import yaml
 
-from wringer import cli, config, start
+from wringer import agents, cli, config, start
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture
+def fake_agent(tmp_path_factory, monkeypatch):
+    """Put a stand-in for an agent binary on PATH.
+
+    Detection is `shutil.which` and nothing cleverer (§3c), so an executable
+    with the right name is all it takes — and a stub is the only device that
+    tests the offered path without installing a vendor binary into CI.
+
+    Deliberately NOT under the repo fixture's directory: that tree is a git
+    repo whose cleanliness later slices verify, and a stray `bin/` in it would
+    show up as an untracked file in a real bundle.
+    """
+    bindir = tmp_path_factory.mktemp("agent-bin")
+    agent = agents.AGENTS[0]
+    binary = bindir / agent.command
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    return agent
+
+
+@pytest.fixture
+def bare_path(tmp_path_factory):
+    """A PATH with git on it and no agent anywhere.
+
+    Not an empty PATH: `wring start`'s preflight is `wring doctor`'s checks,
+    and a machine with no git FAILS one of them — so an empty PATH would test
+    the preflight refusing rather than the agent step naming what to install.
+    Not the real PATH either: a developer who happens to have an agent
+    installed would silently stop exercising the absent branch.
+    """
+    bindir = tmp_path_factory.mktemp("bare-bin")
+    git = shutil.which("git")
+    assert git is not None, "the test suite needs git"
+    (bindir / "git").symlink_to(git)
+    return bindir
 
 # A config a human plainly wrote: their own gates, their own workspace.
 HAND_WRITTEN = """\
@@ -49,7 +93,7 @@ def raw_config(repo: Path) -> dict:
 
 def test_start_is_a_registered_command():
     parser = cli.build_parser()
-    args = parser.parse_args(["start", "--accept-gates"])
+    args = parser.parse_args(["start", "--accept-gates", "--no-agent"])
     assert args.func is cli.cmd_start
 
 
@@ -74,7 +118,7 @@ def test_every_answer_except_the_key_has_a_flag():
 def test_start_writes_a_config_where_there_was_none(repo, monkeypatch, capsys):
     monkeypatch.chdir(repo)
 
-    assert cli.main(["start", "--accept-gates"]) == cli.EXIT_OK
+    assert cli.main(["start", "--accept-gates", "--no-agent"]) == cli.EXIT_OK
     capsys.readouterr()
 
     cfg = read_config(repo)
@@ -108,7 +152,9 @@ def test_an_existing_config_is_added_to_never_replaced(repo, monkeypatch, capsys
     (repo / config.CONFIG_FILENAME).write_text(MINIMAL, encoding="utf-8")
     monkeypatch.chdir(repo)
 
-    code = cli.main(["start", "--workspace", "../work", "--accept-gates"])
+    code = cli.main(
+        ["start", "--workspace", "../work", "--accept-gates", "--no-agent"]
+    )
     assert code == cli.EXIT_OK
     capsys.readouterr()
 
@@ -128,7 +174,9 @@ def test_a_section_the_user_wrote_is_refused_rather_than_rewritten(
     (repo / config.CONFIG_FILENAME).write_text(HAND_WRITTEN, encoding="utf-8")
     monkeypatch.chdir(repo)
 
-    code = cli.main(["start", "--workspace", "../somewhere-else", "--accept-gates"])
+    code = cli.main(
+        ["start", "--workspace", "../somewhere-else", "--accept-gates", "--no-agent"]
+    )
     captured = capsys.readouterr()
 
     assert code == cli.EXIT_REFUSED
@@ -144,7 +192,9 @@ def test_declaring_the_same_workspace_twice_changes_nothing(
     (repo / config.CONFIG_FILENAME).write_text(HAND_WRITTEN, encoding="utf-8")
     monkeypatch.chdir(repo)
 
-    code = cli.main(["start", "--workspace", "../mine", "--accept-gates"])
+    code = cli.main(
+        ["start", "--workspace", "../mine", "--accept-gates", "--no-agent"]
+    )
     capsys.readouterr()
 
     assert code == cli.EXIT_OK
@@ -157,7 +207,9 @@ def test_no_start_section_is_ever_written(repo, monkeypatch, capsys):
     it was written into."""
     monkeypatch.chdir(repo)
 
-    code = cli.main(["start", "--workspace", "../work", "--accept-gates"])
+    code = cli.main(
+        ["start", "--workspace", "../work", "--accept-gates", "--no-agent"]
+    )
     assert code == cli.EXIT_OK
     capsys.readouterr()
 
@@ -193,7 +245,7 @@ def test_start_outside_a_git_repository_exits_2(tmp_path, monkeypatch, capsys):
     a repository. Said before anything is written rather than after."""
     monkeypatch.chdir(tmp_path)
 
-    code = cli.main(["start", "--accept-gates"])
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
     captured = capsys.readouterr()
 
     assert code == cli.EXIT_CONFIG
@@ -204,8 +256,182 @@ def test_start_outside_a_git_repository_exits_2(tmp_path, monkeypatch, capsys):
 def test_a_repo_that_is_not_there_exits_2(repo, monkeypatch, capsys):
     monkeypatch.chdir(repo)
 
-    code = cli.main(["start", "--repo", "nowhere", "--accept-gates"])
+    code = cli.main(["start", "--repo", "nowhere", "--accept-gates", "--no-agent"])
     captured = capsys.readouterr()
 
     assert code == cli.EXIT_CONFIG
     assert "nowhere" in captured.err
+
+
+# --- the agent seam: detected, proposed, never installed --------------------
+
+
+def test_the_agent_table_is_the_only_place_a_coding_agent_is_named():
+    """§3c and AGENTS.md rule 5 — one module maps agent id → binary, args, the
+    variable name it expects, its install command. `forge.py`'s precedent: the
+    CLI says "the agent", never a product name, as it says "the forge" and
+    never "GitHub"."""
+    names = {
+        token
+        for agent in agents.AGENTS
+        for token in (agent.id, agent.command, agent.package)
+        if token
+    }
+    offenders: dict[str, list[str]] = {}
+    for path in sorted((repo_root() / "src" / "wringer").glob("*.py")):
+        if path.name == "agents.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        found = sorted(name for name in names if name in text)
+        if found:
+            offenders[path.name] = found
+    assert not offenders, (
+        f"a coding-agent vendor string escaped the table: {offenders}. Every "
+        "one of them belongs in agents.py, so swapping which agent Wringer "
+        "offers stays a table edit rather than a grep"
+    )
+
+
+def test_the_agent_table_cannot_run_anything():
+    """§3c-i — Wringer does not install an agent. The install command is data
+    the human is shown; the module holding it has no way to execute it, which
+    is a stronger guarantee than a promise not to."""
+    source = (repo_root() / "src" / "wringer" / "agents.py").read_text("utf-8")
+    for forbidden in ("subprocess", "os.system", "os.exec", "popen"):
+        assert forbidden not in source, (
+            f"agents.py references {forbidden!r} — the module that holds "
+            "install commands must not be able to run one"
+        )
+
+
+# Every place in `src/` that may even SPELL a package-manager command, and
+# why. Both are text a human is shown; neither is ever an argv. Pinned as an
+# exact set so a third one cannot appear without this test saying so.
+ALLOWED_PACKAGE_MANAGER_MENTIONS = {
+    # `doctor`'s fix line for a `wring` that is importable but not on PATH.
+    # It has diagnosed and never repaired since it shipped.
+    "doctor.py": ["pip install"],
+    # The agent table. Install commands are the data it exists to hold.
+    "agents.py": ["npm install"],
+}
+
+
+def test_no_package_manager_is_invoked_anywhere_in_src():
+    """The §8 box, as a grep: `grep -rn` shows no package-manager invocation in
+    `src/`. Two modules spell one as advice; nothing runs one."""
+    tokens = ("npm install", "pip install", "brew install", "apt-get",
+              "cargo install", "go install")
+    spelled: dict[str, list[str]] = {}
+    for path in sorted((repo_root() / "src" / "wringer").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        found = sorted(token for token in tokens if token in text)
+        if found:
+            spelled[path.name] = found
+    assert spelled == ALLOWED_PACKAGE_MANAGER_MENTIONS, (
+        "a package-manager command appeared somewhere new in src/. If it is "
+        "advice, add it to ALLOWED_PACKAGE_MANAGER_MENTIONS with the reason; "
+        "if it is an invocation, Wringer does not do that"
+    )
+
+
+def test_an_absent_agent_is_named_with_its_install_command_and_nothing_is_run(
+    repo, bare_path, monkeypatch, capsys
+):
+    """§3c — absent = named, with the exact install command printed for the
+    human to run. SPEC_ACP_V0 rule 3 fixes the code: exit 2 naming what to
+    install."""
+    absent = agents.AGENTS[0]
+    monkeypatch.setenv("PATH", str(bare_path))
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--agent", absent.id])
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+
+    assert code == cli.EXIT_CONFIG
+    assert absent.install in output, "the install command was not printed"
+    assert not (repo / config.CONFIG_FILENAME).exists(), (
+        "a config was written for an agent that is not installed"
+    )
+
+
+def test_a_detected_agent_is_written_as_an_acp_worker(
+    repo, fake_agent, monkeypatch, capsys
+):
+    """§3c — the wizard writes the worker stanza with consent, and `--agent
+    <id>` is that consent given ahead of time."""
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--agent", fake_agent.id])
+    capsys.readouterr()
+
+    assert code == cli.EXIT_OK
+    worker = read_config(repo).run.worker
+    assert isinstance(worker, config.AcpWorker)
+    assert worker.command == fake_agent.command
+    assert worker.args == fake_agent.args
+    assert worker.env_passthrough == (fake_agent.key_env,)
+
+
+def test_the_wizard_writes_an_acp_worker_or_no_worker_at_all(
+    repo, monkeypatch, capsys
+):
+    """§3a-ii — a shell worker inherits the operator's ENTIRE environment
+    (`gates.py:95-102` passes no `env=`), so a wizard that wrote one would
+    silently hand the agent every secret in the shell. Declining writes no
+    `run:` section; it does not fall back to a shell worker it invented."""
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--no-agent"])
+    capsys.readouterr()
+
+    assert code == cli.EXIT_OK
+    assert read_config(repo).run is None
+    # The blank template carries a COMMENTED example worker, so the check
+    # is on the parsed document rather than on the bytes.
+    assert "run" not in raw_config(repo)
+
+
+def test_the_emitter_takes_no_worker_form_but_the_acp_one():
+    """The same rule, one layer down: there is no argument through which a
+    shell string could reach the file."""
+    import inspect
+
+    signature = inspect.signature(start.emit)
+    assert signature.parameters["worker"].annotation == "config.AcpWorker | None"
+
+
+def test_a_missing_agent_answer_exits_2_naming_both_flags(
+    repo, monkeypatch, capsys
+):
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_CONFIG
+    assert "--agent" in captured.err
+    assert "--no-agent" in captured.err
+
+
+def test_an_unknown_agent_id_is_refused_and_the_known_ones_named(
+    repo, monkeypatch, capsys
+):
+    monkeypatch.chdir(repo)
+
+    code = cli.main(["start", "--accept-gates", "--agent", "not-an-agent"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_CONFIG
+    for agent in agents.AGENTS:
+        assert agent.id in captured.err
+
+
+def test_the_acp_spec_no_longer_promises_a_consent_based_install():
+    """§3c-i, and it is a §8 box: a binding spec that still promises the
+    deferred feature is a contradiction, not a footnote. Two shipped error
+    strings say Wringer never installs an agent, and Marc confirmed the ruling
+    on 2026-08-06, so the parenthetical is what changes."""
+    text = (repo_root() / "SPEC_ACP_V0.md").read_text(encoding="utf-8")
+    assert "Consent-based install belongs to" not in text
+    assert "never installs" in text or "does not install" in text
