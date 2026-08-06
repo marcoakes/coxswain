@@ -365,6 +365,81 @@ def _check_untracked_bytes(root: Path, run_dir: Path, state: git.RepoState) -> N
         )
 
 
+# What git reads as false in a boolean config value — git's own list.
+_CONFIG_FALSE = {"false", "no", "off", "0", ""}
+
+
+def _case_insensitive(root: Path) -> bool:
+    """Whether git treats two paths differing only in case as one file here.
+
+    Read from `core.ignorecase`, which `git init` probes and writes, rather
+    than guessed from the platform: a case-sensitive volume mounted on macOS
+    is an ordinary thing to have. Unset answers false, which is git's own
+    default when nothing probed it.
+    """
+    code, out = _git(root, ["config", "--get", "core.ignorecase"], check=False)
+    if code != 0:
+        return False
+    return out.strip().lower() not in _CONFIG_FALSE
+
+
+def _case_aliases(paths: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Pairs in `paths` that name the same file on a case-insensitive volume."""
+    first: dict[str, str] = {}
+    pairs: list[tuple[str, str]] = []
+    for path in paths:
+        key = path.lower()
+        if key in first and first[key] != path:
+            pairs.append((first[key], path))
+        else:
+            first.setdefault(key, path)
+    return pairs
+
+
+def _check_no_case_aliases(root: Path, carried: tuple[str, ...]) -> None:
+    """Refuse a case-only rename here, where no branch exists yet to strand.
+
+    `git mv Foo.py foo.py` on a case-insensitive volume puts BOTH names in
+    `changed_files`, because that is what the porcelain reports — one `R`
+    entry whose two paths differ only in case. **No path-restricted commit can
+    express it.** Measured on git 2.50.1:
+
+      - `commit --only foo.py` exits 128: *will not add file alias 'foo.py'
+        ('Foo.py' already exists in index)*. `--only` rebuilds from HEAD, HEAD
+        holds `Foo.py`, and adding `foo.py` beside it is the alias git refuses.
+      - `commit --only Foo.py` exits 1, "nothing to commit": the pathspec
+        matches HEAD's entry and the worktree file has the same content, so
+        the rename is invisible.
+      - naming both, in either order, fails exactly like naming the new one.
+
+    Two ways out were measured and rejected. Committing the whole index works
+    and would ship whatever else the user had staged, which is the hole
+    `--only` exists to close. Building the tree through a temporary index and
+    `commit-tree` *succeeds* and writes BOTH paths into the tree — a wrong
+    tree, delivered silently, which is worse than any refusal.
+
+    So it refuses, and it refuses from `plan()`. The failure used to arrive
+    from `send()` **after** `switch --create`, leaving the user standing on a
+    branch Wringer had made and abandoned, with a git fatal for a message.
+    """
+    if not _case_insensitive(root):
+        return  # here the two names really are two files, and git is happy
+    aliases = _case_aliases(carried)
+    if not aliases:
+        return
+    named = "; ".join(f"'{old}' and '{new}'" for old, new in aliases[:3])
+    raise Refused(
+        f"{named} are the same file on this filesystem, so this change "
+        "renames a file by its capitalisation alone. git cannot commit that "
+        "through a path-restricted commit — 'git commit --only' refuses with "
+        "'will not add file alias' — and Wringer will not commit the whole "
+        "index instead, because that would ship whatever else you have "
+        "staged. Commit the rename yourself with 'git commit', then run "
+        "'wring verify' again",
+        1,
+    )
+
+
 def resolve_base(root: Path, settings: config.Deliver) -> tuple[str, str | None]:
     """The branch the MR targets, and the remote's default branch.
 
@@ -436,6 +511,8 @@ def plan(
     )
     if not carried:
         raise Refused("there is nothing to deliver — the working tree is clean", 1)
+
+    _check_no_case_aliases(root, carried)
 
     base, default = resolve_base(root, settings)
     branch = resolve_branch(settings.branch, run_id, task)
@@ -700,17 +777,115 @@ def send(
 ) -> dict[str, Any]:
     """Create the branch, commit, and push. Every step logged before it runs.
 
-    Nothing is rolled back on failure. A half-delivered branch is a fact, and
-    a rollback that deleted branches would be a larger power than the one
-    this slice was granted.
+    **The branch is undone if the commit never happens, and never once it
+    has.** Those two halves are one rule with one boundary.
+
+    The branch is created before the commit, so anything that goes wrong in
+    between used to leave the user standing on a branch Wringer had made and
+    walked away from, changes still uncommitted, with a git fatal for an
+    explanation — and the next `wring deliver` then refused, because
+    condition 1 is *only a branch Wringer created* and that name now exists.
+    Two causes were confirmed (a case-only rename, an over-long argv) and
+    there are obviously others: a pre-commit hook, a full disk. So the repair
+    is at the failure rather than at each cause.
+
+    After the commit lands, nothing is rolled back, and that is deliberate.
+    The branch then holds real work; a push that fails afterwards is a state
+    to report — the CLI already does — not one to delete. Deleting there
+    would destroy the commit, which is a larger power than this slice was
+    granted.
     """
     done: dict[str, Any] = {"branch": None, "commit": None, "pushed": False}
+    # Where to put the user back. Captured BEFORE anything moves, and as a ref
+    # rather than a name so a detached HEAD is restored detached.
+    was_on = _read(root, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+    was_at = _read(root, ["rev-parse", "HEAD"])
 
     bundle.event("branch.planned", branch=planned.branch, base=planned.base)
     _run(root, ["switch", "--create", planned.branch])
     done["branch"] = planned.branch
     bundle.event("branch.created", branch=planned.branch)
 
+    try:
+        done["commit"] = _commit(root, bundle, planned)
+    except BaseException:
+        # BaseException, not Exception: a Ctrl-C between the two commands is
+        # the likeliest way to reach here, and it strands a branch exactly the
+        # same way an error does.
+        _abandon(root, bundle, planned.branch, was_on, was_at)
+        raise
+    bundle.event("commit.written", sha=done["commit"])
+
+    if push:
+        bundle.event("push.planned", remote=planned.remote, branch=planned.branch)
+        # No force. Not here, not anywhere — a test greps the whole program.
+        _run(root, ["push", "--set-upstream", planned.remote, planned.branch])
+        done["pushed"] = True
+        bundle.event("push.done", remote=planned.remote, branch=planned.branch)
+
+    return done
+
+
+def _abandon(
+    root: Path,
+    bundle: Bundle,
+    branch: str,
+    was_on: str | None,
+    was_at: str | None,
+) -> None:
+    """Put the user back and remove the branch that never got a commit.
+
+    Best-effort throughout, and it must never raise: it runs from an `except`
+    block, and a failure here would replace the real diagnosis with a second,
+    less useful one. What it could not undo is recorded instead, so the
+    delivery bundle says what state the tree was left in.
+
+    Deleting is safe precisely because it only runs when the commit did not:
+    the branch is still exactly where `switch --create` put it, so `-D`
+    discards nothing that was not already reachable from where it started.
+    """
+    # NEVER `--force`. `git switch --force` is `--discard-changes`, and the
+    # whole reason this function is running is that the user's work did not
+    # get committed — throwing it away to tidy up a branch would be a far
+    # worse bug than the stranded branch. Caught by the test below, which
+    # asserts the change is still there to deliver afterwards.
+    #
+    # A plain switch is safe here and cannot conflict: the abandoned branch
+    # was created at the commit we are going back to, so the two refs name the
+    # same tree and git carries the modifications across untouched. If it
+    # somehow refuses, the branch stays and the ledger says so.
+    restored = False
+    try:
+        if was_on:
+            _run(root, ["switch", was_on])
+            restored = True
+        elif was_at:
+            _run(root, ["switch", "--detach", was_at])
+            restored = True
+    except DeliverError:
+        restored = False
+
+    removed = False
+    if restored:
+        try:
+            _run(root, ["branch", "-D", branch])
+            removed = True
+        except DeliverError:
+            removed = False
+
+    try:
+        bundle.event(
+            "branch.abandoned",
+            branch=branch,
+            restored=restored,
+            deleted=removed,
+        )
+    except OSError:  # the bundle is not worth a second exception either
+        pass
+
+
+def _commit(root: Path, bundle: Bundle, planned: Plan) -> str | None:
+    """Stage the planned paths and commit exactly them."""
     bundle.event("commit.planned", files=list(planned.changed_files))
     # Stage exactly what the plan said it would carry — never `add --all`.
     # A repo that ran `wring init` has `.wringer/` gitignored, but `wring
@@ -761,17 +936,7 @@ def send(
          "--pathspec-from-file=-", "--pathspec-file-nul"],
         stdin="\0".join(planned.changed_files),
     )
-    done["commit"] = _read(root, ["rev-parse", "HEAD"])
-    bundle.event("commit.written", sha=done["commit"])
-
-    if push:
-        bundle.event("push.planned", remote=planned.remote, branch=planned.branch)
-        # No force. Not here, not anywhere — a test greps the whole program.
-        _run(root, ["push", "--set-upstream", planned.remote, planned.branch])
-        done["pushed"] = True
-        bundle.event("push.done", remote=planned.remote, branch=planned.branch)
-
-    return done
+    return _read(root, ["rev-parse", "HEAD"])
 
 
 def _matchable(root: Path, paths: tuple[str, ...]) -> list[str]:

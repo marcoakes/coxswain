@@ -12,6 +12,7 @@ five conditions; each one has a test that fails without it.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import subprocess
@@ -1475,6 +1476,126 @@ def test_a_path_git_cannot_commit_is_refused(
         deliver.plan(delivery_repo, cfg, run_dir, "unsupported")
     assert "notes.txt" in str(refusal.value)
     assert "git will not commit it" in str(refusal.value)
+
+
+# --- a half-delivered branch is its own finding -----------------------------
+#
+# `send` created the branch first and rolled nothing back, so any failure
+# between `switch --create` and the commit left the user standing on a branch
+# Wringer had made and abandoned, with their changes still uncommitted and no
+# instruction about what to do next. Two ways in were confirmed: a case-only
+# rename (below) and an over-long argv (see `_matchable`). There will be
+# others — a pre-commit hook, a full disk — so the fix is at the failure, not
+# at each cause.
+
+
+def test_a_failed_commit_leaves_no_branch_behind(delivery_repo, monkeypatch,
+                                                  capsys):
+    """The commit dies, so the branch never held anything. Leaving it means
+    the next `wring deliver` refuses too — condition 1 says Wringer only
+    commits to a branch it created, and this one now exists."""
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "doomed")
+    # a path git cannot resolve: `commit --only` exits 128 on it, AFTER the
+    # branch has been created
+    planned = dataclasses.replace(
+        planned, changed_files=(*planned.changed_files, "never-existed.txt")
+    )
+    bundle = deliver.Bundle.create(delivery_repo / deliver.DELIVERIES_DIRNAME)
+    bundle.write_plan(planned)
+
+    with pytest.raises(deliver.DeliverError):
+        deliver.send(delivery_repo, bundle, planned, push=False)
+
+    assert git(delivery_repo, "rev-parse", "--abbrev-ref", "HEAD") == "main", (
+        "the user was left standing on a branch Wringer made and abandoned"
+    )
+    branches = git(delivery_repo, "branch", "--list", planned.branch)
+    assert not branches.strip(), f"abandoned branch survived: {branches!r}"
+    # and the change is still there to deliver once the cause is fixed
+    assert "feature.py" in git(delivery_repo, "status", "--porcelain")
+
+
+def test_a_successful_commit_is_never_rolled_back(delivery_repo, monkeypatch,
+                                                   capsys):
+    """The control, and the boundary. Once the commit lands the branch holds
+    real work; a push that fails afterwards is a state to report, not one to
+    delete. Rolling back there would destroy the commit."""
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "keeper")
+    planned = dataclasses.replace(planned, remote="no-such-remote")
+    bundle = deliver.Bundle.create(delivery_repo / deliver.DELIVERIES_DIRNAME)
+    bundle.write_plan(planned)
+
+    with pytest.raises(deliver.DeliverError):
+        deliver.send(delivery_repo, bundle, planned, push=True)
+
+    assert git(delivery_repo, "branch", "--list", planned.branch).strip()
+    assert git(
+        delivery_repo, "log", "-1", "--format=%s", planned.branch
+    ), "the commit that landed was thrown away"
+
+
+def test_a_case_only_rename_is_refused_before_a_branch_exists(
+    delivery_repo, monkeypatch, capsys
+):
+    """`git mv Foo.py foo.py` on a case-insensitive filesystem.
+
+    Measured on git 2.50.1: **no path-restricted commit can express this.**
+    `git commit --only foo.py` exits 128 with `will not add file alias
+    'foo.py' ('Foo.py' already exists in index)`; `--only Foo.py` exits 1 with
+    "nothing to commit"; naming both aliases fails the same way as naming the
+    new one. Building the tree by hand through a temporary index is worse — it
+    succeeds and writes BOTH paths into the tree, which is a wrong tree
+    delivered silently.
+
+    So this refuses, and it refuses in `plan()` — before `switch --create`,
+    so there is no branch to strand.
+    """
+    if not deliver._case_insensitive(delivery_repo):
+        pytest.skip("this filesystem is case-sensitive; the alias cannot occur")
+
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "Foo.py").write_text("x = 1\n", encoding="utf-8")
+    git(delivery_repo, "add", "-A")
+    git(delivery_repo, "commit", "-m", "add Foo.py")
+    git(delivery_repo, "mv", "Foo.py", "foo.py")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+
+    with pytest.raises(deliver.Refused) as refusal:
+        deliver.plan(delivery_repo, cfg, run_dir, "caserename")
+
+    message = str(refusal.value)
+    assert "Foo.py" in message and "foo.py" in message
+    assert refusal.value.exit_code == 1
+    # nothing was created on the way to the refusal
+    assert git(delivery_repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert not git(delivery_repo, "branch", "--list", "wringer/*").strip()
+
+
+def test_paths_differing_by_case_but_not_aliases_still_deliver(
+    delivery_repo, monkeypatch, capsys
+):
+    """The control. Two *different* files whose names merely share letters
+    must not trip the alias check — `README.md` and `readme.txt` collide on
+    neither filesystem."""
+    (delivery_repo / "feature.py").unlink()
+    (delivery_repo / "Notes.md").write_text("one\n", encoding="utf-8")
+    (delivery_repo / "notes.txt").write_text("two\n", encoding="utf-8")
+
+    verified(delivery_repo, monkeypatch, capsys)
+    run_dir = sorted((delivery_repo / ".wringer" / "runs").iterdir())[-1]
+    cfg = config.load(delivery_repo / ".wringer.yaml")
+
+    planned = deliver.plan(delivery_repo, cfg, run_dir, "twofiles")
+    assert set(planned.changed_files) == {"Notes.md", "notes.txt"}
 
 
 def test_an_unreachable_remote_refuses_rather_than_assuming_no_branch(
