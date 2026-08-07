@@ -58,9 +58,23 @@ echo "  ok    installs"
 echo "  version: $($WRING --version)"
 echo
 
+# Read from the PARSER, not from a list maintained by hand. The hand-written
+# list said thirteen commands while the program registered sixteen, so this
+# bar passed 24/24 without ever touching `start`, `attest` or `audit` — the
+# three a 0.3 release exists to ship. A release check that cannot see a new
+# command is a release check that gets more wrong the more you build.
 echo "== every command answers --help =="
-for c in init verify run fleet resume judge spec plan get issue deliver \
-         doctor explain; do
+COMMANDS=$("$WORK/venv/bin/python" -c "
+from wringer import cli
+for a in cli.build_parser()._actions:
+    if getattr(a, 'choices', None):
+        print(' '.join(a.choices)); break
+" 2>/dev/null)
+if [ -z "$COMMANDS" ]; then
+    echo "  FAIL  could not read the command list from the installed parser"
+    FAIL=$((FAIL + 1))
+fi
+for c in $COMMANDS; do
     check "wring $c --help" "$WRING" "$c" --help
 done
 echo
