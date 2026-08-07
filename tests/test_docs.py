@@ -954,3 +954,117 @@ def test_every_redactor_reads_the_names_the_config_declares():
         "credential named in `run.worker.acp.env_passthrough` reaches whatever "
         f"they write: {offenders}"
     )
+
+
+# --- enumerations of the network surface, wherever they live ---------------
+#
+# SPEC_START_V0 §3e-i named two documents that enumerate it exactly and
+# required both to be restated when `wring start --clone` made them false.
+# README.md carries a THIRD copy of the same sentence and was not on that
+# list, so it went on saying "two commands fetch" after there were three.
+# Naming the files was the mistake; this finds them.
+
+FETCHERS = ("get", "issue", "start")
+
+
+def test_no_document_still_says_two_commands_fetch():
+    """The claim `wring start --clone` falsified."""
+    offenders = []
+    for path in sorted(repo_root().glob("*.md")):
+        if path.name.startswith("field-report"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        for phrase in ("Two commands fetch", "two commands FETCH",
+                       "two commands fetch"):
+            if phrase in text:
+                offenders.append(f"{path.name}: {phrase!r}")
+    assert not offenders, (
+        "a document still enumerates two fetching commands; `wring start "
+        f"--clone` is the third: {offenders}"
+    )
+
+
+def test_every_fetch_enumeration_names_wring_start():
+    """The positive half. Forbidding the old sentence is only half a fix if
+    the replacement quietly drops the command that caused it."""
+    for name in ("README.md", "AGENTS.md", "SPEC_GET_V0.md"):
+        path = repo_root() / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "fetch" not in text.lower():
+            continue
+        assert "wring start" in text, (
+            f"{name} enumerates what fetches but never names `wring start`, "
+            "which opens a socket when the user asks it to clone"
+        )
+
+
+# --- counts a reader counts -----------------------------------------------
+
+NUMBER_WORDS = {
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20,
+}
+
+
+def registered_command_count() -> int:
+    from wringer import cli
+
+    return len(
+        [
+            name
+            for action in cli.build_parser()._actions
+            if getattr(action, "choices", None)
+            for name in action.choices
+        ]
+    )
+
+
+def test_the_command_table_heading_counts_the_commands_that_exist():
+    """QUICKSTART's heading is where a reader counts, and it said thirteen
+    while the parser registered sixteen for three days.
+
+    Only the heading, deliberately. Prose elsewhere says "0.2.0, thirteen
+    commands" and that is a true statement about a PUBLISHED release, not a
+    claim about this tree — pinning it to the parser would make a fact go
+    stale every time main grows a command.
+    """
+    require_checkout("QUICKSTART.md")
+    import re
+
+    text = (repo_root() / "QUICKSTART.md").read_text(encoding="utf-8")
+    match = re.search(r"^## The ([a-z]+) commands$", text, re.MULTILINE)
+    assert match, "QUICKSTART has no '## The N commands' heading to check"
+
+    claimed = NUMBER_WORDS.get(match.group(1))
+    assert claimed is not None, f"unrecognised number word: {match.group(1)!r}"
+    assert claimed == registered_command_count(), (
+        f"QUICKSTART's heading says {match.group(1)} commands; the parser "
+        f"registers {registered_command_count()}"
+    )
+
+
+def test_a_count_tied_to_a_release_says_which_release():
+    """The other half. "thirteen commands" is only safe while it sits beside
+    the version it describes — on its own it becomes a claim about this tree,
+    and a wrong one."""
+    import re
+
+    for name in ("README.md", "QUICKSTART.md"):
+        path = repo_root() / name
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = re.search(r"\b([a-z]+) commands\b", line)
+            if not match:
+                continue
+            claimed = NUMBER_WORDS.get(match.group(1))
+            if claimed is None or claimed == registered_command_count():
+                continue
+            assert re.search(r"\d+\.\d+\.\d+", line), (
+                f"{name} claims '{match.group(1)} commands' without naming the "
+                f"release it belongs to, and the parser registers "
+                f"{registered_command_count()}: {line.strip()!r}"
+            )
