@@ -46,7 +46,7 @@ green — and a bundle on disk to check the claim against. Regenerate it with
 
 ## What ships first
 
-**Proof beats orchestration.** `pip install wringer` — **0.2.0, thirteen commands, out now.**
+**Proof beats orchestration.** `pip install wringer` — **0.3.0, sixteen commands, out now.**
 It began as one command, and that command is still the core of it:
 
 > *One command that proves whether this change is mergeable, and leaves behind evidence a human or agent can inspect.*
@@ -231,10 +231,6 @@ increasingly the agent itself. `--prove` tightens for one run; there is no
 Contract: **[SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md)**.
 
 ## Set this up and start your first build
-
-> **On `main`, not in 0.2.0.** `pip install wringer` gets you the thirteen
-> commands above; `wring start` is the fourteenth and arrives in the next
-> release. `pip install "git+https://github.com/marcoakes/wringer"` to try it.
 
 `wring start` is the guided launch: preflight, the gates your repo already
 declares, the agent that will drive the loop, and a first build that ends on a

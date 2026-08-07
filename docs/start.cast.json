@@ -22,7 +22,7 @@
  },
  {
   "at": 0.7,
-  "text": "\u2713 wring                 wring 0.2.0 at \u2026sers/marc/Claude/wringer/.venv/bin/wring"
+  "text": "\u2713 wring                 wring 0.3.0 at \u2026sers/marc/Claude/wringer/.venv/bin/wring"
  },
  {
   "at": 0.7,
@@ -202,42 +202,42 @@
  },
  {
   "at": 0.9,
-  "text": "Evidence: .wringer/runs/20260806-205727-739d/"
+  "text": "Evidence: .wringer/runs/20260807-110842-36e4/"
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": ""
  },
  {
-  "at": 1.0,
-  "text": "Receipt:  .wringer/attestations/20260806-205727-dc13/attestation.json"
+  "at": 0.9,
+  "text": "Receipt:  .wringer/attestations/20260807-110842-d6db/attestation.json"
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": ""
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": "! unsigned \u2014 this proves the named bundles are unaltered since they were"
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": "  written, not who produced them, and not that they were not fabricated"
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": "  wholesale."
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": ""
  },
  {
-  "at": 1.0,
+  "at": 0.9,
   "text": "Check it yourself \u2014 offline, no config, no network:"
  },
  {
-  "at": 1.0,
-  "text": "  wring audit .wringer/attestations/20260806-205727-dc13/attestation.json"
+  "at": 0.9,
+  "text": "  wring audit .wringer/attestations/20260807-110842-d6db/attestation.json"
  }
 ]

@@ -4,11 +4,28 @@ Notable changes, newest first. Wringer follows [semantic
 versioning](https://semver.org/); schema versions move independently of the
 package version and are listed per release.
 
-## Unreleased
+## 0.3.0 — 2026-08-07
 
-Fifteen findings from the second field run — and the first execution of the
-Apple `container` path by anyone, on a clean MDM-managed macOS 26 Apple
-silicon host. CI structurally cannot run that path (GitHub's macOS runners
+**Three new commands, and the check that makes the rest of them mean
+something.** `wring start` is the guided launch — one command from an
+installed binary to a verified change with a receipt, and the program's first
+interactive surface. `wring attest` and `wring audit` turn a finished run into
+a provenance claim a stranger can check offline. And `wring verify --prove`
+answers the question this project exists for: *could these gates have failed?*
+A gate that passes with and without your change proved nothing about it, and
+`wring deliver` refuses that bundle.
+
+If you read one thing, make it [`docs/vacuous.svg`](docs/vacuous.svg) — a real
+captured session where a worker makes a failing test pass by rewriting the
+assertion into `multiply(3, 4) == multiply(3, 4)`, the loop converges, the
+gates go green, and Wringer refuses to deliver it.
+
+Upgrading from 0.2.0 needs nothing: every command added is opt-in, no schema
+changed under its own version, and `wring verify` behaves as it did.
+
+This release also carries fifteen findings from the second field run — and the
+first execution of the Apple `container` path by anyone, on a clean
+MDM-managed macOS 26 Apple silicon host. CI structurally cannot run that path (GitHub's macOS runners
 have no nested virtualization), so every `AC-*` finding below is information
 no test, review or amount of reading could have produced. The full transcript
 is preserved verbatim at `docs/field-report-2026-08-05.md`.

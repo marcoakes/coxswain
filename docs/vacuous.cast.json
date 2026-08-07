@@ -42,65 +42,65 @@
  },
  {
   "at": 1.2,
-  "text": "Loop evidence: .wringer/loops/20260806-205728-7d39/"
+  "text": "Loop evidence: .wringer/loops/20260807-110842-3992/"
  },
  {
   "at": 2.6,
   "text": ""
  },
  {
-  "at": 2.7,
+  "at": 2.6,
   "text": "$ wring verify --prove",
   "prompt": true
  },
  {
-  "at": 3.6,
+  "at": 3.5,
   "text": "\u2713 test passed        0.1s"
  },
  {
-  "at": 3.8,
+  "at": 3.7,
   "text": ""
  },
  {
-  "at": 3.8,
+  "at": 3.7,
   "text": "! every required gate passed without the change too (test), so they proved"
  },
  {
-  "at": 3.8,
+  "at": 3.7,
   "text": "  nothing about it \u2014 write a test that fails without your change"
  },
  {
-  "at": 3.8,
-  "text": "  Both trees' output: .wringer/runs/20260806-205729-e3a5/vacuity/"
+  "at": 3.7,
+  "text": "  Both trees' output: .wringer/runs/20260807-110843-da4d/vacuity/"
  },
  {
-  "at": 3.8,
+  "at": 3.7,
   "text": "  `wring deliver` will refuse this bundle."
  },
  {
-  "at": 3.8,
+  "at": 3.7,
   "text": ""
  },
  {
-  "at": 3.8,
+  "at": 3.7,
   "text": "Evidence written to:"
  },
  {
-  "at": 3.8,
-  "text": ".wringer/runs/20260806-205729-e3a5/"
+  "at": 3.7,
+  "text": ".wringer/runs/20260807-110843-da4d/"
  },
  {
-  "at": 5.2,
+  "at": 5.1,
   "text": ""
  },
  {
-  "at": 5.2,
+  "at": 5.1,
   "text": "$ wring deliver",
   "prompt": true
  },
  {
   "at": 5.9,
-  "text": "wring deliver: refusing to deliver 20260806-205729-e3a5 \u2014 it recorded"
+  "text": "wring deliver: refusing to deliver 20260807-110843-da4d \u2014 it recorded"
  },
  {
   "at": 5.9,
@@ -116,7 +116,7 @@
  },
  {
   "at": 5.9,
-  "text": "20260806-205729-e3a5/vacuity/ if you want to see why. There is no flag for"
+  "text": "20260807-110843-da4d/vacuity/ if you want to see why. There is no flag for"
  },
  {
   "at": 5.9,

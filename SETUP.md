@@ -148,7 +148,7 @@ command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install --force --python 3.12 wringer && uv tool update-shell
 ```
 
-That installs 0.2.0 from PyPI. **To set up against unreleased work on
+That installs 0.3.0 from PyPI. **To set up against unreleased work on
 `main`** instead, from this clone: `uv tool install --force --python 3.12 .`
 
 **Alternative — `pipx`**, if you already have it *and* its default Python is
@@ -169,7 +169,7 @@ Verify:
 wring --version && wring doctor --help >/dev/null && echo "doctor present"
 ```
 
-Correct output: a version line starting `wring 0.2`, then `doctor present`.
+Correct output: a version line starting `wring 0.3`, then `doctor present`.
 
 - `command not found` → the install directory is not on your PATH.
   `uv tool update-shell` (or `pipx ensurepath`) plus a **fresh shell** fixes
@@ -419,7 +419,7 @@ ladder. This is expected, happens once, and takes about ten seconds:
 [5/6] Unpacking init image [8s]
 [5/6] Unpacking init image for platform linux/arm64/v8 [8s]
 [6/6] Starting container [9s]
-wring 0.2.0
+wring 0.3.0
 ```
 
 Later runs skip stages 3 to 5 and start in under a second. No key is
@@ -484,7 +484,7 @@ A real captured run, on a Mac with no container runtime installed:
 
 ```
 ✓ python                Python 3.12.13
-✓ wring                 wring 0.2.0 at /Users/you/.local/bin/wring
+✓ wring                 wring 0.3.0 at /Users/you/.local/bin/wring
 ✓ git                   git version 2.50.1 (Apple Git-155)
 ! container runtime     no container runtime found (Apple silicon detected)
                         → Install apple/container (needs macOS 26) or Docker Desktop — or skip the container and run wring directly
@@ -520,7 +520,7 @@ cd /tmp && mkdir -p not-a-repo && cd not-a-repo && wring doctor; echo "doctor ex
 
 ```
 ✓ python                Python 3.12.13
-✓ wring                 wring 0.2.0 at /Users/you/.local/bin/wring
+✓ wring                 wring 0.3.0 at /Users/you/.local/bin/wring
 ✓ git                   git version 2.50.1 (Apple Git-155)
 ! container runtime     no container runtime found (Apple silicon detected)
                         → Install apple/container (needs macOS 26) or Docker Desktop — or skip the container and run wring directly

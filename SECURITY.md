@@ -1,6 +1,6 @@
 # Security
 
-Wringer is young software (`0.1.0`). Read this before running
+Wringer is young software (`0.3.0`). Read this before running
 `wring verify` in a repository you did not write.
 
 ## Reporting a vulnerability
@@ -136,10 +136,11 @@ backported to an older one.
 | Version | Supported |
 |---|---|
 | `main` | ✅ |
-| `0.2.0` (PyPI, current) | ✅ |
+| `0.3.0` (PyPI, current) | ✅ |
+| `0.2.0` (PyPI) | upgrade — `pip install -U wringer` |
 | `0.1.0` (PyPI) | upgrade — `pip install -U wringer` |
 | `*.dev*` (git installs) | reinstall from `main` or PyPI |
 
-Upgrading from 0.1.0 needs nothing: `wring verify` behaves as it did, its
+Upgrading from 0.1.0 or 0.2.0 needs nothing: `wring verify` behaves as it did, its
 bundles stay readable, and every command added since is opt-in. See
 [CHANGELOG.md](CHANGELOG.md).

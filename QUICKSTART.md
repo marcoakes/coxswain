@@ -2,9 +2,7 @@
 
 > **Every transcript on this page is real** — one session in a scratch Python
 > repo on 2026-07-30, captured and pasted unedited, in the order shown. The
-> single clearly-marked block at the bottom is not built yet and says so, and
-> the one command here that is on `main` rather than in the release is marked
-> where it appears.
+> single clearly-marked block at the bottom is not built yet and says so.
 >
 ## Install
 
@@ -20,14 +18,14 @@ python3 --version        # must be 3.11+
 pipx install wringer     # or: pip install wringer
 ```
 
-That is **0.2.0**, all thirteen commands, and its only runtime dependency is
+That is **0.3.0**, all sixteen commands, and its only runtime dependency is
 PyYAML. `pipx` puts `wring` on your PATH globally and keeps it out of your
 system Python; `pip install wringer` into a venv works identically.
 
 Verify it:
 
 ```bash
-wring --version          # wring 0.2.0
+wring --version          # wring 0.3.0
 ```
 
 > **Installing from git** — `pip install "git+https://github.com/marcoakes/wringer"`
@@ -43,11 +41,6 @@ working correctly — it ran what your repo declared. Install your project's
 dependencies into the same environment, or edit `.wringer.yaml`.
 
 ## Or let it walk you through it
-
-> **`wring start` is on `main` and is not in 0.2.0 yet.** `pipx install
-> wringer` gets you thirteen of the sixteen commands; this one arrives in the
-> next release. To try it now:
-> `pipx install "git+https://github.com/marcoakes/wringer"`.
 
 `wring start` does the next four sections for you: preflight, the gates your
 project already declares, the agent that will drive the repair loop, and a
@@ -100,12 +93,11 @@ the one thing a guided launch must not do.
 ## The sixteen commands
 
 This page walks five of them in order. The rest exist and are documented
-where they are used; nothing here is a preview. **Thirteen are in 0.2.0 on
-PyPI; the three marked `main` only arrive in the next release.**
+where they are used; nothing here is a preview.
 
 | command | does | proves? | network |
 |---|---|---|---|
-| `start` | the guided launch: preflight, config, agent, first build, receipt (**`main` only, not in 0.2.0**) | **yes** | `--clone` fetches |
+| `start` | the guided launch: preflight, config, agent, first build, receipt | **yes** | `--clone` fetches |
 | `init` | write a `.wringer.yaml` from what your project already declares | — | no |
 | `verify` | run the declared gates, write an evidence bundle | **yes** | no |
 | `explain` | diagnose a finished run, without an LLM | — | no |
@@ -119,8 +111,8 @@ PyPI; the three marked `main` only arrive in the next release.**
 | `issue` | write a forge issue to a local markdown file | — | fetches |
 | `deliver` | a verified change becomes a branch, a commit and a merge request | — | `--send` |
 | `doctor` | check this machine's preconditions; exit 1 on anything blocking | — | no |
-| `attest` | assemble the provenance claim for a verified change (**`main` only**) | — | no |
-| `audit` | check an attestation offline — no config, no network, no LLM (**`main` only**) | — | no |
+| `attest` | assemble the provenance claim for a verified change | — | no |
+| `audit` | check an attestation offline — no config, no network, no LLM | — | no |
 
 **Nothing in the "proves" column can reach a network.** That is the line
 that matters: the commands that decide whether a change is good run offline,

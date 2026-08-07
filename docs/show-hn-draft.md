@@ -3,7 +3,21 @@
 *Written 2026-08-03. **Not posted.** Posting is Marc's, and so is the final
 wording — this is a starting point with every number checked, not a script.*
 
-**✅ The precondition is met (2026-08-03).** `pip install wringer` gives
+> **⚠️ STALE AS OF 2026-08-07, and deliberately not rewritten.** The block
+> below records what was *verified* on 2026-08-03, and editing those numbers
+> to say 0.3.0 would be asserting a check nobody has run — 0.3.0 is prepared
+> on `main` but **not yet tagged or published**. Re-run
+> `scripts/verify-published.sh` after the publish and update this block from
+> its output, not from memory.
+>
+> Three things the post should change once it is true:
+> **0.3.0, sixteen commands** rather than 0.2.0 and thirteen; the release to
+> point at is `v0.3.0`; and the demo to open with is
+> [`docs/vacuous.svg`](vacuous.svg) rather than `docs/demo.svg` — a worker
+> making a failing test pass by rewriting the assertion, and Wringer refusing
+> to deliver it, is a far better sixty seconds than a bug getting fixed.
+
+**✅ The precondition was met (2026-08-03).** `pip install wringer` gives
 0.2.0 with all thirteen commands — verified from the index, cache off, by
 `scripts/verify-published.sh`. Checked at the same time, because the post
 leans on all of it:
