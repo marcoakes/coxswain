@@ -736,3 +736,45 @@ def test_a_task_dir_that_leaves_the_repo_is_refused(repo, escape):
             },
             "test",
         )
+
+
+def test_a_prd_carrying_the_agents_credential_is_scrubbed(
+    repo, write_config, monkeypatch, capsys
+):
+    """`wring spec` scrubs the PRD on the way IN, so `request.json` and the
+    wire carry the same text. It built that redactor from `judge.api_key_env`
+    alone, so a credential named in `run.worker.acp.env_passthrough` — the one
+    an agent is handed, and the one `wring start` writes — went through
+    untouched.
+
+    A PRD is a document a human pasted things into. That is exactly where a
+    key ends up by accident.
+    """
+    secret = "notarealcredential-in-a-prd-4c81f0a6"
+    monkeypatch.setenv("WRINGER_AGENT_CREDENTIAL", secret)
+    write_config(
+        repo,
+        'version: 1\ngates:\n  - id: t\n    run: "true"\n'
+        "run:\n  worker:\n    acp:\n      command: some-agent\n"
+        "      env_passthrough: [WRINGER_AGENT_CREDENTIAL]\n"
+        "judge:\n"
+        "  endpoint: http://127.0.0.1:11434/v1/chat/completions\n"
+        "  model: a-model\n"
+        "  rubric: rubric.yaml\n",
+    )
+    (repo / "PRD.md").write_text(
+        f"# Build it\n\nUse the key {secret} when you call the API.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["spec", "PRD.md"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    hits = [
+        path.relative_to(repo).as_posix()
+        for path in (repo / ".wringer").rglob("*")
+        if path.is_file()
+        and secret in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert hits == [], f"the credential reached {hits}"

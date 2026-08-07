@@ -921,3 +921,36 @@ def test_the_recipe_blocks_the_merge_on_a_vacuous_bundle():
     assert any(
         line.endswith("wring deliver") for line in recipe_wring_lines()
     ), "the recipe claims to block on vacuous gates but never runs wring deliver"
+
+
+# --- every bundle-writing command must know every declared credential ------
+#
+# `config.declared_secret_names` is the single answer to "what does this
+# config say holds a credential". Four commands built narrower lists of their
+# own, and one — `wring fleet` — passed no extra names at all. That is how a
+# credential an AGENT was handed reached `wring deliver`'s patch in cleartext
+# while `verify`'s bundle had scrubbed it (fixed 2026-08-07), and the same
+# argument applies to every other writer.
+
+
+def test_every_redactor_reads_the_names_the_config_declares():
+    """Structural, because behaviour tests only cover the paths somebody
+    thought to exercise — and the two leaks this repo shipped were both write
+    paths nobody thought to exercise."""
+    import re
+
+    offenders = []
+    for path in sorted((repo_root() / "src" / "wringer").glob("*.py")):
+        if path.name == "redact.py":  # where from_config is defined
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"Redactor\.from_config\(", text):
+            window = text[match.start() : match.start() + 320]
+            if "declared_secret_names" not in window:
+                line = text[: match.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line}")
+    assert not offenders, (
+        "these build a redactor without the names the config declares, so a "
+        "credential named in `run.worker.acp.env_passthrough` reaches whatever "
+        f"they write: {offenders}"
+    )

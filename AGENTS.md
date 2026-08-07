@@ -373,6 +373,40 @@ is an error.
   update. Bundles are redacted before write, but redaction only knows about
   values in the environment — a secret a gate reads from a file and prints
   is still yours to catch, so read a bundle before pasting it anywhere.
+- **A red CI build here CAN be read, without auth.** The logs are login-walled
+  (403 on the API, a login wall on the web), which is why `tests.yml` pipes
+  pytest's failures into a `::error::` annotation — and annotations are public:
+
+  ```bash
+  curl -s "https://api.github.com/repos/marcoakes/wringer/commits/<sha>/check-runs"
+  # then, per failing run id:
+  curl -s "https://api.github.com/repos/marcoakes/wringer/check-runs/<id>/annotations"
+  ```
+
+  Read that BEFORE forming a hypothesis. On 2026-08-07 a day went into guessing
+  at five red builds, and two production changes were made on hypotheses that
+  turned out to be wrong, while the actual failing assertions were sitting in
+  that endpoint the whole time. Run status is readable the same way
+  (`/actions/runs?per_page=5`), but it is **60 requests/hour per IP** — poll
+  once, never in a loop.
+
+- **`scripts/ci-repro.sh` passing is NOT CI passing.** It was green through
+  five red builds and got quoted three times as evidence. It reproduces a
+  fresh clone and a missing git identity; it now also pins `TMPDIR=/tmp` and
+  `init.defaultBranch=master`, because both were deciding the outcome:
+  a bare repo made without `-b main` breaks `git remote set-head -a` wherever
+  git defaults to `master`, and every stderr message is wrapped to the
+  terminal, so a shorter tmp path moves where a line breaks and a multi-word
+  assertion fails. **Assert on flattened output** — `conftest.flat` — never on
+  where the formatter chose to break a line.
+
+- **Revert the fix and watch the test go red.** It costs a minute and it has
+  now caught three tests in one week that passed against broken code: a
+  descriptor count that moved with GC timing, a leak test that passed because
+  the command REFUSED and wrote nothing, and one asserting a phrase the
+  wrapper had started breaking. A test written after the fix proves nothing
+  until it has failed once.
+
 - **Don't run `wring verify` on this repo casually while iterating** — each
   run writes a new `.wringer/runs/<id>/`. Harmless (gitignored), just noisy.
 - **Test repos must be isolated from the developer's git config.**

@@ -272,7 +272,11 @@ def run(
     """Supervise the queue until it empties or the deadline bites."""
     assert cfg.fleet is not None
     settings = cfg.fleet
-    redactor = Redactor.from_config(cfg.evidence)
+    # Every name this config declares. A fleet's bundle records what its
+    # children did, and its children are the ones handed a credential.
+    redactor = Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
     bundle = Bundle.create(root / FLEETS_DIRNAME, redactor=redactor)
 
     bundle.event(

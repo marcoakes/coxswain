@@ -1509,9 +1509,9 @@ def cmd_judge(args: argparse.Namespace) -> int:
         _fail("judge", exc)
         return EXIT_CONFIG
 
-    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
-        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
-    ))
+    redactor = redact.Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
 
     try:
         passed, failed_gate = judge.gates_passed(run_dir)
@@ -1696,9 +1696,9 @@ def cmd_spec(args: argparse.Namespace) -> int:
     # Built BEFORE the PRD is read, because the PRD is scrubbed on the way in
     # rather than on the way to disk: a request.json saying [REDACTED] beside a
     # socket that carried the real value is an audit record that lies.
-    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
-        (cfg.judge.api_key_env,) if cfg.judge.api_key_env else ()
-    ))
+    redactor = redact.Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
 
     try:
         prd = spec.read_prd(Path(args.prd), root, redactor)
@@ -2107,9 +2107,9 @@ def cmd_issue(args: argparse.Namespace) -> int:
         )
         return EXIT_CONFIG
 
-    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
-        (cfg.forge.token_env,) if cfg.forge.token_env else ()
-    ))
+    redactor = redact.Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
     settings = cfg.deliver or config.Deliver()
 
     try:
