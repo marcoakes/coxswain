@@ -216,8 +216,20 @@ class Connection:
                     raise AcpError(f"{found['error'].get('message', 'agent error')}")
                 return found.get("result", {})
             if self._done.is_set() and self._proc.poll() is not None:
+                # ONE LAST DRAIN before giving up, and it is load-bearing.
+                # The reader sets `_done` only at EOF, so by now everything
+                # the agent said is in `_inbound` — but it can have arrived
+                # AFTER this iteration's pop, in which case raising here
+                # discards precisely the last thing it said before it died.
+                # That is the highest-value line in a failed turn, and losing
+                # it is a race that shows up on a loaded machine and never on
+                # a fast one.
+                self.drain()
                 raise AcpError("the agent exited before replying")
             time.sleep(0.01)
+        # Same reason on the deadline path: an agent that ran out of time
+        # usually said why first.
+        self.drain()
         raise AcpError("the agent did not reply before the turn's deadline")
 
     # Set by the session so inbound requests can be served with context.

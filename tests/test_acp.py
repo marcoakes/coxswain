@@ -603,3 +603,61 @@ def test_the_last_bytes_an_agent_wrote_are_captured(repo, monkeypatch, capsys):
 
     log = next((only_loop(repo)).rglob("worker.stderr.log"))
     assert "THE LAST BYTES BEFORE THE EXIT" in log.read_text(encoding="utf-8")
+
+
+def test_the_last_message_is_served_even_when_it_lands_as_the_agent_exits():
+    """The race that turned CI red while every local run stayed green.
+
+    `_read_forever` sets `_done` at EOF, so by then everything the agent said
+    is in `_inbound`. But `_await` pops `_inbound` at the TOP of its loop and
+    checks for the exit at the BOTTOM — so a line that arrives between those
+    two points is still sitting in the queue when the exit check fires, and
+    raising there discards it. On a fast machine the pop almost always wins.
+    On a loaded CI runner it does not.
+
+    What is discarded is precisely the last thing an agent said before it
+    died, which is the highest-value line in a failed turn.
+
+    Driven directly rather than through a subprocess, because a race that
+    reproduces one run in ten is not a test — this forces the exact
+    interleaving every time.
+    """
+    import threading
+
+    from wringer import acp
+
+    class ExitedProc:
+        returncode = 0
+        stdin = stdout = stderr = None
+
+        def poll(self):
+            return 0
+
+    connection = acp.Connection.__new__(acp.Connection)
+    connection._proc = ExitedProc()
+    connection._deadline = time.monotonic() + 5
+    connection._next_id = 1
+    connection._responses = {}
+    connection._lock = threading.Lock()
+    connection._inbound = []
+    connection._done = threading.Event()
+
+    served: list[dict] = []
+    connection.handler = served.append
+
+    def arrive_between_the_pop_and_the_check():
+        if not connection._inbound and not served:
+            connection._inbound.append(
+                {"method": "session/update", "params": {"text": "LAST WORDS"}}
+            )
+        return True
+
+    connection._done.is_set = arrive_between_the_pop_and_the_check
+
+    with pytest.raises(acp.AcpError, match="exited before replying"):
+        connection._await(1)
+
+    assert served, (
+        "the agent's last message was dropped because it arrived while the "
+        "client was deciding the agent had gone"
+    )
