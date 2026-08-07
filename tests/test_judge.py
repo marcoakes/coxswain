@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import flat
 
 from wringer import cli, config, judge, loop, rubric
 
@@ -96,7 +97,7 @@ def test_a_bundle_whose_gates_failed_is_refused(repo, monkeypatch, capsys):
 
     assert cli.main(["judge"]) == cli.EXIT_REFUSED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "gates did not pass" in err
     # no request was built, so nothing could have been sent
     assert not (repo / judge.VERDICTS_DIRNAME).exists()
@@ -223,7 +224,7 @@ def test_a_repo_without_a_judge_section_cannot_reach_a_network(
 
     assert cli.main(["judge"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "no 'judge:' section" in err
     assert "never will be" in err
 

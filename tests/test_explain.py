@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from conftest import flat
+
 from wringer import cli, evidence, gates
 
 FAILING = """\
@@ -159,7 +161,7 @@ def test_explain_without_any_runs_is_a_config_error(repo, monkeypatch, capsys):
 
     assert cli.main(["explain"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "no runs" in err
     assert "wring verify" in err
 

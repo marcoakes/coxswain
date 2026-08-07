@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import flat
 
 from wringer import cli, evidence, loop
 
@@ -237,7 +238,7 @@ gates:
 
     assert cli.main(["run"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "no 'run:' section" in err
     assert "never one it guessed" in err
     assert not (repo / loop.LOOPS_DIRNAME).exists()

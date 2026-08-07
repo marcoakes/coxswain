@@ -36,12 +36,26 @@ echo "HEAD: $(git log --oneline -1)"
 # red builds that could not be diagnosed, because this repo's CI logs are not
 # readable without auth. Reproducing it locally is the whole point of this
 # script.
+# Two more divergences, both of which cost a day on 2026-08-07 because this
+# script was green through five red builds:
+#
+#   init.defaultBranch=master — a bare repo made without `-b main` gets a HEAD
+#   pointing at a branch nothing ever pushes, so `git remote set-head -a`
+#   fails. This Mac's git defaults to `main` and hid it completely.
+#
+#   TMPDIR=/tmp — CI's pytest paths are far SHORTER than macOS's
+#   /private/var/folders/… ones. Every message this CLI prints is wrapped to
+#   the terminal, so the path length decides where the line breaks, and an
+#   assertion on a multi-word phrase passes or fails on that alone.
 HOME="$WORK/nohome" \
+TMPDIR=/tmp \
 GIT_CONFIG_GLOBAL=/dev/null \
 GIT_CONFIG_SYSTEM=/dev/null \
-GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_COUNT=2 \
 GIT_CONFIG_KEY_0=user.useConfigOnly \
 GIT_CONFIG_VALUE_0=true \
+GIT_CONFIG_KEY_1=init.defaultBranch \
+GIT_CONFIG_VALUE_1=master \
     .venv/bin/pytest -q
 CODE=$?
 echo "---"

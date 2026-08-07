@@ -76,7 +76,7 @@ def test_an_unapproved_spec_is_refused_and_changes_nothing(
 
     assert cli.main(["plan"]) == cli.EXIT_GATE_FAILED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "approved: false" in err
     assert "no --yes" in err
     # nothing was written, so nothing can be run
@@ -93,7 +93,7 @@ def test_unanswered_required_questions_are_refused_and_listed(
 
     assert cli.main(["plan"]) == cli.EXIT_GATE_FAILED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "date-format: Which date format" in err
     # the optional one is not held against the plan
     assert "row-cap" not in err
@@ -303,7 +303,7 @@ def test_a_task_dir_that_does_not_exist_is_refused(repo, monkeypatch, capsys):
 
     assert cli.main(["plan"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "does not exist" in err
     assert "fleet would park it" in err
 
@@ -489,7 +489,7 @@ def test_two_tasks_may_not_share_a_brief(repo, monkeypatch, capsys):
 
     assert cli.main(["plan"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "names the same brief" in err
     assert not (repo / spec.TASKS_FILENAME).exists()
 

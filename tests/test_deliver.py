@@ -1805,7 +1805,7 @@ def _with_origin(repo, git_run, tmp_path_factory) -> None:
     in for the one under test.
     """
     origin = tmp_path_factory.mktemp("origin") / "bare.git"
-    git_run(repo, "init", "--bare", "-q", str(origin))
+    git_run(repo, "init", "--bare", "-b", "main", "-q", str(origin))
     git_run(repo, "remote", "add", "origin", str(origin))
     git_run(repo, "push", "-q", "origin", "main")
     git_run(repo, "remote", "set-head", "origin", "-a")

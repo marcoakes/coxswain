@@ -139,7 +139,7 @@ def leaky_repo(repo: Path, git_run, tmp_path_factory, monkeypatch) -> Path:
     # without this the delivery bundle is never written and the sweep would
     # silently stop covering that write path.
     origin = tmp_path_factory.mktemp("origin") / "bare.git"
-    git_run(repo, "init", "--bare", "-q", str(origin))
+    git_run(repo, "init", "--bare", "-b", "main", "-q", str(origin))
     git_run(repo, "remote", "add", "origin", str(origin))
     git_run(repo, "push", "-q", "origin", "main")
     git_run(repo, "remote", "set-head", "origin", "-a")

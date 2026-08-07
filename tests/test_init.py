@@ -1,5 +1,7 @@
 """`wring init` behavior."""
 
+from conftest import flat
+
 from wringer import cli, config, detect
 
 
@@ -168,7 +170,7 @@ def test_init_refuses_to_overwrite(tmp_path, monkeypatch, capsys):
     (tmp_path / config.CONFIG_FILENAME).write_text("version: 1\n", encoding="utf-8")
 
     assert cli.main(["init"]) == cli.EXIT_CONFIG
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "refusing to overwrite" in err
     kept = (tmp_path / config.CONFIG_FILENAME).read_text(encoding="utf-8")
     assert kept == "version: 1\n"

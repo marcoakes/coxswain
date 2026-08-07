@@ -228,7 +228,7 @@ git commit -qm "a calculator, and a test that passes"
 # A real `origin` on disk. `wring deliver` refuses when the remote's default
 # branch cannot be resolved, and that refusal would be recorded INSTEAD of the
 # vacuity one — the recording would show a true message about the wrong thing.
-git init -q --bare "$ORIGIN"
+git init -q --bare -b main "$ORIGIN"
 git remote add origin "$ORIGIN"
 git push -q origin main
 git remote set-head origin -a

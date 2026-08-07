@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from conftest import flat
+
 from wringer import cli, evidence, gates
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -224,7 +226,7 @@ def test_missing_config_is_a_config_error_and_writes_nothing(
 
     assert cli.main(["verify"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert ".wringer.yaml" in err
     assert "wring init" in err
     assert bundles(repo) == []
@@ -238,7 +240,7 @@ def test_unknown_gate_is_a_config_error_and_writes_nothing(
 
     assert cli.main(["verify", "--gate", "typo"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "no gate 'typo'" in err
     assert "format, lint, test" in err
     assert bundles(repo) == []
@@ -711,7 +713,7 @@ def test_outside_a_git_repo_verify_refuses(tmp_path, write_config, monkeypatch, 
 
     assert cli.main(["verify"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "not a git repository" in err
     assert bundles(tmp_path) == []
 
@@ -737,7 +739,7 @@ def test_a_conflicted_merge_is_refused_with_exit_three(
 
     assert cli.main(["verify"]) == cli.EXIT_REFUSED
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "in the middle of a merge" in err
     assert bundles(repo) == []
 

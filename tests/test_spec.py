@@ -575,7 +575,7 @@ def test_a_reply_that_answers_its_own_question_is_refused(
 
     assert cli.main(["spec", "PRD.md", "--send"]) == cli.EXIT_CONFIG
 
-    err = capsys.readouterr().err
+    err = flat(capsys.readouterr().err)
     assert "answered its own open question" in err
     assert "date-format" in err
     assert not (repo / spec.SPEC_FILENAME).exists()
