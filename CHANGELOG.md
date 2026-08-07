@@ -57,6 +57,48 @@ here, not the fixes.
   writes no receipt** — a vacuous green produced by the onboarding flow is the
   failure this project exists to prevent.
 
+- **`docs/vacuous.svg`** — *the agent lies, Wringer catches it*, captured. A
+  worker is handed a real bug with a real test that catches it, and it makes
+  the failure go away by rewriting the assertion into
+  `multiply(3, 4) == multiply(3, 4)`. The loop converges. The gates go green.
+  The bug is still there. `wring verify --prove` then finds those gates pass
+  on the pre-change tree too — `gates_vacuous` — and `wring deliver` refuses
+  the bundle. Every frame is a real command really executed.
+
+  The green baseline is load-bearing: `--prove` compares against HEAD, so it
+  catches gates that could not fail, **not** an agent deleting a test that was
+  already failing (SPEC_VACUITY_V0 §5a's stated limit). Committing the failing
+  test would record `sensitive` and tell the opposite story.
+
+- **`docs/flow.svg`** — the intent→receipt map, generated and probed like the
+  roadmap: every box names the command that performs it, and a test asserts
+  each is registered in the real parser. Two boxes name **no** command on
+  purpose — approving a spec and reviewing a merge request are where this
+  program stops and waits for a person — and a test keeps them there.
+
+- **`examples/github-actions/`** — the recipe an organisation copies. Verifies
+  with `--prove`, uploads the bundle, **blocks the merge on a vacuous
+  verdict** (which already worked: `wring deliver` exits 1 on
+  `gates_vacuous`), and posts `summary.md` to the pull request. Three guards,
+  because a workflow under `examples/` is never executed and rots in silence:
+  every `wring` line in it parses against the real CLI, `--send` appears
+  nowhere, and the step it claims to have is actually there.
+
+- **`wring verify --prove` now says on the TERMINAL that the gates proved
+  nothing.** `vacuity.json` recorded `gates_vacuous` and `summary.md` carried
+  the warning while the console printed `✓ test passed` and exited 0 — so a
+  reader learned nothing until `wring deliver` refused the bundle much later,
+  for a reason nothing had mentioned. Silent on `proven`, and silent when no
+  prove pass ran, per SPEC_VACUITY_V0 §7.
+
+- **One sweep that asks whether a credential can reach ANY artifact**
+  (`tests/test_no_secret_in_any_bundle.py`). Every other redaction test here
+  is per-path, written by whoever built that path — which is exactly how two
+  leaks shipped. This one plants two credentials, runs the commands that
+  produce artifacts, and walks **every file** under `.wringer/`. It does not
+  enumerate write paths, so one added next year is covered the day it is
+  added.
+
 - **`docs/start.svg`** — a second captured recording, beside the existing one
   rather than replacing it, with `docs/start.cast.json` as its transcript. The
   key step is deliberately off-camera and the documentation says so in words:
@@ -195,6 +237,61 @@ here, not the fixes.
   as the worked example.
 
 ### Fixed
+
+- **`wring verify --prove` wrote its gate logs with no redaction at all.**
+  `vacuity.prove` ran the pre-change gates through `gates.run` without a
+  redactor, so those logs — which land inside the run bundle — got neither the
+  config's patterns, nor `env_passthrough`, nor even the built-in
+  `*TOKEN*`/`*SECRET*`/`*KEY*` defaults. The one set of bundle files written
+  outside the guarantee SECURITY.md makes. Reproduced with a gate that echoes
+  an environment variable; the value was sitting in
+  `vacuity/001_<gate>.stdout.log`.
+
+- **Redaction made delivery impossible, permanently.** `verify` writes
+  `diff.patch` scrubbed; `wring deliver`'s tree-match check compared that
+  against a freshly computed **raw** diff. Scrubbed bytes never equal raw
+  ones, so any repository whose changed code contained something the redactor
+  recognised was refused on a tree that had not moved — and the refusal's own
+  remedy ("run `wring verify` again") produced the same scrubbed patch. Both
+  sides are scrubbed now.
+
+- **`wring deliver`, `judge`, `spec`, `issue` and `fleet` did not know every
+  credential the config declares.** Each built a redactor from one name of its
+  own choosing, and `fleet` passed none at all — so a credential named in
+  `run.worker.acp.env_passthrough`, the one an *agent* is handed and the one
+  `wring start` writes, reached the delivery patch in cleartext while
+  `verify`'s bundle had scrubbed it. All five read
+  `config.declared_secret_names` now, and a test walks every
+  `Redactor.from_config` call in `src/` to keep it that way.
+
+  For `deliver` the two are one fix: the tree-match check compares its
+  scrubbed patch against `verify`'s, so a narrower list on either side breaks
+  the comparison as surely as it leaks.
+
+- **A failed ACP turn destroyed what the agent said before it died.**
+  `run_turn`'s `finally` writes the session updates; the error handler then
+  wrote the failure note over the same path. The bundle kept "something went
+  wrong" — the half a reader already knows — and lost the only diagnostic the
+  turn produced. SPEC_ACP_V0 §2 promises an ACP worker leaves the same shape
+  of evidence a shell worker does, and a shell worker keeps its stdout when it
+  crashes.
+
+- **An ACP turn leaked three file descriptors.** `_stop` closes the child's
+  stdin only when it has to *kill* the process, so an agent that exited
+  cleanly — the common case — left stdin, stdout and stderr all open. A
+  `wring fleet` drives hundreds of turns in one process, where that surfaces
+  somewhere else entirely as `too many open files`.
+
+- **A message arriving as the agent exited was discarded.** `_await` pops the
+  inbound queue at the top of its loop and checks for the exit at the bottom,
+  so a line landing between the two was still queued when the raise fired. On
+  a fast machine the pop wins; on a loaded CI runner it does not. Both
+  give-up paths drain first now.
+
+- **Refusals did not fit a terminal.** The vacuity refusal rendered as a
+  single **402-column line**. All 43 sites that print a domain exception now
+  wrap, line-by-line so the indented examples a reader is meant to copy — a
+  `judge:` stanza, a `git remote set-head` command — survive intact.
 
 - **An ACP agent's output reached the evidence bundle unscrubbed.** `acp.py`
   handed the child a raw file handle for its stderr and wrote its session
