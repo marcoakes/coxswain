@@ -169,7 +169,10 @@ Verify:
 wring --version && wring doctor --help >/dev/null && echo "doctor present"
 ```
 
-Correct output: a version line starting `wring 0.3`, then `doctor present`.
+Correct output: a `wring <version>` line, then `doctor present`. The
+version is whatever PyPI currently serves — this step gates that `wring`
+is installed and answers, not which release it is. Pinning a number here
+would make the runbook wrong on the day of every release.
 
 - `command not found` → the install directory is not on your PATH.
   `uv tool update-shell` (or `pipx ensurepath`) plus a **fresh shell** fixes

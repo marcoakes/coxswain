@@ -304,12 +304,27 @@ def test_step_7h_and_its_selftest_agree():
 # come from src/wringer/__init__.py, the single source of truth pyproject
 # already points at.
 
-_VERSION_LITERAL = re.compile(r"\b0\.\d+\.\d+\b")
+# Two parts or three. The pattern required THREE and the literal that
+# broke the 0.3.0 release was `^wring 0\\.2` — so the guard would have
+# missed it even with the right file on its list.
+_VERSION_LITERAL = re.compile(r"\b0\.\d+(?:\.\d+)?\b")
 
 
-@pytest.mark.parametrize(
-    "name", ["verify-published.sh", "release-check.sh", "ci-repro.sh"]
-)
+def every_shell_script() -> list[str]:
+    """Every script, discovered — not a list maintained beside them.
+
+    The named list was `verify-published.sh`, `release-check.sh`,
+    `ci-repro.sh`. `setup-selftest.sh` was not on it, hardcoded `^wring 0\\.2`,
+    and failed the release that bumped to 0.3 — in CI only, because a
+    developer's `wring` on PATH is often an older tool install while CI's is
+    the repo. The guard against stale version literals had itself gone stale,
+    in exactly the way it exists to prevent.
+    """
+    scripts = repo_root() / "scripts"
+    return sorted(p.name for p in scripts.glob("*.sh")) if scripts.is_dir() else []
+
+
+@pytest.mark.parametrize("name", every_shell_script() or ["none"])
 def test_no_release_script_hardcodes_a_version_it_checks(name: str):
     require_checkout("scripts")
     path = repo_root() / "scripts" / name

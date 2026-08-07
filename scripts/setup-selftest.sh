@@ -40,6 +40,10 @@ PASS=0
 FAIL=0
 ok()   { echo "  ok    $1"; PASS=$((PASS + 1)); }
 bad()  { echo "  FAIL  $1"; FAIL=$((FAIL + 1)); }
+# Worth saying, not worth failing. A developer's `wring` on PATH is often
+# an older tool install than the tree they are standing in; that is a
+# useful thing to be told and a terrible thing to block a runbook on.
+note() { echo "  note  $1"; }
 
 echo "wring under test: $(command -v wring) ($(wring --version 2>&1))"
 echo "scratch tree    : $WORK"
@@ -64,9 +68,24 @@ done
 
 echo
 echo "== step 3 — the verify command =="
-wring --version | grep -q "^wring 0\.2" \
-    && ok "wring --version starts 'wring 0.2'" \
-    || bad "wring --version is not 0.2.x"
+# The version is NOT hardcoded. A literal `0.2` here passed for months and
+# then failed the release that bumped to 0.3 — and it failed in CI only,
+# because a developer's `wring` on PATH is often an older tool install while
+# CI's is the repo. What this step actually gates is "wring is installed and
+# answers", so it checks the shape and, when it can see the source, that the
+# answer matches the tree it was built from.
+VERSION_LINE=$(wring --version 2>&1)
+case "$VERSION_LINE" in
+    "wring "[0-9]*) ok "wring --version answers ($VERSION_LINE)" ;;
+    *) bad "wring --version did not print a version ($VERSION_LINE)" ;;
+esac
+EXPECTED=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' \
+    "$ROOT/src/wringer/__init__.py" 2>/dev/null)
+if [ -n "$EXPECTED" ]; then
+    [ "$VERSION_LINE" = "wring $EXPECTED" ] \
+        && ok "the wring on PATH is this tree's ($EXPECTED)" \
+        || note "the wring on PATH is $VERSION_LINE, this tree is $EXPECTED"
+fi
 wring doctor --help >/dev/null 2>&1 \
     && ok "doctor present" || bad "doctor missing"
 
