@@ -122,8 +122,17 @@ def leaky_repo(repo: Path, git_run, tmp_path_factory, monkeypatch) -> Path:
     (repo / "rubric.yaml").write_text(RUBRIC, encoding="utf-8")
     (repo / ".wringer.yaml").write_text(config_body(), encoding="utf-8")
     (repo / ".gitignore").write_text(".wringer/\n", encoding="utf-8")
+    (repo / "notes.py").write_text("TOKEN = 'placeholder'\n", encoding="utf-8")
     git_run(repo, "add", "-A")
     git_run(repo, "commit", "-qm", "a repo that leaks from every seam")
+
+    # An agent pasting a credential into a SOURCE FILE, which is the second
+    # way a secret gets into evidence and the one an environment-only test
+    # cannot see. It is an uncommitted change, so it is in every diff every
+    # command captures from here on.
+    (repo / "notes.py").write_text(
+        f"TOKEN = {PLAIN_VALUE!r}\nKEY = {KEYED_VALUE!r}\n", encoding="utf-8"
+    )
 
     # A real `origin`, on disk. `wring deliver` refuses when the remote's
     # default branch cannot be resolved — one of its five refusals — so

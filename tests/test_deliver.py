@@ -1792,3 +1792,100 @@ def test_the_unresolvable_default_refusal_offers_a_remedy_that_works(
     git_run(repo, "remote", "set-head", "origin", "-a")
     planned = deliver.plan(repo, cfg, run_dir, "remedy")
     assert planned.base == "develop"  # `base` still names the MR's target
+
+
+# --- redaction must not make delivery impossible --------------------------
+
+
+def _with_origin(repo, git_run, tmp_path_factory) -> None:
+    """A real bare `origin` on disk.
+
+    `wring deliver` refuses when the remote's default branch cannot be
+    resolved — one of its five conditions — and that refusal would stand
+    in for the one under test.
+    """
+    origin = tmp_path_factory.mktemp("origin") / "bare.git"
+    git_run(repo, "init", "--bare", "-q", str(origin))
+    git_run(repo, "remote", "add", "origin", str(origin))
+    git_run(repo, "push", "-q", "origin", "main")
+    git_run(repo, "remote", "set-head", "origin", "-a")
+
+
+def test_a_redactable_value_in_the_diff_does_not_block_delivery(
+    repo, write_config, monkeypatch, capsys, git_run, tmp_path_factory
+):
+    """`verify` writes `diff.patch` SCRUBBED. `deliver` compared that against
+    a freshly computed diff, which is raw — so the two never matched and the
+    refusal fired on a tree that had not moved at all.
+
+    Worse, it is unclearable: the message says "run 'wring verify' again", and
+    the next verify scrubs the patch exactly the same way. A repository whose
+    changed code contains anything the redactor recognises could not be
+    delivered, ever. This repo has shipped two permanently-unclearable
+    refusals before; this is the third.
+
+    The case that matters is the one this project exists for: an agent pastes
+    a credential into a source file.
+    """
+    secret = "notarealtoken-in-the-diff-9f3e11c4"
+    monkeypatch.setenv("WRINGER_DELIVER_TOKEN", secret)
+    write_config(
+        repo,
+        'version: 1\ngates:\n  - id: t\n    run: "true"\n'
+        "deliver:\n  branch: \"wringer/{run}\"\n",
+    )
+    (repo / "notes.py").write_text("TOKEN = 'placeholder'\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-qm", "before")
+    _with_origin(repo, git_run, tmp_path_factory)
+    (repo / "notes.py").write_text(f"TOKEN = {secret!r}\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    assert cli.main(["verify"]) == cli.EXIT_OK
+    code = cli.main(["deliver"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_OK, (
+        "delivery was refused over a tree that never moved: "
+        + flat(captured.err)
+    )
+
+
+def test_the_delivery_patch_is_scrubbed_of_declared_credentials(
+    repo, write_config, monkeypatch, capsys, git_run, tmp_path_factory
+):
+    """`deliver` built its redactor from `forge.token_env` alone, so a
+    credential named anywhere else — `run.worker.acp.env_passthrough`, which
+    is the one an AGENT is handed — reached `patch.diff` in cleartext even
+    though `verify`'s own bundle had scrubbed it."""
+    secret = "notarealcredential-in-delivery-77b3e0a4"
+    monkeypatch.setenv("WRINGER_AGENT_CREDENTIAL", secret)
+    write_config(
+        repo,
+        'version: 1\ngates:\n  - id: t\n    run: "true"\n'
+        "run:\n  worker:\n    acp:\n      command: some-agent\n"
+        "      env_passthrough: [WRINGER_AGENT_CREDENTIAL]\n"
+        'deliver:\n  branch: "wringer/{run}"\n',
+    )
+    (repo / "notes.py").write_text("TOKEN = 'placeholder'\n", encoding="utf-8")
+    git_run(repo, "add", "-A")
+    git_run(repo, "commit", "-qm", "before")
+    _with_origin(repo, git_run, tmp_path_factory)
+    (repo / "notes.py").write_text(f"TOKEN = {secret!r}\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    cli.main(["verify"])
+    # Asserted, because without it this test passes for the WRONG reason: a
+    # deliver that refuses writes no patch at all, and an absent file leaks
+    # nothing. The narrow name list made both redactors disagree, so the
+    # tree-match check refused and the leak below was never reachable.
+    assert cli.main(["deliver"]) == cli.EXIT_OK, flat(capsys.readouterr().err)
+    capsys.readouterr()
+
+    hits = [
+        path.relative_to(repo).as_posix()
+        for path in (repo / ".wringer").rglob("*")
+        if path.is_file()
+        and secret in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert hits == [], f"the agent's credential reached {hits}"

@@ -2180,12 +2180,27 @@ def cmd_deliver(args: argparse.Namespace) -> int:
     if run_dir is None:
         return EXIT_CONFIG
 
-    redactor = redact.Redactor.from_config(cfg.evidence, extra_names=(
-        (cfg.forge.token_env,) if cfg.forge and cfg.forge.token_env else ()
-    ))
+    # Every name this config declares, not just the forge's. A credential an
+    # AGENT was handed — `run.worker.acp.env_passthrough` — reached the
+    # delivery patch in cleartext while `verify`'s own bundle had scrubbed it.
+    # Every name this config declares, not just the forge's. Two things need
+    # it: a credential an AGENT was handed (run.worker.acp.env_passthrough)
+    # reached the delivery patch in cleartext, AND the tree-match check below
+    # compares this redactor's output against verify's — so a narrower list
+    # here makes the two disagree and refuses a tree that never moved.
+    # Every name this config declares, not just the forge's. Two things need
+    # it: a credential an AGENT was handed (run.worker.acp.env_passthrough)
+    # reached the delivery patch in cleartext, AND the tree-match check below
+    # compares this redactor's output against verify's — so a narrower list
+    # here makes the two disagree and refuses a tree that never moved.
+    redactor = redact.Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
 
     try:
-        planned = deliver.plan(root, cfg, run_dir, run_dir.name, args.task)
+        planned = deliver.plan(
+            root, cfg, run_dir, run_dir.name, args.task, redactor=redactor
+        )
     except deliver.Refused as exc:
         _fail("deliver", exc)
         return exc.exit_code

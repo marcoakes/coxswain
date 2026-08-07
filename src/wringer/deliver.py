@@ -184,7 +184,12 @@ def branch_exists(root: Path, name: str, remote: str | None = None) -> bool:
     return False
 
 
-def check_verified_tree(root: Path, run_dir: Path, state: git.RepoState) -> None:
+def check_verified_tree(
+    root: Path,
+    run_dir: Path,
+    state: git.RepoState,
+    redactor: Redactor | None = None,
+) -> None:
     """Refuse unless the bundle describes the tree being shipped.
 
     **The most important refusal in this module.** `gates_passed` reads the
@@ -254,7 +259,14 @@ def check_verified_tree(root: Path, run_dir: Path, state: git.RepoState) -> None
     captured = run_dir / evidence.DIFF_FILENAME
     if captured.is_file():
         before = captured.read_text(encoding="utf-8", errors="replace")
-        after = git.diff(root, state.head_sha) or ""
+        # Scrubbed on BOTH sides. `before` came out of a bundle, where
+        # every write goes through the redactor; `after` is raw from git.
+        # Comparing the two directly made this refusal fire on a tree that
+        # had not moved — and it was unclearable, because its own remedy
+        # ("run 'wring verify' again") produces the same scrubbed patch.
+        after = (redactor or Redactor()).scrub(
+            git.diff(root, state.head_sha) or ""
+        )
         if before.strip() != after.strip():
             raise Refused(
                 f"the tracked changes differ from what {run_dir.name} verified. "
@@ -513,8 +525,16 @@ def plan(
     run_dir: Path,
     run_id: str,
     task: str | None = None,
+    redactor: Redactor | None = None,
 ) -> Plan:
-    """Work out the whole delivery. Touches git only to read."""
+    """Work out the whole delivery. Touches git only to read.
+
+    `redactor` is not decoration here: the tree-match check below compares
+    this run's `diff.patch` — which `verify` wrote SCRUBBED — against a
+    freshly computed diff. Comparing scrubbed bytes to raw ones means a
+    repository whose changed code contains anything the redactor
+    recognises never matches, and can never be delivered.
+    """
     assert cfg.deliver is not None
     settings = cfg.deliver
 
@@ -546,7 +566,7 @@ def plan(
     _check_not_vacuous(run_dir)
 
     state = git.inspect(root)
-    check_verified_tree(root, run_dir, state)
+    check_verified_tree(root, run_dir, state, redactor)
 
     # The delivered set, honestly: `.wringer/` is excluded at `git add` time,
     # so counting it here would make the plan describe a commit that will not
