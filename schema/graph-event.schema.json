@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/graph-event.schema.json",
+  "title": "Wringer graph event",
+  "description": "One line of graph.jsonl. Append-only, one JSON object per line, in the order things happened, each carrying the hash of the line before it. This schema describes a single line, not the file.",
+  "type": "object",
+  "required": [
+    "type",
+    "ts",
+    "prev_hash"
+  ],
+  "properties": {
+    "type": {
+      "enum": [
+        "graph.started",
+        "graph.resumed",
+        "graph.finished",
+        "node.started",
+        "node.finished",
+        "node.failed",
+        "node.parked",
+        "route.selected",
+        "state.updated",
+        "budget.exhausted"
+      ]
+    },
+    "ts": {
+      "description": "Local ISO-8601 with UTC offset, millisecond precision.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "prev_hash": {
+      "description": "sha256 of the previous line, or 64 zeros for the first.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "graph_id": {"type": "string"},
+    "node_id": {"type": "string"},
+    "kind": {"enum": ["intent", "human", "loop", "router", "deliver"]},
+    "status": {"type": "string"},
+    "reason": {"type": "string"},
+    "to": {"description": "The node or sink a route selected.", "type": "string"},
+    "when": {"description": "The route expression that matched, verbatim.", "type": "string"},
+    "path": {"description": "A state key that changed.", "type": "string"},
+    "value": {"type": "string"},
+    "ref": {
+      "description": "A path to another bundle — loop or delivery. Referenced, never nested: one run, one bundle, one place.",
+      "type": "string"
+    },
+    "budget": {"type": "string"},
+    "detail": {"type": "string"}
+  }
+}

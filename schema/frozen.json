@@ -10,6 +10,8 @@
     "fleet-event.schema.json": "477527a1ffc141b9a0a2dfe47c43675b562b16d45bce21f35ab2667d971f1946",
     "fleet-manifest.schema.json": "594c5060c9fff05d05f5a23449e9008ec300eb5d70496bc165977baf9563ffe5",
     "gate-result.schema.json": "3e1a4af0742b4191170a4c605d7e07ee441fb7d44a34925271c621ccfd4326fd",
+    "graph-event.schema.json": "c736ccdacd4f4208305dc080af593c5412c066c6433ccec65ad26c0f685f941b",
+    "graph-manifest.schema.json": "9b1036719d84848406558cb08a73c6ad958473bd441dcc7307bafc8bf99f1c6d",
     "judge-request.schema.json": "aff2a3c8fcbb051950098f531bb17e981b82ace45705161f42313f8dfe8d2467",
     "judge-verdict.schema.json": "0a895b4a9906080effa088323bfdcc9f92e881d1e3c79ef50dc4d8b293c4f81a",
     "loop-event.schema.json": "17686a89b294dcecf91712abe0ca11e3620612571633b7f0608a5f102ef4ed5c",

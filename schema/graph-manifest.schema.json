@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/marcoakes/wringer/blob/main/schema/graph-manifest.schema.json",
+  "title": "Wringer graph manifest",
+  "description": "manifest.json in a graph run bundle. A convenience index over graph.jsonl, which is the source of truth — resume reconstructs from the ledger and never trusts this file.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "graph_run_id",
+    "graph_id",
+    "started_at",
+    "result"
+  ],
+  "properties": {
+    "schema_version": {"const": "wringer.graph.v1"},
+    "graph_run_id": {"type": "string"},
+    "graph_id": {"type": "string"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "result": {
+      "type": "object",
+      "required": ["status", "reason", "completed"],
+      "properties": {
+        "status": {
+          "description": "parked is neither success nor failure: a person must act.",
+          "enum": ["done", "failed", "parked", "interrupted"]
+        },
+        "reason": {"type": "string"},
+        "current_node": {"type": ["string", "null"]},
+        "completed": {
+          "description": "Node ids finished, in order. Resume never re-runs these.",
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}

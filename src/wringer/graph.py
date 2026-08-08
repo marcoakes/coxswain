@@ -25,14 +25,32 @@ typo must not quietly change what a graph does. This module executes nothing.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from wringer import evidence
+from wringer.redact import Redactor
+
 SCHEMA_VERSION = "wringer.graph.v1"
+
+GRAPHS_DIRNAME = Path(".wringer") / "graphs"
+EVENTS_FILENAME = "graph.jsonl"
+MANIFEST_FILENAME = "manifest.json"
+RESOLVED_FILENAME = "graph.resolved.json"
+STATE_FILENAME = "state.json"
+SUMMARY_FILENAME = "summary.md"
+NODES_DIRNAME = "nodes"
+
+# What a graph run can end as. `parked` is the one that is neither a
+# success nor a failure — a person has to act, which is the same claim
+# `wring judge` makes with exit 5 (SPEC_GRAPH_V0 §5.3).
+STATUSES = ("done", "failed", "parked", "interrupted")
 
 # The node kinds v0 has. Each names a capability that already exists; adding
 # one means wrapping something Wringer already does, never inventing it.
@@ -652,3 +670,164 @@ def render_mermaid(graph: Graph) -> str:
         elif node.then:
             lines.append(f"  {node.id} --> {node.then}")
     return "\n".join(lines) + "\n"
+
+
+# --- the run bundle --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Bundle:
+    """A graph run's evidence — `.wringer/graphs/<id>/`.
+
+    Loop and delivery bundles are referenced by path, never nested: one run,
+    one bundle, one place. Like every other bundle here it OWNS the redactor,
+    so a write path cannot skip scrubbing by the author forgetting — the
+    failure mode that produced two leaks this month.
+    """
+
+    directory: Path
+    graph_run_id: str
+    started_at: datetime
+    redactor: Redactor = Redactor()
+
+    @classmethod
+    def create(
+        cls,
+        graphs_root: Path,
+        now: datetime | None = None,
+        redactor: Redactor | None = None,
+    ) -> Bundle:
+        started_at = now if now is not None else datetime.now().astimezone()
+        try:
+            graphs_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise GraphError(f"cannot create {graphs_root}: {exc}") from exc
+
+        for _ in range(64):
+            graph_run_id = evidence.new_run_id(started_at)
+            directory = graphs_root / graph_run_id
+            try:
+                directory.mkdir(exist_ok=False)
+            except FileExistsError:
+                continue  # same second, fresh suffix
+            except OSError as exc:
+                raise GraphError(f"cannot create {directory}: {exc}") from exc
+            return cls(
+                directory=directory,
+                graph_run_id=graph_run_id,
+                started_at=started_at,
+                redactor=redactor or Redactor(),
+            )
+        raise GraphError(f"could not allocate a graph directory under {graphs_root}")
+
+    @classmethod
+    def at(cls, directory: Path, redactor: Redactor | None = None) -> Bundle:
+        """Reopen an existing run — what `resume`, `status` and `explain` use.
+
+        `started_at` comes from the manifest when there is one; a run killed
+        before its first manifest still reopens, because the ledger is what
+        resume actually reads.
+        """
+        if not directory.is_dir():
+            raise GraphError(f"no graph run at {directory}")
+        started = datetime.now().astimezone()
+        manifest = directory / MANIFEST_FILENAME
+        if manifest.is_file():
+            try:
+                recorded = json.loads(manifest.read_text(encoding="utf-8"))
+                started = datetime.fromisoformat(recorded["started_at"])
+            except (ValueError, KeyError, OSError):
+                pass
+        return cls(
+            directory=directory,
+            graph_run_id=directory.name,
+            started_at=started,
+            redactor=redactor or Redactor(),
+        )
+
+    def node_dir(self, node_id: str) -> Path:
+        directory = self.directory / NODES_DIRNAME / node_id
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def event(self, event_type: str, **fields: Any) -> None:
+        """Append one chained, scrubbed line. The ledger is the truth."""
+        scrubbed = evidence.deep_scrub(self.redactor, fields)
+        path = self.directory / EVENTS_FILENAME
+        line = json.dumps(
+            {
+                "type": event_type,
+                "ts": evidence.timestamp(),
+                "prev_hash": evidence.chain_head(path),
+                **scrubbed,
+            }
+        )
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+
+    def read_events(self) -> list[dict[str, Any]]:
+        path = self.directory / EVENTS_FILENAME
+        if not path.is_file():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def write_resolved(self, graph: Graph) -> Path:
+        """The graph AS EXECUTED.
+
+        `render`, `status` and `explain` read this rather than the file on
+        disk, so they describe the run rather than whatever the author has
+        edited since — the same reason a run bundle records its own gates.
+        """
+        path = self.directory / RESOLVED_FILENAME
+        path.write_text(
+            json.dumps(graph.as_dict(), indent=2) + "\n", encoding="utf-8"
+        )
+        return path
+
+    def write_state(self, state: dict[str, str]) -> Path:
+        """A convenience snapshot. **Never read back as authority** — resume
+        reconstructs from the ledger, so a doctored file changes nothing."""
+        path = self.directory / STATE_FILENAME
+        path.write_text(
+            json.dumps(dict(sorted(state.items())), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def write_manifest(
+        self,
+        status: str,
+        reason: str,
+        current: str | None,
+        graph_id: str,
+        completed: tuple[str, ...] = (),
+    ) -> Path:
+        manifest = {
+            "schema_version": SCHEMA_VERSION,
+            "graph_run_id": self.graph_run_id,
+            "graph_id": graph_id,
+            "started_at": self.started_at.replace(microsecond=0).isoformat(),
+            "result": {
+                "status": status,
+                "reason": reason,
+                "current_node": current,
+                "completed": list(completed),
+            },
+        }
+        path = self.directory / MANIFEST_FILENAME
+        path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def write_summary(self, text: str) -> Path:
+        path = self.directory / SUMMARY_FILENAME
+        path.write_text(self.redactor.scrub(text), encoding="utf-8")
+        return path
+
+    def write_digests(self) -> Path:
+        """Hash every file in this bundle. **Written last**, so the digest
+        covers the manifest and the summary rather than sitting beside them."""
+        return evidence.digest_directory(self.directory)
