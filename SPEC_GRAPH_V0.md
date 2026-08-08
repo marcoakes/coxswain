@@ -3,8 +3,9 @@
 *Drafted 2026-08-07 by the planning window, from an external base plan that
 was adversarially reviewed against the whole spec corpus — its four largest
 defects are now rulings 1, 2, 3 and 5 rather than inherited mistakes.
-**Two rulings await Marc's word and are marked; everything else is decided
-under standing delegation.** [SPEC_SUPERVISION_V0.md](SPEC_SUPERVISION_V0.md)
+**APPROVED 2026-08-07: Marc delegated the two open rulings (§5.3, §5.5)
+to the planning window and both are decided below. Binding; no approval
+pauses remain in this slice.** [SPEC_SUPERVISION_V0.md](SPEC_SUPERVISION_V0.md)
 binds every primitive here; [SPEC_RUN_V0.md](SPEC_RUN_V0.md),
 [SPEC_GET_V0.md](SPEC_GET_V0.md), [SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md)
 and [SPEC_JUDGE_V0.md](SPEC_JUDGE_V0.md) are unchanged except where §5.3
@@ -67,11 +68,14 @@ config or environment, including an invalid graph file · `3` a refused
 precondition · `4` interrupted · **`5` parked — a human must act before the
 graph can continue.**
 
-**§5.3 (NEEDS MARC):** `5` currently belongs to `wring judge` alone, by
+**§5.3 (DECIDED 2026-08-07, under Marc's delegation):** `5` currently
+belongs to `wring judge` alone, by
 SPEC_JUDGE §2's own sentence. A parked graph is the same claim — *nothing
 was decided; a person must act* — and `0` here would make
-`wring graph run && anything` a footgun. If approved, SPEC_JUDGE §2's
-"belongs to `wring judge` alone" sentence is **restated in the same commit**
+`wring graph run && anything` a footgun. SPEC_JUDGE §2's
+"belongs to `wring judge` alone" sentence is **restated in the same commit
+that registers the graph CLI** (the J2 precedent: wording ships with the
+capability)
 (the network-enumeration lesson: no third copy left behind), and
 `test_judge.py`'s "verify and run can never return 5" guard is *extended* to
 keep asserting exactly that — it pins those two commands, not the family.
@@ -203,7 +207,8 @@ Calls the existing delivery machinery with the run bundle the loop node
 recorded. **Dry-run by default, exactly as `wring deliver` is:** the patch,
 message, branch and MR body land on disk and nothing touches git.
 
-**§5.5 (NEEDS MARC):** the graph never conjures a `--send`. The amended law
+**§5.5 (DECIDED 2026-08-07, under Marc's delegation):** the graph never
+conjures a `--send`. The amended law
 6 says git history moves only on a flag a human typed — so the flag is typed
 *on the graph invocation*: `wring graph run … --send` (or `resume … --send`)
 authorises the deliver node this run reaches, once. A decision file cannot
@@ -256,14 +261,24 @@ says exactly what to type next.
    shipped refusals: gates-passed, tree-unchanged-since-verify, vacuity.
    A graph that lied in state delivers nothing, because delivery re-checks
    the evidence — Wringer's thesis applied to Wringer's own new feature.
-3. **Exit 5 = parked** (NEEDS MARC — amends one SPEC_JUDGE sentence, §2).
+3. **Exit 5 = parked — DECIDED.** `0` would make `wring graph run &&
+   deploy` ship on a graph nobody approved; `1` would page someone for a
+   graph that is merely waiting for them. "Nothing was decided; a person
+   must act" already has a number in this family, and reusing it keeps the
+   exit table one table. Amends one SPEC_JUDGE §2 sentence, restated in the
+   registering commit; `verify` and `run` still provably never return 5.
 4. **Wrap in-process; never shell out to yourself; never reimplement.** The
    graph engine contains no gate runner, no worker seam, no delivery logic
    and no second repair loop — `loop.run` and `deliver.plan/send` are called
    as `cli.py` calls them today.
-5. **`--send` passes through from the human's own invocation** (NEEDS MARC —
-   extends the amended law 6's "flag a human typed" to a graph typing it
-   once, at the top).
+5. **`--send` passes through from the human's own invocation — DECIDED.**
+   The amended law 6 survives verbatim: a human types the flag, and the
+   graph is the human's invocation. Scope is deliberately narrow — it
+   authorises only the deliver node reached in THAT invocation, once;
+   resume requires retyping it; neither a graph file nor a decision file
+   can carry it, because a file is not a typed flag. Without this the
+   headline flow dead-ends at a dry run and the product claim loses its
+   point; with it, delivery still passes through every shipped refusal.
 6. **v0 is a DAG.** Retry-the-loop-differently cycles are a later version
    with explicit bounds; today the loop node is the only cycle and it is
    already bounded four ways.
@@ -298,7 +313,7 @@ Windows.
 - [ ] deliver without `--send` writes the dry run and git is untouched;
       `--send` on the invocation delivers through the existing five refusals
 - [ ] parked = exit 5, and the SPEC_JUDGE amendment + extended guard land in
-      the same commit (if ruling 3 approved; else parked = the approved code)
+      the same commit that registers the graph CLI
 - [ ] every artifact passes the extended whole-artifact secret sweep with a
       graph in the driven-command list
 - [ ] `render` output is derived from the resolved graph and a test asserts
