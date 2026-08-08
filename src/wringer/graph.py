@@ -52,6 +52,20 @@ NODES_DIRNAME = "nodes"
 # `wring judge` makes with exit 5 (SPEC_GRAPH_V0 §5.3).
 STATUSES = ("done", "failed", "parked", "interrupted")
 
+# Every way `loop.run` can end. A router compares against these, so they
+# are the loop's own vocabulary rather than a second list that drifts —
+# and `LOOP_REASONS` exists so a test can assert the two agree.
+LOOP_REASONS = frozenset(
+    {
+        "converged",
+        "max_iterations",
+        "no_progress",
+        "oscillating",
+        "budget_exhausted",
+        "interrupted",
+    }
+)
+
 # The node kinds v0 has. Each names a capability that already exists; adding
 # one means wrapping something Wringer already does, never inventing it.
 KINDS = ("intent", "human", "loop", "router", "deliver")
@@ -953,7 +967,7 @@ def run(
             on_node(node)
         bundle.event("node.started", node_id=node.id, kind=node.kind)
         try:
-            written = _execute(root, node, document, bundle, state)
+            written, extras = _execute(root, node, document, bundle, state)
         except Parked as parked:
             # One event per PARK, not per glance: resuming an unapproved
             # decision file must not fill the ledger with identical lines.
@@ -974,7 +988,12 @@ def run(
             state[path] = value
             bundle.event("state.updated", node_id=node.id, path=path, value=value)
 
-        bundle.event("node.finished", node_id=node.id, status="completed")
+        # A node's own status wins over the generic one: a loop node
+        # finishing `converged` or `no_progress` says more than "completed",
+        # and it is what a reader of the ledger wants.
+        bundle.event(
+            "node.finished", node_id=node.id, **{"status": "completed", **extras}
+        )
         completed.append(node.id)
         current = _advance(node, state, bundle)
 
@@ -1086,13 +1105,22 @@ def _execute(
     document: Graph,
     bundle: Bundle,
     state: dict[str, str],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Run one node. Returns (state writes, extra fields for `node.finished`).
+
+    A node never writes `node.finished` itself. `run` owns the ledger, so
+    exactly one event is emitted per node — an append-only log that records a
+    node finishing twice is a log that disagrees with itself, and `Replay`
+    reads these to decide what must not be re-run.
+    """
     if node.kind == "intent":
-        return _run_intent(root, node, document, bundle)
+        return _run_intent(root, node, document, bundle), {}
     if node.kind == "human":
-        return _run_human(node, bundle, state)
+        return _run_human(node, bundle, state), {}
     if node.kind == "router":
-        return {}
+        return {}, {}
+    if node.kind == "loop":
+        return _run_loop(root, node, document, bundle)
     raise NodeFailed(node.id, f"the '{node.kind}' node kind is not built yet")
 
 
@@ -1253,3 +1281,102 @@ def _reparse(when: str) -> tuple[str, str, tuple[str, ...]]:
     if parsed is None:
         raise GraphError(f"{RESOLVED_FILENAME} carries an unparseable route: {when!r}")
     return parsed
+
+
+def _elapsed(started_at: datetime) -> float:
+    """Seconds a graph run has been going. Its own function so a test can
+    stand where a long run would be without waiting for one."""
+    return (datetime.now().astimezone() - started_at).total_seconds()
+
+
+def _remaining(document: Graph, bundle: Bundle) -> int:
+    """The graph's budget, minus what it has spent."""
+    return int(document.wall_clock - _elapsed(bundle.started_at))
+
+
+def _run_loop(
+    root: Path, node: Node, document: Graph, bundle: Bundle
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Run the repair loop this node names — `loop.run`, in process.
+
+    **Not a subprocess.** `verify.py` exists because shelling out to yourself
+    means parsing your own output, and in process is the only way the loop's
+    supervision machinery — pgid files, reaping, the breaker, `wants_prove` —
+    comes along intact. The graph adds sequencing, never a second loop.
+
+    **Budgets nest and are hard** (supervision invariant 8). Whatever the node
+    asked for is clamped to the graph's REMAINING budget before the loop
+    starts, and handed to `loop.run` as its own parameters — so enforcement is
+    the loop's existing enforcement rather than a second timer to keep honest.
+
+    Every outcome is a routing fact. The node completes whatever the loop
+    decided, writes the reason into state, and the router says what it means:
+    a graph that treated `no_progress` as a crash could not express "escalate
+    to a human".
+    """
+    from wringer import config as config_module
+    from wringer import loop as loop_module
+
+    left = _remaining(document, bundle)
+    if left <= 0:
+        bundle.event(
+            "budget.exhausted",
+            node_id=node.id,
+            budget="graph.wall_clock",
+            detail=f"{document.wall_clock}s spent before this node started",
+        )
+        raise NodeFailed(
+            node.id,
+            f"the graph's {document.wall_clock}s budget was spent before this "
+            "node started, so the loop was never run",
+        )
+
+    try:
+        cfg = config_module.load(root / config_module.CONFIG_FILENAME)
+    except config_module.ConfigError as exc:
+        raise NodeFailed(node.id, str(exc)) from exc
+    if cfg.run is None:
+        raise NodeFailed(
+            node.id,
+            f"no 'run:' section in {config_module.CONFIG_FILENAME} — a loop "
+            "node runs the worker YOUR repo declared, and there is no default",
+        )
+
+    wall_clock = min(node.budgets.wall_clock or left, left)
+    try:
+        outcome = loop_module.run(
+            root,
+            cfg,
+            max_iterations=node.budgets.max_iterations,
+            wall_clock=wall_clock,
+        )
+    except evidence.EvidenceError as exc:
+        raise NodeFailed(node.id, str(exc)) from exc
+
+    # Referenced, never nested: one run, one bundle, one place.
+    reference = _relative_to(outcome.directory, root)
+    (bundle.node_dir(node.id) / "loop.ref.json").write_text(
+        json.dumps(
+            {
+                "loop_dir": reference,
+                "status": outcome.status,
+                "reason": outcome.reason,
+                "iterations": outcome.iterations,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {path: outcome.reason for _, path in node.writes}, {
+        "status": outcome.status,
+        "reason": outcome.reason,
+        "ref": reference,
+    }
+
+
+def _relative_to(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
