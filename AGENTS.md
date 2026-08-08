@@ -33,6 +33,7 @@ no network, no uploads — ever.
 | [SPEC_VACUITY_V0.md](SPEC_VACUITY_V0.md) | **binding** for `wring verify --prove` and `run.prove` — a green tick that could not have been red is worth nothing |
 | [SPEC_PROVENANCE_V0.md](SPEC_PROVENANCE_V0.md) | **binding** for `wring attest` / `wring audit` — what an unsigned attestation does and does not claim |
 | [SPEC_START_V0.md](SPEC_START_V0.md) | **binding** for `wring start` — the guided launch: the credential ruling, the non-interactive contract, and why a clone stops before any gate runs |
+| [SPEC_GRAPH_V0.md](SPEC_GRAPH_V0.md) | **binding** for `wring graph` (P7, unbuilt) — graphs name capabilities never commands, state routes while only bundles gate, and a parked graph is exit 5 |
 | [ROADMAP.md](ROADMAP.md) | execution order (90-day compression) |
 | [wringer-ai-dlc-harness-plan.md](wringer-ai-dlc-harness-plan.md) | architectural north star (post-v0.1) |
 | README · [QUICKSTART.md](QUICKSTART.md) | landing pages — transcripts are now **real captured output**; if you change console or bundle shape, recapture them rather than editing the numbers by hand |
