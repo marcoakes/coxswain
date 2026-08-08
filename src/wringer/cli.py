@@ -246,9 +246,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--send",
         action="store_true",
         help=(
-            "actually contact the endpoint — the only path in Wringer that "
-            "opens a network connection. Without it, the request is built and "
-            "written but nothing is sent."
+            "actually contact the endpoint — this opens a socket, and it is "
+            "one of three --send commands that can (see SECURITY.md). Without "
+            "it, the request is built and written but nothing is sent."
         ),
     )
     parser_judge.add_argument(

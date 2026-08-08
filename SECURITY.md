@@ -95,18 +95,35 @@ turn them into text.
 
 ## What Wringer never does
 
-- **No network, with one command as the declared exception.**
-  `wring verify`, `wring run`, `wring resume`, `wring fleet` and
-  `wring explain` make no outbound connections — nothing is uploaded, phoned
-  home, or telemetered, ever, by design, in every release.
-  **`wring judge --send` is the exception, and it is opt-in three times
-  over:** it exists only when your repo declares a `judge.endpoint`, it runs
-  only when you type `--send` (the default builds the request and sends
-  nothing), and it writes `request.json` — the exact bytes — to disk *before*
-  it opens the socket, so what left the machine is auditable rather than
-  asserted. Plain `http://` is refused to anything but loopback, redirects
-  are not followed, and `judge.api_key_env` names a variable whose value is
-  folded into the redactor so it cannot reach any artifact.
+- **Nothing that proves anything touches a network, and nothing leaves this
+  machine without a flag you typed.** `wring verify`, `wring run`,
+  `wring resume`, `wring fleet`, `wring plan`, `wring explain`,
+  `wring attest` and `wring audit` make no outbound connections — nothing is
+  uploaded, phoned home, or telemetered, ever, by design, in every release.
+
+  **Three commands SEND, each behind `--send` you type:** `wring judge`,
+  `wring spec` and `wring deliver`. Each exists only when your repo declares
+  the section it needs (`judge:` or `forge:`), each defaults to building the
+  request and sending nothing, and **each writes the exact bytes to disk
+  before it opens a socket**, so what left the machine is auditable rather
+  than asserted. Plain `http://` is refused to anything but loopback,
+  redirects are not followed, and a key named by `judge.api_key_env` or
+  `forge.token_env` has its value folded into the redactor so it cannot reach
+  any artifact.
+
+  **Three commands FETCH**, and are not behind a flag because fetching is
+  their entire purpose: `wring get` clones a repository, `wring issue` reads
+  one issue, and `wring start --clone` clones one — then **stops**, because a
+  fresh clone is untrusted input and it will not run a stranger's gates in
+  the same breath as downloading them. Typing any of the three is itself the
+  decision to reach a network.
+
+  **Every socket in the program lives in two functions** — `judge.send` and
+  `forge.request` — so `grep -rn build_opener src/` returns exactly two
+  answers, and a third would be a review comment.
+
+  This paragraph is the one SPEC_GET_V0 §7 and SPEC_START_V0 §3e-i enumerate,
+  and it is restated whenever a command changes it rather than quietly kept.
 - **No writes outside the repo.** Evidence goes to `.wringer/runs/` under the
   detected git root. Gate ids are validated as slugs precisely so a config
   cannot direct a write outside the bundle.

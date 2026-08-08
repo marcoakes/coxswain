@@ -86,11 +86,19 @@ Runs gates, writes the evidence bundle.
 
 ```bash
 wring verify
-wring verify --changed-only
+wring verify --changed-only   # NOT REGISTERED — see the note below
 wring verify --json
 wring verify --output .wringer/runs/manual-001
 wring verify --gate test
 ```
+
+> **`--changed-only` is deliberately unregistered.** This spec names it and
+> never defines it, and the plausible readings — skip a clean tree · scope
+> gates to changed files · limit what is captured — are different products. A
+> flag that half-works is worse than a missing one because agents consume this
+> CLI, so it stays out until the semantics are pinned here. `AGENTS.md` §"Do
+> not add these early" carries the reasoning; typing it today is an argparse
+> error, which is the honest outcome.
 
 **Exit codes are contract:**
 

@@ -999,20 +999,112 @@ def test_no_document_still_says_two_commands_fetch():
     )
 
 
-def test_every_fetch_enumeration_names_wring_start():
+def network_surface_documents() -> list[Path]:
+    """Every file that enumerates what reaches a network — discovered.
+
+    This guard USED to name README.md, AGENTS.md and SPEC_GET_V0.md. That is
+    the defect it exists to catch: SPEC_START_V0 §3e-i named two files,
+    README was a third, and it stayed false for a week. SECURITY.md was a
+    fourth and no guard could see it, because the guard had a list too.
+
+    A file is enumerating the surface if it counts the commands that fetch or
+    the commands that send. That is a property of the text, so a fifth copy
+    written next year is covered the day it is written.
+    """
+    import re
+
+    counting = re.compile(
+        r"\b(one|two|three|four|\d+)\s+commands?\s+(fetch|send)", re.IGNORECASE
+    )
+    found = []
+    for path in sorted(repo_root().glob("*.md")) + sorted(
+        repo_root().glob("docs/*.md")
+    ):
+        if path.name.startswith("field-report"):
+            continue
+        if counting.search(path.read_text(encoding="utf-8")):
+            found.append(path)
+    return found
+
+
+def test_every_network_enumeration_names_wring_start():
     """The positive half. Forbidding the old sentence is only half a fix if
     the replacement quietly drops the command that caused it."""
-    for name in ("README.md", "AGENTS.md", "SPEC_GET_V0.md"):
-        path = repo_root() / name
-        if not path.is_file():
+    documents = network_surface_documents()
+    assert documents, "no document enumerates the network surface — suspicious"
+
+    offenders = [
+        path.name
+        for path in documents
+        if "wring start" not in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, (
+        f"{offenders} enumerate what reaches a network but never name "
+        "`wring start`, which opens a socket when the user asks it to clone"
+    )
+
+
+# Claims that the network surface is SMALLER than it is. Each was true once
+# and was falsified by a later slice; each survived because the sentence
+# lived somewhere nobody thought to restate.
+_UNDERSTATEMENTS = (
+    "Two commands fetch",
+    "two commands fetch",
+    "two commands FETCH",
+    "one command as the declared exception",
+    "the only path in Wringer that opens a network",
+    "the only function that opens a socket",
+    "the only command that opens a socket",
+)
+
+
+def test_nothing_claims_the_network_surface_is_smaller_than_it_is():
+    """Over documents AND source, because the worst instance was a `--help`
+    string a user reads at the terminal, not a document.
+
+    `SPEC_JUDGE` §9 required SECURITY.md's "What Wringer never does" edited
+    in the same commit as the transport. It was not, and nothing could tell:
+    the claim and the code had no relationship a test could check.
+    """
+    searched = (
+        sorted(repo_root().glob("*.md"))
+        + sorted(repo_root().glob("docs/*.md"))
+        + sorted((repo_root() / "src" / "wringer").glob("*.py"))
+    )
+    import re
+
+    offenders = []
+    for path in searched:
+        if path.name.startswith("field-report"):
             continue
-        text = path.read_text(encoding="utf-8")
-        if "fetch" not in text.lower():
-            continue
-        assert "wring start" in text, (
-            f"{name} enumerates what fetches but never names `wring start`, "
-            "which opens a socket when the user asks it to clone"
-        )
+        # Flattened before searching, and this is the part that matters.
+        # Prose wraps, and a Python help string is several adjacent literals
+        # — so `the only path in Wringer that opens a network connection`
+        # exists in `cli.py` as two strings on two lines. A line-by-line
+        # search cannot see either shape, and the first version of this guard
+        # could not: it passed while the claim it names was still shipping.
+        flat = " ".join(path.read_text(encoding="utf-8").split())
+        if path.suffix == ".py":
+            flat = re.sub(r'"\s*"', "", flat)  # join adjacent literals
+        for phrase in _UNDERSTATEMENTS:
+            if phrase not in flat:
+                continue
+            # A prose document may QUOTE a superseded claim in order to
+            # correct it — SPEC_GET_V0 §7 does exactly that, and a guard that
+            # forbade it would forbid explaining the bug it enforces. That is
+            # the `container images` rule, which lets prose name the wrong
+            # command while a code block may not.
+            #
+            # Source is different: there the string IS the claim, said to a
+            # user at a terminal, so no exemption applies.
+            if path.suffix == ".md" and f'"{phrase}' in flat:
+                continue
+            offenders.append(f"{path.name}: {phrase!r}")
+    assert not offenders, (
+        "these understate the network surface. Three commands SEND behind "
+        "--send (judge, spec, deliver) and three FETCH (get, issue, "
+        f"start --clone) — SPEC_GET_V0 §7: {offenders}"
+    )
 
 
 # --- counts a reader counts -----------------------------------------------
