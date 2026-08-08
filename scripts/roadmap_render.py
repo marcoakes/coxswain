@@ -92,6 +92,15 @@ MILESTONES: tuple[Milestone, ...] = (
         files=("src/wringer/vacuity.py",),
     ),
     Milestone("P6", "bench", commands=("bench",)),
+    # Probed on the DOCS, not on the command: `wring graph validate`
+    # and `render` ship in the first slice while four verbs do not, so
+    # a node that went green on `graph` being registered would claim a
+    # finished feature four commits early.
+    Milestone(
+        "P7", "graphs",
+        commands=("graph",),
+        files=("docs/graphs.md", "SPEC_GRAPH_V0.md"),
+    ),
 )
 
 

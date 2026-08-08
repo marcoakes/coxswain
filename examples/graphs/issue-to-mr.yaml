@@ -1,0 +1,62 @@
+# The canonical graph: intent in, a reviewed branch out, with a person in the
+# middle and evidence at the end. `wring graph validate` checks every rule
+# below before anything runs.
+#
+# Note what is NOT here: no command strings. A graph names capabilities, and
+# the capability does what it always does — the loop node runs the worker
+# YOUR .wringer.yaml declares, and the deliver node passes through every one
+# of delivery's five refusals. See SPEC_GRAPH_V0.md ruling 1.
+version: 1
+id: issue-to-mr
+
+inputs:
+  task: examples/tasks/example-issue.md
+
+state:
+  # Strings only: a router compares strings, so anything else would be a
+  # value no route could read.
+  approved: "false"
+
+budgets:
+  # Required. A graph without a wall clock is the thing that runs all night
+  # (supervision invariant 3).
+  wall_clock: 7200
+
+nodes:
+  read-intent:
+    kind: intent
+    input: inputs.task
+    writes:
+      brief: state.brief
+    then: approve-plan
+
+  approve-plan:
+    kind: human
+    prompt: >-
+      Read the brief, then set `approved: true` in this file by hand.
+      Nothing runs until you do — the same interlock `wringer.spec.yaml`
+      uses, and for the same reason.
+    then: build
+
+  build:
+    kind: loop
+    budgets:
+      max_iterations: 4
+      wall_clock: 2700
+    writes:
+      status: state.build-status
+    then: route
+
+  route:
+    kind: router
+    routes:
+      - when: "state.build-status == 'converged'"
+        to: deliver
+    # Every other outcome — max_iterations, no_progress, oscillating,
+    # budget_exhausted, interrupted — lands here. A graph that can reach a
+    # router and match nothing has nowhere to go, so `default` is required.
+    default: fail
+
+  deliver:
+    kind: deliver
+    then: done

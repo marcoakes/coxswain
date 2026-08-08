@@ -46,7 +46,7 @@ green — and a bundle on disk to check the claim against. Regenerate it with
 
 ## What ships first
 
-**Proof beats orchestration.** `pip install wringer` — **0.3.0, sixteen commands, out now.**
+**Proof beats orchestration.** `pip install wringer` — **0.3.0, seventeen commands, out now.**
 It began as one command, and that command is still the core of it:
 
 > *One command that proves whether this change is mergeable, and leaves behind evidence a human or agent can inspect.*

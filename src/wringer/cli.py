@@ -28,6 +28,7 @@ from wringer import (
     forge,
     gates,
     git,
+    graph,
     judge,
     loop,
     redact,
@@ -123,6 +124,30 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser_start.set_defaults(func=cmd_start)
+
+    parser_graph = subparsers.add_parser(
+        "graph",
+        help="compose loops into a resumable, evidence-driven workflow",
+    )
+    # The CLI's first two-level command. `graph` stays ONE entry in the
+    # top-level choices, which is what the roadmap, flow-diagram and
+    # release-check probes read — they enumerate commands, not verbs.
+    graph_verbs = parser_graph.add_subparsers(dest="verb", required=True)
+
+    graph_validate = graph_verbs.add_parser(
+        "validate", help="check a graph file without running anything"
+    )
+    graph_validate.add_argument("graph", metavar="GRAPH_YAML")
+    graph_validate.set_defaults(func=cmd_graph_validate)
+
+    graph_render = graph_verbs.add_parser(
+        "render", help="emit a Mermaid diagram of a graph file"
+    )
+    graph_render.add_argument("graph", metavar="GRAPH_YAML")
+    graph_render.add_argument(
+        "--output", metavar="FILE", help="write here instead of stdout"
+    )
+    graph_render.set_defaults(func=cmd_graph_render)
 
     parser_init = subparsers.add_parser(
         "init", help=f"write a commented {config.CONFIG_FILENAME} template"
@@ -1018,6 +1043,41 @@ def _report_start(emission: start.Emission, key_name: str | None) -> None:
             + f"\n\n  {start.PERSIST_HINT.format(name=key_name)}"
         )
 
+
+
+def cmd_graph_validate(args: argparse.Namespace) -> int:
+    """Check a graph file and run nothing (SPEC_GRAPH_V0.md §3)."""
+    try:
+        loaded = graph.load(Path(args.graph))
+    except graph.GraphError as exc:
+        _fail("graph validate", exc)
+        return EXIT_CONFIG
+
+    kinds = [node.kind for node in loaded.nodes]
+    print(f"✓ {args.graph} is a valid {graph.SCHEMA_VERSION} graph")
+    print(f"✓ {len(loaded.nodes)} nodes, starting at '{loaded.start}'")
+    for kind in graph.KINDS:
+        if kinds.count(kind):
+            print(f"✓ {kinds.count(kind)} {kind}")
+    print("✓ acyclic, every route reachable, every routed value written")
+    return EXIT_OK
+
+
+def cmd_graph_render(args: argparse.Namespace) -> int:
+    """Mermaid, derived from the graph rather than maintained beside it."""
+    try:
+        loaded = graph.load(Path(args.graph))
+    except graph.GraphError as exc:
+        _fail("graph render", exc)
+        return EXIT_CONFIG
+
+    diagram = graph.render_mermaid(loaded)
+    if args.output:
+        Path(args.output).write_text(diagram, encoding="utf-8")
+        print(f"Wrote {args.output}")
+    else:
+        print(diagram, end="")
+    return EXIT_OK
 
 
 def cmd_init(args: argparse.Namespace) -> int:

@@ -74,9 +74,8 @@ SPEC_JUDGE §2's own sentence. A parked graph is the same claim — *nothing
 was decided; a person must act* — and `0` here would make
 `wring graph run && anything` a footgun. SPEC_JUDGE §2's
 "belongs to `wring judge` alone" sentence is **restated in the same commit
-that registers the graph CLI** (the J2 precedent: wording ships with the
-capability)
-(the network-enumeration lesson: no third copy left behind), and
+that registers the graph CLI** — the J2 precedent (wording ships with the
+capability) and the network-enumeration lesson (no third copy left behind).
 `test_judge.py`'s "verify and run can never return 5" guard is *extended* to
 keep asserting exactly that — it pins those two commands, not the family.
 

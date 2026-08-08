@@ -18,7 +18,7 @@ python3 --version        # must be 3.11+
 pipx install wringer     # or: pip install wringer
 ```
 
-That is **0.3.0**, all sixteen commands, and its only runtime dependency is
+That is **0.3.0**, all seventeen commands, and its only runtime dependency is
 PyYAML. `pipx` puts `wring` on your PATH globally and keeps it out of your
 system Python; `pip install wringer` into a venv works identically.
 
@@ -90,7 +90,7 @@ a repository, records where it came from, and **stops** — a stranger's
 `.wringer.yaml` is code, and running it in the same breath as downloading it is
 the one thing a guided launch must not do.
 
-## The sixteen commands
+## The seventeen commands
 
 This page walks five of them in order. The rest exist and are documented
 where they are used; nothing here is a preview.
@@ -111,6 +111,7 @@ where they are used; nothing here is a preview.
 | `issue` | write a forge issue to a local markdown file | — | fetches |
 | `deliver` | a verified change becomes a branch, a commit and a merge request | — | `--send` |
 | `doctor` | check this machine's preconditions; exit 1 on anything blocking | — | no |
+| `graph` | compose loops into a resumable, evidence-driven workflow (`validate`, `render`) | — | no |
 | `attest` | assemble the provenance claim for a verified change | — | no |
 | `audit` | check an attestation offline — no config, no network, no LLM | — | no |
 

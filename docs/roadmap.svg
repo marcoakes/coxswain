@@ -1,56 +1,59 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="300" viewBox="0 0 1000 300" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" role="img" aria-label="Wringer roadmap — 9 of 10 milestones shipped">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="300" viewBox="0 0 1000 300" font-family="ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace" role="img" aria-label="Wringer roadmap — 9 of 11 milestones shipped">
   <rect width="100%" height="100%" rx="10" fill="#11141a"/>
   <text x="40" y="46" fill="#7d8590" font-size="12">Jul 29</text>
   <text x="960" y="46" fill="#7d8590" font-size="12" text-anchor="end">Sep 30 — deadline</text>
   <rect x="40" y="58" width="920" height="6" rx="3" fill="#2b313b"/>
-  <rect x="40" y="58" width="117" height="6" rx="3" fill="#58a6ff"/>
-  <text x="157" y="84" fill="#58a6ff" font-size="12">today · day 9 of 63</text>
-  <text x="960" y="84" fill="#7d8590" font-size="12" text-anchor="end">55 days remaining</text>
+  <rect x="40" y="58" width="131" height="6" rx="3" fill="#58a6ff"/>
+  <text x="171" y="84" fill="#58a6ff" font-size="12">today · day 10 of 63</text>
+  <text x="960" y="84" fill="#7d8590" font-size="12" text-anchor="end">54 days remaining</text>
   <line x1="40" y1="176" x2="960" y2="176" stroke="#2b313b" stroke-width="3"/>
-  <line x1="40" y1="176" x2="858" y2="176" stroke="#3fb950" stroke-width="3"/>
+  <line x1="40" y1="176" x2="776" y2="176" stroke="#3fb950" stroke-width="3"/>
   <text x="40" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">v0.1</text>
   <circle cx="40" cy="176" r="11" fill="#3fb950"/>
   <text x="40" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
   <text x="40" y="206" fill="#7d8590" font-size="11" text-anchor="middle">verify</text>
-  <text x="142" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">v0.2</text>
-  <circle cx="142" cy="176" r="11" fill="#3fb950"/>
-  <text x="142" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="142" y="206" fill="#7d8590" font-size="11" text-anchor="middle">loop+fleet</text>
-  <text x="244" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">ship</text>
-  <circle cx="244" cy="176" r="11" fill="#3fb950"/>
-  <text x="244" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="244" y="206" fill="#7d8590" font-size="11" text-anchor="middle">PyPI+tag</text>
-  <text x="347" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P0</text>
-  <circle cx="347" cy="176" r="11" fill="#3fb950"/>
-  <text x="347" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="347" y="206" fill="#7d8590" font-size="11" text-anchor="middle">the box</text>
-  <text x="449" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P1</text>
-  <circle cx="449" cy="176" r="11" fill="#3fb950"/>
-  <text x="449" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="449" y="206" fill="#7d8590" font-size="11" text-anchor="middle">ACP</text>
-  <text x="551" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P2</text>
-  <circle cx="551" cy="176" r="11" fill="#3fb950"/>
-  <text x="551" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="551" y="206" fill="#7d8590" font-size="11" text-anchor="middle">spec/plan</text>
-  <text x="653" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P3</text>
-  <circle cx="653" cy="176" r="11" fill="#3fb950"/>
-  <text x="653" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="653" y="206" fill="#7d8590" font-size="11" text-anchor="middle">issue→MR</text>
-  <text x="756" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P4</text>
-  <circle cx="756" cy="176" r="11" fill="#3fb950"/>
-  <text x="756" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="756" y="206" fill="#7d8590" font-size="11" text-anchor="middle">PM UX</text>
-  <text x="858" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P5</text>
-  <circle cx="858" cy="176" r="11" fill="#3fb950"/>
-  <text x="858" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
-  <text x="858" y="206" fill="#7d8590" font-size="11" text-anchor="middle">attest</text>
-  <text x="960" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P6</text>
+  <text x="132" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">v0.2</text>
+  <circle cx="132" cy="176" r="11" fill="#3fb950"/>
+  <text x="132" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="132" y="206" fill="#7d8590" font-size="11" text-anchor="middle">loop+fleet</text>
+  <text x="224" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">ship</text>
+  <circle cx="224" cy="176" r="11" fill="#3fb950"/>
+  <text x="224" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="224" y="206" fill="#7d8590" font-size="11" text-anchor="middle">PyPI+tag</text>
+  <text x="316" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P0</text>
+  <circle cx="316" cy="176" r="11" fill="#3fb950"/>
+  <text x="316" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="316" y="206" fill="#7d8590" font-size="11" text-anchor="middle">the box</text>
+  <text x="408" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P1</text>
+  <circle cx="408" cy="176" r="11" fill="#3fb950"/>
+  <text x="408" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="408" y="206" fill="#7d8590" font-size="11" text-anchor="middle">ACP</text>
+  <text x="500" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P2</text>
+  <circle cx="500" cy="176" r="11" fill="#3fb950"/>
+  <text x="500" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="500" y="206" fill="#7d8590" font-size="11" text-anchor="middle">spec/plan</text>
+  <text x="592" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P3</text>
+  <circle cx="592" cy="176" r="11" fill="#3fb950"/>
+  <text x="592" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="592" y="206" fill="#7d8590" font-size="11" text-anchor="middle">issue→MR</text>
+  <text x="684" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P4</text>
+  <circle cx="684" cy="176" r="11" fill="#3fb950"/>
+  <text x="684" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="684" y="206" fill="#7d8590" font-size="11" text-anchor="middle">PM UX</text>
+  <text x="776" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P5</text>
+  <circle cx="776" cy="176" r="11" fill="#3fb950"/>
+  <text x="776" y="180" fill="#11141a" font-size="12" font-weight="700" text-anchor="middle">✓</text>
+  <text x="776" y="206" fill="#7d8590" font-size="11" text-anchor="middle">attest</text>
+  <text x="868" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P6</text>
+  <circle cx="868" cy="176" r="10" fill="#11141a" stroke="#7d8590" stroke-width="2"/>
+  <text x="868" y="206" fill="#7d8590" font-size="11" text-anchor="middle">bench</text>
+  <text x="960" y="150" fill="#d7dae0" font-size="13" font-weight="600" text-anchor="middle">P7</text>
   <circle cx="960" cy="176" r="10" fill="#11141a" stroke="#7d8590" stroke-width="2"/>
-  <text x="960" y="206" fill="#7d8590" font-size="11" text-anchor="middle">bench</text>
+  <text x="960" y="206" fill="#7d8590" font-size="11" text-anchor="middle">graphs</text>
   <circle cx="46" cy="248" r="6" fill="#3fb950"/>
   <text x="60" y="252" fill="#7d8590" font-size="12">shipped — every command it names is registered and every file it names is committed</text>
   <circle cx="46" cy="272" r="5.5" fill="#11141a" stroke="#7d8590" stroke-width="2"/>
-  <text x="60" y="276" fill="#7d8590" font-size="12">remaining — P6</text>
-  <text x="960" y="252" fill="#d7dae0" font-size="12" text-anchor="end">9 of 10 milestones</text>
+  <text x="60" y="276" fill="#7d8590" font-size="12">remaining — P6, P7</text>
+  <text x="960" y="252" fill="#d7dae0" font-size="12" text-anchor="end">9 of 11 milestones</text>
   <text x="960" y="276" fill="#7d8590" font-size="11" text-anchor="end">every node probed against this checkout</text>
 </svg>
