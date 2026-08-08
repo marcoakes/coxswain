@@ -140,6 +140,18 @@ def build_parser() -> argparse.ArgumentParser:
     graph_validate.add_argument("graph", metavar="GRAPH_YAML")
     graph_validate.set_defaults(func=cmd_graph_validate)
 
+    graph_run = graph_verbs.add_parser(
+        "run", help="execute a graph until it is done, failed, or parked"
+    )
+    graph_run.add_argument("graph", metavar="GRAPH_YAML")
+    graph_run.set_defaults(func=cmd_graph_run)
+
+    graph_resume = graph_verbs.add_parser(
+        "resume", help="continue a parked or killed graph run"
+    )
+    graph_resume.add_argument("run", metavar="GRAPH_DIR")
+    graph_resume.set_defaults(func=cmd_graph_resume)
+
     graph_render = graph_verbs.add_parser(
         "render", help="emit a Mermaid diagram of a graph file"
     )
@@ -1061,6 +1073,103 @@ def cmd_graph_validate(args: argparse.Namespace) -> int:
             print(f"✓ {kinds.count(kind)} {kind}")
     print("✓ acyclic, every route reachable, every routed value written")
     return EXIT_OK
+
+
+def _graph_redactor(root: Path) -> redact.Redactor:
+    """Every credential the repo declares, so a graph bundle scrubs like
+    every other one. A config that does not load is not a reason to write
+    unscrubbed evidence — an empty declaration still gets the defaults."""
+    try:
+        cfg = config.load(root / config.CONFIG_FILENAME)
+    except config.ConfigError:
+        return redact.Redactor.from_config({})
+    return redact.Redactor.from_config(
+        cfg.evidence, extra_names=config.declared_secret_names(cfg)
+    )
+
+
+_GRAPH_EXITS = {
+    "done": EXIT_OK,
+    "failed": EXIT_GATE_FAILED,
+    # Neither success nor failure: a person must act. The same claim
+    # `wring judge` makes with 5, and 0 here would let `wring graph run &&
+    # deploy` ship a graph nobody approved (SPEC_GRAPH_V0 §5.3).
+    "parked": EXIT_NEEDS_HUMAN,
+    "interrupted": EXIT_INTERRUPTED,
+}
+
+
+def cmd_graph_run(args: argparse.Namespace) -> int:
+    """Execute a graph from the beginning (SPEC_GRAPH_V0.md §1)."""
+    root = git.find_root(Path.cwd())
+    try:
+        document = graph.load(Path(args.graph))
+    except graph.GraphError as exc:
+        _fail("graph run", exc)
+        return EXIT_CONFIG
+
+    try:
+        bundle = graph.Bundle.create(
+            root / graph.GRAPHS_DIRNAME, redactor=_graph_redactor(root)
+        )
+    except graph.GraphError as exc:
+        _fail("graph run", exc)
+        return EXIT_CONFIG
+    bundle.write_resolved(document)
+
+    print(f"graph {document.id} — {bundle.graph_run_id}")
+    outcome = graph.run(root, document, bundle, on_node=_report_node)
+    _report_graph(outcome, root)
+    return _GRAPH_EXITS[outcome.status]
+
+
+def cmd_graph_resume(args: argparse.Namespace) -> int:
+    """Continue from the ledger — never from `state.json`, which is a
+    convenience snapshot and would otherwise be the cheapest file in the
+    bundle deciding what happens next."""
+    root = git.find_root(Path.cwd())
+    directory = Path(args.run)
+    try:
+        bundle = graph.Bundle.at(directory, redactor=_graph_redactor(root))
+        document = graph.resolved(bundle)
+    except graph.GraphError as exc:
+        _fail("graph resume", exc)
+        return EXIT_CONFIG
+
+    replay = graph.Replay.of(bundle.read_events())
+    if replay.finished:
+        _fail(
+            "graph resume",
+            f"{directory.name} finished — there is nothing to resume. Start "
+            "a new run with 'wring graph run'",
+        )
+        return EXIT_CONFIG
+
+    print(f"graph {document.id} — resuming {bundle.graph_run_id}")
+    outcome = graph.run(root, document, bundle, resuming=replay,
+                        on_node=_report_node)
+    _report_graph(outcome, root)
+    return _GRAPH_EXITS[outcome.status]
+
+
+def _report_node(node) -> None:
+    print(f"→ {node.id}  ({node.kind})", flush=True)
+
+
+def _report_graph(outcome, root: Path) -> None:
+    where = _relative(outcome.directory, root)
+    if outcome.status == "parked":
+        node = outcome.current
+        print(f"\n! parked at '{node}' — {outcome.reason}")
+        print(
+            f"\nEdit:\n  {where}/{graph.NODES_DIRNAME}/{node}/"
+            f"{graph.DECISION_FILENAME}\n\nThen:\n  wring graph resume {where}"
+        )
+    elif outcome.status == "done":
+        print(f"\n✓ done — {outcome.reason}")
+    else:
+        print(f"\n✗ {outcome.status} — {outcome.reason}")
+    print(f"\nGraph evidence: {where}/")
 
 
 def cmd_graph_render(args: argparse.Namespace) -> int:

@@ -831,3 +831,425 @@ class Bundle:
         """Hash every file in this bundle. **Written last**, so the digest
         covers the manifest and the summary rather than sitting beside them."""
         return evidence.digest_directory(self.directory)
+
+
+# --- executing a graph -----------------------------------------------------
+#
+# The executor holds NO state that is not on disk (supervision invariant 7).
+# Where a run has got to, and what its routing state is, are both replayed
+# from `graph.jsonl` — which is why `resume` is built here with the first two
+# node kinds rather than bolted on afterwards: "what has the ledger already
+# recorded, and what runs next" IS the state machine, and a straight-line
+# runner has nowhere to put that answer.
+
+
+DECISION_FILENAME = "decision.yaml"
+PROMPT_FILENAME = "prompt.md"
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What one graph run did. `cli.py` turns this into an exit code."""
+
+    status: str
+    reason: str
+    current: str | None
+    completed: tuple[str, ...]
+    state: dict[str, str]
+    directory: Path
+
+
+@dataclass(frozen=True)
+class Replay:
+    """Where a run had got to, reconstructed from the ledger alone.
+
+    Never from `state.json` — that file is a convenience snapshot, and if it
+    were authority then the cheapest file in the bundle would decide what
+    happens next.
+    """
+
+    completed: tuple[str, ...]
+    state: dict[str, str]
+    parked_at: str | None
+    finished: bool
+
+    @classmethod
+    def of(cls, events: list[dict[str, Any]]) -> Replay:
+        completed: list[str] = []
+        state: dict[str, str] = {}
+        parked_at = None
+        finished = False
+        for event in events:
+            kind = event.get("type")
+            if kind == "graph.started":
+                state = dict(event.get("state") or {})
+            elif kind == "node.finished":
+                node_id = event.get("node_id")
+                if isinstance(node_id, str) and node_id not in completed:
+                    completed.append(node_id)
+                parked_at = None
+            elif kind == "node.parked":
+                parked_at = event.get("node_id")
+            elif kind == "state.updated":
+                path, value = event.get("path"), event.get("value")
+                if isinstance(path, str) and isinstance(value, str):
+                    state[path] = value
+            elif kind == "graph.finished":
+                finished = True
+        return cls(tuple(completed), state, parked_at, finished)
+
+
+class Parked(Exception):
+    """A node needs a person. Not a failure — the graph is waiting."""
+
+    def __init__(self, node_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.node_id = node_id
+        self.reason = reason
+
+
+class NodeFailed(Exception):
+    """A node could not do its job. The graph stops, having said why."""
+
+    def __init__(self, node_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.node_id = node_id
+        self.reason = reason
+
+
+def run(
+    root: Path,
+    document: Graph,
+    bundle: Bundle,
+    resuming: Replay | None = None,
+    on_node: Any = None,
+) -> Outcome:
+    """Walk the graph until it is done, failed, or waiting for a person.
+
+    `resuming` carries what the ledger said; a fresh run passes None. Nodes
+    already in `completed` are never re-run — re-running an intent node would
+    restage its input, and re-running a loop node would spend a worker's time
+    a second time on work that was already done.
+    """
+    replay = resuming or Replay((), dict(document.state), None, False)
+    state = dict(replay.state)
+    completed = list(replay.completed)
+
+    if resuming is None:
+        bundle.event("graph.started", graph_id=document.id, state=dict(state))
+    else:
+        bundle.event("graph.resumed", graph_id=document.id, completed=list(completed))
+
+    current: str | None = replay.parked_at or _next_after(document, completed)
+
+    while current is not None and current not in SINKS:
+        node = document.node(current)
+
+        if node.id in completed:
+            current = _advance(node, state, bundle)
+            continue
+
+        if on_node is not None:
+            on_node(node)
+        bundle.event("node.started", node_id=node.id, kind=node.kind)
+        try:
+            written = _execute(root, node, document, bundle, state)
+        except Parked as parked:
+            # One event per PARK, not per glance: resuming an unapproved
+            # decision file must not fill the ledger with identical lines.
+            if replay.parked_at != node.id:
+                bundle.event("node.parked", node_id=node.id, reason=parked.reason)
+            _finish(bundle, document, "parked", parked.reason, node.id, completed,
+                    state)
+            return Outcome("parked", parked.reason, node.id, tuple(completed), state,
+                           bundle.directory)
+        except NodeFailed as failed:
+            bundle.event("node.failed", node_id=node.id, reason=failed.reason)
+            _finish(bundle, document, "failed", failed.reason, node.id, completed,
+                    state)
+            return Outcome("failed", failed.reason, node.id, tuple(completed), state,
+                           bundle.directory)
+
+        for path, value in written.items():
+            state[path] = value
+            bundle.event("state.updated", node_id=node.id, path=path, value=value)
+
+        bundle.event("node.finished", node_id=node.id, status="completed")
+        completed.append(node.id)
+        current = _advance(node, state, bundle)
+
+    status = "done" if current == "done" else "failed"
+    reason = "every node completed" if status == "done" else "a route led to fail"
+    _finish(bundle, document, status, reason, None, completed, state)
+    return Outcome(status, reason, None, tuple(completed), state, bundle.directory)
+
+
+def _advance(node: Node, state: dict[str, str], bundle: Bundle) -> str | None:
+    """Where control goes next. A router chooses; everything else has one
+    `then`, and a node with neither is a graph that stops."""
+    if node.kind != "router":
+        return node.then
+    for route in node.routes:
+        if route.matches(state):
+            bundle.event(
+                "route.selected", node_id=node.id, to=route.to, when=route.source
+            )
+            return route.to
+    bundle.event("route.selected", node_id=node.id, to=node.default, when="default")
+    return node.default
+
+
+def _next_after(document: Graph, completed: list[str]) -> str | None:
+    """The node to run when resuming a graph that was not parked.
+
+    Walks from the start through what is already done, so the answer comes
+    from the graph's shape and the ledger rather than from a cursor somebody
+    would have to keep in sync.
+    """
+    if not completed:
+        return document.start
+    current: str | None = document.start
+    seen: set[str] = set()
+    while current is not None and current not in SINKS and current not in seen:
+        seen.add(current)
+        if current not in completed:
+            return current
+        node = document.node(current)
+        if node.kind == "router":
+            # A router is cheap and pure: re-deciding it on resume is
+            # correct, because state is replayed too.
+            return current
+        current = node.then
+    return current
+
+
+def _finish(
+    bundle: Bundle,
+    document: Graph,
+    status: str,
+    reason: str,
+    current: str | None,
+    completed: list[str],
+    state: dict[str, str],
+) -> None:
+    """Close out a run — and `graph.finished` ONLY when it really is over.
+
+    A parked graph is not finished; it is waiting. Writing the event anyway
+    made `Replay.finished` true, so `wring graph resume` refused to continue
+    the exact runs resume exists for. The loop has the same shape and the
+    same reason: a loop with no `loop.finished` is precisely the one
+    `wring resume` will pick up.
+    """
+    if status in ("done", "failed"):
+        bundle.event("graph.finished", status=status, reason=reason)
+    bundle.write_state(state)
+    bundle.write_manifest(
+        status=status,
+        reason=reason,
+        current=current,
+        graph_id=document.id,
+        completed=tuple(completed),
+    )
+    bundle.write_summary(_summary(document, status, reason, current, completed))
+    bundle.write_digests()  # LAST, so it covers the manifest and the summary
+
+
+def _summary(
+    document: Graph,
+    status: str,
+    reason: str,
+    current: str | None,
+    completed: list[str],
+) -> str:
+    lines = [
+        f"# wring graph — {document.id}",
+        "",
+        f"- status: **{status}** — {reason}",
+    ]
+    if current:
+        lines.append(f"- waiting at: `{current}`")
+    lines += ["", "| node | kind | state |", "|---|---|---|"]
+    for node in document.nodes:
+        mark = "done" if node.id in completed else (
+            "waiting" if node.id == current else "not reached"
+        )
+        lines.append(f"| `{node.id}` | {node.kind} | {mark} |")
+    return "\n".join(lines) + "\n"
+
+
+# --- the node kinds --------------------------------------------------------
+
+
+def _execute(
+    root: Path,
+    node: Node,
+    document: Graph,
+    bundle: Bundle,
+    state: dict[str, str],
+) -> dict[str, str]:
+    if node.kind == "intent":
+        return _run_intent(root, node, document, bundle)
+    if node.kind == "human":
+        return _run_human(node, bundle, state)
+    if node.kind == "router":
+        return {}
+    raise NodeFailed(node.id, f"the '{node.kind}' node kind is not built yet")
+
+
+def _run_intent(
+    root: Path, node: Node, document: Graph, bundle: Bundle
+) -> dict[str, str]:
+    """Stage the input into the bundle, scrubbed on the way in.
+
+    The same scrub-at-the-read `wring issue` does, so the file in evidence,
+    anything built from it later and the wire all carry the same text.
+    """
+    reference = node.input or ""
+    name = reference.split(".", 1)[1] if reference.startswith("inputs.") else reference
+    source = document.inputs.get(name, name)
+    path = (root / source).resolve()
+
+    if not path.is_file():
+        raise NodeFailed(node.id, f"there is no file at {source}")
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise NodeFailed(node.id, f"{source} could not be read: {exc}") from exc
+
+    staged = bundle.node_dir(node.id) / "brief.md"
+    staged.write_text(bundle.redactor.scrub(text), encoding="utf-8")
+    return {
+        path_: staged.relative_to(bundle.directory).as_posix()
+        for _, path_ in node.writes
+    }
+
+
+def _run_human(node: Node, bundle: Bundle, state: dict[str, str]) -> dict[str, str]:
+    """The `approved: false` interlock, again and on purpose.
+
+    SPEC_INTENT §3's three rules hold verbatim: the constant is written as a
+    constant, nothing but a person editing the file may flip it, and the file
+    is re-read from disk every time. There is deliberately no flag.
+    """
+    directory = bundle.node_dir(node.id)
+    decision = directory / DECISION_FILENAME
+
+    if not decision.is_file():
+        (directory / PROMPT_FILENAME).write_text(
+            f"# {node.id}\n\n{node.prompt}\n\n"
+            f"Set `approved: true` in `{DECISION_FILENAME}` beside this file, "
+            "then resume the graph.\n",
+            encoding="utf-8",
+        )
+        decision.write_text(
+            "# Edit this file by hand. Nothing else can approve it — no flag,\n"
+            "# no environment variable, no model reply.\n"
+            "approved: false\n"
+            'comments: ""\n'
+            "state_updates: {}\n",
+            encoding="utf-8",
+        )
+        raise Parked(node.id, "a person must approve this node")
+
+    try:
+        answered = yaml.safe_load(decision.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise NodeFailed(
+            node.id, f"{DECISION_FILENAME} is not valid YAML: {exc}"
+        ) from exc
+    if not isinstance(answered, dict):
+        raise NodeFailed(node.id, f"{DECISION_FILENAME} must be a mapping")
+
+    if answered.get("approved") is not True:
+        raise Parked(node.id, "a person must approve this node")
+
+    updates = answered.get("state_updates") or {}
+    if not isinstance(updates, dict):
+        raise NodeFailed(node.id, "'state_updates' must be a mapping")
+    written = {}
+    for key, value in updates.items():
+        if not isinstance(value, str):
+            raise NodeFailed(
+                node.id,
+                f"state_updates.{key} must be a string — v0 state is strings, "
+                "because that is what a router can compare",
+            )
+        written[str(key)] = value
+    return written
+
+
+def resolved(bundle: Bundle) -> Graph:
+    """Rebuild the graph a run actually executed.
+
+    From `graph.resolved.json` rather than from the author's file, so a run
+    resumes as the thing it started as — editing the YAML mid-run changes the
+    next run, never this one.
+    """
+    path = bundle.directory / RESOLVED_FILENAME
+    if not path.is_file():
+        raise GraphError(
+            f"{bundle.directory.name} has no {RESOLVED_FILENAME} — it is not a "
+            "graph run, or it died before recording what it was running"
+        )
+    try:
+        recorded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise GraphError(f"{RESOLVED_FILENAME} could not be read: {exc}") from exc
+
+    nodes = []
+    for entry in recorded.get("nodes", []):
+        routes = tuple(
+            Route(
+                to=route["to"],
+                **dict(
+                    zip(
+                        ("path", "op", "values"),
+                        _reparse(route["when"]),
+                        strict=True,
+                    )
+                ),
+                source=route["when"],
+            )
+            for route in entry.get("routes", [])
+        )
+        budgets = entry.get("budgets") or {}
+        nodes.append(
+            Node(
+                id=entry["id"],
+                kind=entry["kind"],
+                then=entry.get("then"),
+                input=entry.get("input"),
+                prompt=entry.get("prompt"),
+                budgets=Budgets(
+                    wall_clock=budgets.get("wall_clock"),
+                    max_iterations=budgets.get("max_iterations"),
+                ),
+                writes=tuple(
+                    (name, path_) for name, path_ in (entry.get("writes") or {}).items()
+                ),
+                routes=routes,
+                default=entry.get("default"),
+            )
+        )
+    return Graph(
+        id=recorded["id"],
+        wall_clock=recorded.get("wall_clock", 0),
+        nodes=tuple(nodes),
+        start=recorded["start"],
+        inputs=recorded.get("inputs", {}),
+        state=recorded.get("state", {}),
+    )
+
+
+def _reparse(when: str) -> tuple[str, str, tuple[str, ...]]:
+    """A route expression from a resolved graph, back into its parts.
+
+    It passed validation once, on the way in — but it is re-parsed rather
+    than trusted, because the file has been on disk in the meantime and this
+    is the one place a resumed run could be handed something new.
+    """
+    problems: list[str] = []
+    parsed = _expression(when, "resolved route", problems)
+    if parsed is None:
+        raise GraphError(f"{RESOLVED_FILENAME} carries an unparseable route: {when!r}")
+    return parsed
